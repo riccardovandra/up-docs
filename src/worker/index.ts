@@ -5,7 +5,7 @@ import { parseEmbedOrigins } from "../shared/embed.ts";
 import type { CommentOpResult } from "./comments.ts";
 import { docRoom, SOCKET_USER_HEADER } from "./docRoom.ts";
 import { reviveError, type TabWriteResult } from "./docs.ts";
-import type { Env } from "./env.ts";
+import { resolvePublicOrigin, type Env } from "./env.ts";
 import { withEmbedPolicy } from "./embed.ts";
 import { r2ImageStore } from "./images.ts";
 import { handleMcp } from "./mcp.ts";
@@ -21,10 +21,10 @@ async function revive<A>(call: PromiseLike<A>): Promise<A> {
   }
 }
 
-function apiDeps(env: Env, ctx: ExecutionContext): ApiDeps {
+function apiDeps(env: Env, ctx: ExecutionContext, publicOrigin: string): ApiDeps {
   return {
     db: env.DB,
-    publicOrigin: env.PUBLIC_ORIGIN,
+    publicOrigin,
     owners: parseOwnerEmails(env.OWNER_EMAILS),
     rooms: {
       createTab: (docId, input) => revive(docRoom(env, docId).createTab({ docId, ...input })),
@@ -56,17 +56,18 @@ function apiDeps(env: Env, ctx: ExecutionContext): ApiDeps {
 export default {
   async fetch(request, env, ctx): Promise<Response> {
     const { pathname } = new URL(request.url);
+    const publicOrigin = resolvePublicOrigin(env.PUBLIC_ORIGIN, request.url);
     if (pathname === "/api" || pathname.startsWith("/api/")) {
-      return handleApi(request, apiDeps(env, ctx));
+      return handleApi(request, apiDeps(env, ctx, publicOrigin));
     }
     if (pathname === "/mcp" || pathname.startsWith("/mcp/")) {
-      return handleMcp(request, apiDeps(env, ctx));
+      return handleMcp(request, apiDeps(env, ctx, publicOrigin));
     }
     return withAssetCaching(
       await withEmbedPolicy(
         await env.ASSETS.fetch(request),
         parseEmbedOrigins(env.FRAME_ANCESTORS),
-        env.PUBLIC_ORIGIN,
+        publicOrigin,
       ),
       pathname,
     );

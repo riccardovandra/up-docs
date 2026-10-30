@@ -5,7 +5,7 @@ import { handleMcp } from "./mcp.ts";
 import { makeApiHarness, ORIGIN } from "./testing/apiHarness.ts";
 import { FLOW_EXAMPLE } from "../shared/widget/testing/examples.ts";
 
-/** `requestOrigin` stands in for what request.url reports, which `wrangler dev` rewrites. */
+/** `requestOrigin` stands in for what request.url reports, which can differ from PUBLIC_ORIGIN. */
 async function makeMcpHarness(requestOrigin = ORIGIN) {
   const api = makeApiHarness();
   const cookie = await api.signIn();

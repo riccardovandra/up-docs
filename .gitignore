@@ -1,8 +1,6 @@
 dist
 .wrangler
 .dev.vars
-deploy.env
-wrangler.deploy.json
 node_modules
 *.tsbuildinfo
 .DS_Store
