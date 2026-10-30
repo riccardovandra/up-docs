@@ -1,6 +1,11 @@
 import { useEffect, useId, useRef, useState, type KeyboardEvent, type RefObject } from "react";
 
-import type { DocMember, DocRole, UserSummary } from "../../shared/access.ts";
+import {
+  emailDeliveryNotice,
+  type DocMember,
+  type DocRole,
+  type UserSummary,
+} from "../../shared/access.ts";
 import { PUBLIC_ORIGIN_META } from "../../shared/embed.ts";
 import { api, ApiError } from "../api.ts";
 import { useMe } from "../me.ts";
@@ -57,6 +62,7 @@ export function ShareDialog(props: {
   const [query, setQuery] = useState("");
   const [inviteRole, setInviteRole] = useState<DocRole>("editor");
   const [inviteError, setInviteError] = useState<string | null>(null);
+  const [emailNotices, setEmailNotices] = useState<ReadonlyArray<string>>([]);
   const [activeSuggestion, setActiveSuggestion] = useState(-1);
   const [suggestionsDismissed, setSuggestionsDismissed] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -134,11 +140,15 @@ export function ShareDialog(props: {
     }
     setBusy(true);
     setInviteError(null);
+    setEmailNotices([]);
     const remaining = [...parsed.valid];
     try {
       while (remaining.length > 0) {
         const result = await api.shareDoc(docId, { email: remaining[0]!, role: inviteRole });
         setMembers(result.members);
+        const notice =
+          result.emailDelivery && emailDeliveryNotice(result.emailDelivery, result.member.email);
+        if (notice) setEmailNotices((notices) => [...notices, notice]);
         remaining.shift();
       }
       setQuery("");
@@ -370,6 +380,21 @@ export function ShareDialog(props: {
                 <p className="share-error" role="alert">
                   {inviteError}
                 </p>
+              ) : null}
+              {emailNotices.length > 0 ? (
+                <div className="share-email-notice" role="status">
+                  {emailNotices.map((notice) => (
+                    <p key={notice}>{notice}</p>
+                  ))}
+                  <p className="share-email-link">{canonicalDocUrl(docId)}</p>
+                  <button
+                    type="button"
+                    className="button secondary small"
+                    onClick={() => void copyLink()}
+                  >
+                    {copied ? "Copied" : "Copy doc link"}
+                  </button>
+                </div>
               ) : null}
             </div>
           ) : null}

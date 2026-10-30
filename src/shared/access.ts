@@ -36,6 +36,19 @@ export const canComment = (role: DocRole | null) => hasRole(role, "commenter");
 /** Add, change and remove people; delete the doc. */
 export const canShare = (role: DocRole | null) => hasRole(role, "owner");
 
+/** What happened to an email: `sent`, no provider is set up, or the provider refused or failed. */
+export type EmailDelivery = "sent" | "not_configured" | "failed";
+
+/** What the person sharing must be told, or null when the email went out. */
+export function emailDeliveryNotice(delivery: EmailDelivery, to: string): string | null {
+  if (delivery === "sent") return null;
+  const reason =
+    delivery === "not_configured"
+      ? "email is not set up on this server (RESEND_API_KEY)"
+      : "the email provider did not accept it";
+  return `No email was sent to ${to}: ${reason}. They are on the doc, but cannot sign in until email is configured and working. Send them the doc link yourself.`;
+}
+
 /** A person as other people see them. `name` is empty until they set one. */
 export interface UserSummary {
   readonly id: string;

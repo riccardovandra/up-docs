@@ -3,6 +3,7 @@
 
 import {
   DOC_ROLES,
+  emailDeliveryNotice,
   isDocRole,
   type DocMember,
   type DocRole,
@@ -249,6 +250,9 @@ async function load<A>(promise: Promise<A>, what: string): Promise<A> {
     }
     if (cause instanceof Access.ForbiddenError) {
       return fail("forbidden", `This needs ${cause.required} access to the doc.`);
+    }
+    if (cause instanceof Access.ReservedEmailError) {
+      return fail("invalid_argument", "That address is reserved and cannot be shared with.");
     }
     if (cause instanceof Access.LastOwnerError) {
       return fail("last_owner", "A doc must keep at least one owner.");
@@ -640,7 +644,7 @@ export const TOOLS = [
   {
     name: "share_doc",
     description:
-      "Give a person access to a doc by email, or change their role. Docs are private until shared. New people get an email with the link. Owner only.",
+      "Give a person access to a doc by email, or change their role. Docs are private until shared. New people get an email with the link when email is set up; the result says if none was sent. Owner only.",
     inputSchema: {
       type: "object",
       properties: {
@@ -1148,12 +1152,19 @@ const handlers: Record<ToolName, (args: Args, ctx: ToolContext) => Promise<objec
       }),
       "doc",
     );
-    if (created) {
-      ctx.deps.waitUntil(
-        inviteByEmail(ctx.deps, { docId, to: member.email, principal: ctx.principal }),
-      );
-    }
-    return { member: memberSummary(member), added: created };
+    if (!created) return { member: memberSummary(member), added: false };
+    const delivery = await inviteByEmail(ctx.deps, {
+      docId,
+      to: member.email,
+      principal: ctx.principal,
+    });
+    const notice = emailDeliveryNotice(delivery, member.email);
+    return {
+      member: memberSummary(member),
+      added: true,
+      emailSent: delivery === "sent",
+      ...(notice ? { notice, docUrl: `${ctx.origin}/d/${docId}` } : {}),
+    };
   },
 
   unshare_doc: async (args, ctx) => {
