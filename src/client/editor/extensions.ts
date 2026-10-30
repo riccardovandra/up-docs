@@ -6,6 +6,7 @@ import StarterKit from "@tiptap/starter-kit";
 import { DocsCodeBlock } from "./codeBlock.ts";
 import { HeadingFold } from "./headingFold.ts";
 import { DocImage, type DocImageOptions } from "./image.ts";
+import { VideoDrop, type VideoDropOptions } from "./video/videoDrop.ts";
 
 /**
  * The editor's whole extension list. Every extension must round-trip through
@@ -14,6 +15,7 @@ import { DocImage, type DocImageOptions } from "./image.ts";
  */
 export const createEditorExtensions = (
   images: DocImageOptions = { upload: null, onUploadError: () => undefined },
+  videos: VideoDropOptions = { onFiles: null },
 ) => [
   StarterKit.configure({ link: { openOnClick: false }, codeBlock: false }),
   DocsCodeBlock,
@@ -21,6 +23,7 @@ export const createEditorExtensions = (
   TaskItem.configure({ nested: true }),
   TableKit.configure({ table: { resizable: false } }),
   DocImage.configure(images),
+  VideoDrop.configure(videos),
   HeadingFold,
   Markdown,
 ];

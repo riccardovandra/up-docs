@@ -47,6 +47,7 @@ import type { Principal } from "./auth.ts";
 import * as Comments from "./comments.ts";
 import * as DocThreads from "./docThreads.ts";
 import * as Docs from "./docs.ts";
+import { checkVideosIn } from "../shared/video.ts";
 import { widgetProblems } from "./widgets.ts";
 
 const MAX_MARKDOWN_LENGTH = 1_000_000;
@@ -161,6 +162,17 @@ function checkTables(markdown: string, previous?: string): void {
     fail("table_invalid", `${problem} Nothing was written.`, {
       format:
         '{"id","columns":[{"id","name","type":"text|select|link|number|date","options?":[{"value","color"}]}],"rows":[{"id","cells":{"<columnId>":value}}]}',
+    });
+  }
+}
+
+/** Rejects markdown that adds or changes an invalid ```t3-video block, before anything is written. */
+function checkVideos(markdown: string, previous?: string): void {
+  const problem = checkVideosIn(markdown, previous);
+  if (problem) {
+    fail("video_invalid", `${problem} Nothing was written.`, {
+      format:
+        "```t3-video\n<YouTube or Loom link, or /api/videos/<docId>/<file>>\nOptional title\n```",
     });
   }
 }
@@ -753,6 +765,7 @@ const handlers: Record<ToolName, (args: Args, ctx: ToolContext) => Promise<objec
     const markdown = markdownArg(args, "markdown", false);
     const projectId = await targetProject(ctx, args);
     if (markdown) checkTables(markdown);
+    if (markdown) checkVideos(markdown);
     if (markdown) assertWidgets(markdown);
     const created = await load(
       Docs.createDoc(ctx.deps.db, {
@@ -829,6 +842,7 @@ const handlers: Record<ToolName, (args: Args, ctx: ToolContext) => Promise<objec
     const markdown = markdownArg(args, "markdown", false) ?? "";
     await need(ctx, docId, "editor");
     checkTables(markdown);
+    checkVideos(markdown);
     assertWidgets(markdown);
     if (parentTabId !== null) {
       const parent = await load(Docs.getTab(ctx.deps.db, parentTabId), "parent tab");
@@ -868,6 +882,7 @@ const handlers: Record<ToolName, (args: Args, ctx: ToolContext) => Promise<objec
       const markdown = tab.markdown.slice(0, at) + replace + tab.markdown.slice(at + find.length);
       if (markdown.length > MAX_MARKDOWN_LENGTH) fail("too_large", "The tab would be too large.");
       checkTables(markdown, tab.markdown);
+      checkVideos(markdown, tab.markdown);
       assertWidgets(markdown, tab.markdown);
       const result = await ctx.deps.rooms.writeTab(tab.docId, {
         tabId,
@@ -890,6 +905,7 @@ const handlers: Record<ToolName, (args: Args, ctx: ToolContext) => Promise<objec
     const baseVersion = requireVersion(args, "baseVersion");
     const current = await tabWith(ctx, tabId, "editor");
     checkTables(markdown, current.markdown);
+    checkVideos(markdown, current.markdown);
     assertWidgets(markdown, current.markdown);
     const result = await ctx.deps.rooms.writeTab(current.docId, {
       tabId,

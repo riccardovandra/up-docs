@@ -3,12 +3,15 @@ import { useSyncExternalStore } from "react";
 
 import { findWidgetFences, widgetInfoString } from "../../../shared/widget/fence.ts";
 import { insertRichTable } from "../../editor/table/tableBlock.ts";
+import { insertVideoLink } from "../../editor/video/insertVideo.ts";
 
 /** What an insert action can reach besides the editor. */
 export interface InsertContext {
   readonly editor: Editor;
   /** Opens the file picker and uploads the chosen image into the doc. */
   readonly pickImage: () => void;
+  /** Opens the file picker and uploads the chosen video into the doc. */
+  readonly pickVideo: () => void;
 }
 
 /**
@@ -113,6 +116,13 @@ const DEFAULT_ACTIONS: ReadonlyArray<InsertAction> = [
     run: ({ editor }) => void insertRichTable(editor),
   },
   { id: "image", label: "Image", order: 80, run: ({ pickImage }) => pickImage() },
+  {
+    id: "video-link",
+    label: "Video link",
+    order: 90,
+    run: ({ editor }) => insertVideoLink(editor),
+  },
+  { id: "video-upload", label: "Upload video", order: 91, run: ({ pickVideo }) => pickVideo() },
 ];
 
 let actions: ReadonlyMap<string, InsertAction> = new Map(

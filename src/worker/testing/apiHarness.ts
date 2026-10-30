@@ -7,6 +7,7 @@ import * as DocThreads from "../docThreads.ts";
 import * as Docs from "../docs.ts";
 import type { DocInvite } from "../email.ts";
 import { makeTestD1 } from "./sqliteD1.ts";
+import type { VideoStore } from "../videos.ts";
 
 export const ORIGIN = "https://docs.test";
 export const OWNER = "owner@example.com";
@@ -20,6 +21,51 @@ export function makeApiHarness(overrides: Partial<ApiDeps> = {}) {
   const invites: Array<DocInvite> = [];
   const sockets: Array<{ docId: string; userId: string; open: boolean }> = [];
   const images = new Map<string, { body: ArrayBuffer; contentType: string }>();
+  const videos = new Map<string, Uint8Array>();
+  const uploads = new Map<
+    string,
+    { key: string; contentType: string; parts: Map<number, Uint8Array> }
+  >();
+  const videoStore: VideoStore = {
+    create: async (key, contentType) => {
+      const uploadId = `upload-${uploads.size + 1}`;
+      uploads.set(uploadId, { key, contentType, parts: new Map() });
+      return uploadId;
+    },
+    uploadPart: async (key, uploadId, partNumber, body) => {
+      const upload = uploads.get(uploadId);
+      if (upload?.key !== key) return null;
+      upload.parts.set(partNumber, new Uint8Array(await new Response(body).arrayBuffer()));
+      return `etag-${partNumber}`;
+    },
+    complete: async (key, uploadId, parts) => {
+      const upload = uploads.get(uploadId);
+      if (upload?.key !== key) return null;
+      const bytes = parts.flatMap(({ partNumber }) => [...(upload.parts.get(partNumber) ?? [])]);
+      uploads.delete(uploadId);
+      videos.set(key, Uint8Array.from(bytes));
+      return bytes.length;
+    },
+    abort: async (key, uploadId) => {
+      if (uploads.get(uploadId)?.key === key) uploads.delete(uploadId);
+    },
+    head: async (key) => {
+      const bytes = videos.get(key);
+      return bytes ? { size: bytes.length } : null;
+    },
+    get: async (key, range) => {
+      const bytes = videos.get(key);
+      if (!bytes) return null;
+      const part = range ? bytes.subarray(range.offset, range.offset + range.length) : bytes;
+      return { body: new Response(part.slice()).body! };
+    },
+    delete: async (key) => {
+      videos.delete(key);
+    },
+    deletePrefix: async (prefix) => {
+      for (const key of [...videos.keys()]) if (key.startsWith(prefix)) videos.delete(key);
+    },
+  };
   const mail: { delivery: EmailDelivery } = { delivery: "sent" };
   const deps: ApiDeps = {
     db,
@@ -95,6 +141,7 @@ export function makeApiHarness(overrides: Partial<ApiDeps> = {}) {
         for (const key of [...images.keys()]) if (key.startsWith(prefix)) images.delete(key);
       },
     },
+    videos: videoStore,
     emailEnabled: true,
     adminPassword: undefined,
     sendLoginCode: async (email, code) => {
@@ -138,5 +185,19 @@ export function makeApiHarness(overrides: Partial<ApiDeps> = {}) {
     return cookie.split(";")[0]!;
   };
 
-  return { db, clock, deps, mail, sentCodes, broadcasts, invites, sockets, images, call, signIn };
+  return {
+    db,
+    clock,
+    deps,
+    mail,
+    sentCodes,
+    broadcasts,
+    invites,
+    sockets,
+    images,
+    videos,
+    uploads,
+    call,
+    signIn,
+  };
 }

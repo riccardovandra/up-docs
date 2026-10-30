@@ -142,6 +142,9 @@ function LocalDoc(props: { readonly path: string; readonly source: DocSource }) 
   const insertImage = useStableCallback(() =>
     setNotice("Images cannot be added to project files here. Ask the agent to add one."),
   );
+  const insertVideo = useStableCallback(() =>
+    setNotice("Videos cannot be uploaded to project files. A YouTube or Loom link works."),
+  );
   const title = docTitleFromPath(props.path);
   const importAvailable = useLocalImportAvailable();
   const saveBeforeImport = useStableCallback(async () => {
@@ -294,6 +297,7 @@ function LocalDoc(props: { readonly path: string; readonly source: DocSource }) 
             width={width}
             onToggleWidth={toggleWidth}
             onInsertImage={insertImage}
+            onInsertVideo={insertVideo}
             onSelect={noop}
             onCreate={noop}
             onRename={noop}
@@ -358,6 +362,7 @@ function LocalDoc(props: { readonly path: string; readonly source: DocSource }) 
                   editable={editable}
                   uploadImage={refuseImage}
                   onUploadError={insertImage}
+                  onVideoFile={insertVideo}
                   onChange={(markdown) => {
                     setSaving(true);
                     saver.current?.schedule(markdown);

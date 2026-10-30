@@ -34,6 +34,16 @@ const doc = (tabs: Array<Tab>): DocWithTabs => ({
 });
 
 describe("markdown assembly", () => {
+  it("shows videos as links, with uploaded files made absolute", () => {
+    const file = "00000000-0000-4000-8000-000000000000.mp4";
+    const body = `\`\`\`t3-video\n/api/videos/doc/${file}\nDemo\n\`\`\``;
+    const expected = `[Demo](https://docs.test/api/videos/doc/${file})`;
+    expect(tabMarkdown(tab("a", null, 0, "One", body), "https://docs.test")).toContain(expected);
+    const whole = docMarkdown(doc([tab("a", null, 0, "One", body)]), "https://docs.test");
+    expect(whole).toContain(expected);
+    expect(whole).not.toContain("t3-video");
+  });
+
   it("writes tabs depth-first with heading levels that follow depth", () => {
     const markdown = docMarkdown(
       doc([

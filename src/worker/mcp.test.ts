@@ -414,6 +414,35 @@ const tableMarkdown = (table: unknown = TABLE) =>
   `# Requests\n\n\`\`\`t3-table\n${JSON.stringify(table)}\n\`\`\`\n\nAfter.\n`;
 
 describe("MCP table tools", () => {
+  it("rejects writes with an invalid t3-video block and accepts valid ones", async () => {
+    const mcp = await makeMcpHarness();
+    const { tab } = await mcp.seedDoc("Start.");
+    const bad = "```t3-video\nhttps://youtube.com.evil.test/watch?v=dQw4w9WgXcQ\n```";
+    const good = "```t3-video\nhttps://youtu.be/dQw4w9WgXcQ\nThe walkthrough\n```";
+
+    const written = await mcp.tool("write_tab", {
+      tabId: tab.tabId,
+      markdown: bad,
+      baseVersion: 2,
+    });
+    expect(written).toMatchObject({ isError: true, body: { error: "video_invalid" } });
+    expect(written.body.message).toContain("Nothing was written.");
+
+    const edited = await mcp.tool("edit_tab", { tabId: tab.tabId, find: "Start.", replace: bad });
+    expect(edited).toMatchObject({ isError: true, body: { error: "video_invalid" } });
+
+    const docId = (await mcp.tool("list_docs", {})).body.docs[0].docId;
+    const created = await mcp.tool("create_tab", { docId, title: "T", markdown: bad });
+    expect(created).toMatchObject({ isError: true, body: { error: "video_invalid" } });
+    const doc = await mcp.tool("create_doc", { title: "D", markdown: bad });
+    expect(doc).toMatchObject({ isError: true, body: { error: "video_invalid" } });
+
+    const fine = await mcp.tool("edit_tab", { tabId: tab.tabId, find: "Start.", replace: good });
+    expect(fine.isError).toBe(false);
+    const read = await mcp.tool("read_doc", { docId, tabId: tab.tabId });
+    expect(JSON.stringify(read.body)).toContain("The walkthrough");
+  });
+
   it("rejects writes whose t3-table JSON is invalid, with the reason", async () => {
     const mcp = await makeMcpHarness();
     const { tab } = await mcp.seedDoc("Start.");

@@ -1,6 +1,7 @@
 import type { Node as ProseMirrorNode } from "@tiptap/pm/model";
 
 import { anchorAt, locateAnchor, type DocAnchor } from "../../shared/anchors.ts";
+import { isVideoLanguage } from "../../shared/video.ts";
 import { isTableNode } from "../editor/table/TableView.ts";
 
 /**
@@ -33,6 +34,10 @@ export function buildDocTextIndex(doc: ProseMirrorNode): DocTextIndex {
     }
     // A rich table's text is its JSON; its cells take cell anchors instead.
     if (isTableNode(node)) return false;
+    // A video's text is its source, which readers do not see.
+    if (node.type.name === "codeBlock" && isVideoLanguage(node.attrs.language as string | null)) {
+      return false;
+    }
     if (node.type.name === "hardBreak" || node.isTextblock) separate();
     return true;
   });

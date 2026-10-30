@@ -2,7 +2,7 @@
 
 [![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/riccardovandra/up-docs)
 
-Collaborative markdown docs for people and agents, on your own Cloudflare account. One Cloudflare Worker serves the web app, a JSON API under `/api`, and an MCP endpoint under `/mcp` for agents. Each doc has a Durable Object that applies every write in order and pushes it to open editors over WebSocket. Data lives in D1, doc images in R2, or in D1 if you remove the R2 binding.
+Collaborative markdown docs for people and agents, on your own Cloudflare account. One Cloudflare Worker serves the web app, a JSON API under `/api`, and an MCP endpoint under `/mcp` for agents. Each doc has a Durable Object that applies every write in order and pushes it to open editors over WebSocket. Data lives in D1, doc images in R2, or in D1 if you remove the R2 binding. Uploaded videos always live in R2.
 
 UP Docs can run inside [T3 Code](https://github.com/pingdotgg/t3code)'s Docs panel. `FRAME_ANCESTORS` in `wrangler.jsonc` lists the origins allowed to frame the app. `src/shared/embed.ts` holds the postMessage protocol.
 
@@ -10,7 +10,7 @@ UP Docs can run inside [T3 Code](https://github.com/pingdotgg/t3code)'s Docs pan
 
 ### Before you click
 
-- **R2 may need a payment method.** Images go to an R2 bucket by default, and Cloudflare may require a payment method on the account before it creates one. We have not confirmed this on an account with no card. If the deploy fails on the R2 bucket, either add a payment method, or remove the `r2_buckets` line from `wrangler.jsonc` and deploy again. Images are then stored in D1.
+- **R2 may need a payment method.** Images go to an R2 bucket by default, and Cloudflare may require a payment method on the account before it creates one. We have not confirmed this on an account with no card. If the deploy fails on the R2 bucket, either add a payment method, or remove the `r2_buckets` line from `wrangler.jsonc` and deploy again. Images are then stored in D1, and uploading videos is turned off.
 - **Choose an admin password** of 12 or more characters. Shorter or empty turns password sign-in off, and with no email set up you then cannot sign in at all.
 
 ### What the button does
@@ -53,7 +53,24 @@ bunx wrangler secret put ADMIN_PASSWORD
 ADMIN_PASSWORD=<password> bun scripts/smoke.ts https://<your-worker-url>
 ```
 
-It signs in, creates and edits a doc, uploads an image, uses `/mcp` with a new API token, checks sharing, then removes what it created. The sharing step fails when email is configured, because it expects no email to be sent.
+It signs in, creates and edits a doc, uploads an image and a video, uses `/mcp` with a new API token, checks sharing, then removes what it created. The sharing step fails when email is configured, because it expects no email to be sent.
+
+### Videos
+
+A doc plays YouTube links, Loom links and uploaded MP4, WebM and MOV files. In the editor, use "Video link" or "Upload video" in the "+" menu, or drop a file on the page. Agents write a `t3-video` block, whose first line is the source and whose optional second line is the title:
+
+````
+```t3-video
+https://www.youtube.com/watch?v=dQw4w9WgXcQ
+Release walkthrough
+```
+````
+
+- YouTube and Loom load only when a reader clicks play. Nothing contacts them before that.
+- Uploads need R2. Without the bucket the API answers `video_storage_unavailable` and the editor says so. Links still work.
+- Files are capped at 1 GiB and go through the Worker in 50 MiB parts. They use the `IMAGES` bucket under a `videos/` prefix, so there is nothing extra to configure.
+- Removing a video block does not delete the file. Files go when the doc is deleted. R2 storage costs about $0.015 per GB-month, and egress is free.
+- Inside T3 Code, fullscreen and player autoplay need T3 Code to pass `fullscreen; autoplay` to the docs iframe. Until that ships, videos play there with these two limits.
 
 ### Cloudflare plan limits
 

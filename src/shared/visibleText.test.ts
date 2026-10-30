@@ -43,6 +43,15 @@ describe("visibleText", () => {
     expect(searchSnippet(visibleText(markdown), "strokeWidth")).toBeNull();
   });
 
+  it("reads a video as its title, never its URL", () => {
+    const text = visibleText(
+      "Intro\n\n```t3-video\nhttps://youtu.be/dQw4w9WgXcQ\nThe walkthrough\n```\n\nEnd",
+    );
+    expect(text).toBe("Intro\nThe walkthrough\nEnd");
+    expect(richBlockText("t3-video", "https://youtu.be/dQw4w9WgXcQ")).toEqual([]);
+    expect(richBlockText("t3-video", "https://example.com/x\nTitle")).toEqual([]);
+  });
+
   it("skips a rich table that does not parse", () => {
     expect(richBlockText("t3-table", '{"rows": [')).toEqual([]);
     expect(richBlockText("mermaid", "graph TD")).toBeNull();
