@@ -1,0 +1,127 @@
+/*
+ * Diagram colour tokens (Claude's --cds-* names) mapped onto the theme
+ * variables. WidgetView resolves them here and posts the values into the
+ * sandboxed frame, so light, dark and a T3 palette all reach the drawing.
+ */
+.widget-block {
+  --cds-text-primary: var(--text);
+  --cds-text-secondary: var(--muted);
+  --cds-chart-axis: color-mix(in srgb, var(--text) 55%, var(--bg));
+  --cds-chart-grid: var(--border);
+  --cds-chart-reference-tint: color-mix(in srgb, var(--text) 5%, transparent);
+  --cds-chart-categorical-1: var(--accent);
+  --cds-chart-categorical-2: #3b82c4;
+  --cds-chart-categorical-3: #2a9d8f;
+  --cds-chart-categorical-4: #8b6bd1;
+  --cds-chart-categorical-5: #d0643a;
+  --cds-chart-categorical-6: #c2417a;
+  --cds-chart-categorical-7: #6f8f2f;
+  --cds-chart-categorical-8: #c9971a;
+  --cds-chart-status-good: #2f9e5b;
+  --cds-chart-status-warning: #c98a12;
+  --cds-chart-status-critical: var(--danger);
+  position: relative;
+  margin: 1em 0;
+}
+
+.tab-editor .ProseMirror .widget-block pre.widget-source {
+  display: none;
+  margin: 0 0 0.5rem;
+}
+
+/* The source shows while editing, and when the module does not parse. */
+.tab-editor .ProseMirror .widget-block:is([data-editing], [data-state="error"]) pre.widget-source {
+  display: block;
+}
+
+.widget-chrome {
+  position: relative;
+  border: 1px solid transparent;
+  border-radius: 8px;
+}
+
+.widget-block:hover .widget-chrome,
+.widget-block[data-editing] .widget-chrome {
+  border-color: var(--border);
+}
+
+.widget-stage {
+  position: relative;
+  width: 100%;
+}
+
+.widget-frame {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: transparent;
+  color-scheme: light;
+}
+
+.widget-block[data-state="error"] .widget-stage {
+  display: none;
+}
+
+.widget-label-input {
+  position: absolute;
+  transform: translateY(-50%);
+  box-sizing: border-box;
+  padding: 0.1em 0.3em;
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--text);
+  font-family: var(--font-sans);
+  outline: 2px solid color-mix(in srgb, var(--accent) 30%, transparent);
+}
+
+.widget-diagnostics {
+  margin: 0.25rem 0 0;
+  padding: 0 0.75rem;
+  list-style: none;
+  color: var(--danger);
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+}
+
+.widget-diagnostics:empty {
+  display: none;
+}
+
+.widget-edit {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  padding: 0.2rem 0.55rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.8rem;
+  cursor: pointer;
+  opacity: 0;
+}
+
+.widget-block:hover .widget-edit,
+.widget-edit:focus-visible {
+  opacity: 1;
+}
+
+.widget-block[data-editing] .widget-edit,
+.tab-editor:not(:has(.ProseMirror[contenteditable="true"])) .widget-edit {
+  display: none;
+}
+
+@media print {
+  .widget-edit,
+  .widget-diagnostics,
+  .widget-label-input {
+    display: none !important;
+  }
+
+  .widget-chrome {
+    border-color: transparent !important;
+  }
+}

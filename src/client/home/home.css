@@ -1,0 +1,792 @@
+/*
+ * The home page, after Claude's Artifacts page, in T3 Code's colours (the
+ * variables documented at the top of styles.css). Nothing here animates
+ * continuously; cards skip layout and paint while off screen.
+ */
+
+.home {
+  --home-tint: color-mix(in srgb, var(--accent) 62%, var(--bg));
+  --home-tint-soft: color-mix(in srgb, var(--accent) 16%, var(--surface));
+  max-width: 82rem;
+  margin: 0 auto;
+  padding: 2.25rem 2.25rem 5rem;
+}
+
+.home-title-row {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.home-title {
+  margin: 0;
+  font-size: 2.1rem;
+  font-weight: 500;
+  line-height: 1.2;
+}
+
+.account-menu {
+  margin-left: auto;
+}
+
+.account-avatar {
+  display: inline-grid;
+  place-items: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 999px;
+  border: none;
+  background: var(--chip-bg);
+  color: var(--chip-text);
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.account-avatar:hover,
+.account-avatar[aria-expanded="true"] {
+  background: color-mix(in srgb, var(--text) 12%, var(--chip-bg));
+}
+
+.account-name,
+.account-email {
+  display: block;
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+.account-name {
+  color: var(--text);
+  font-size: 0.9rem;
+  font-weight: 500;
+}
+
+.account-email {
+  font-size: 0.8rem;
+}
+
+/* Project switcher, as T3 Code's */
+
+.project-switcher {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  max-width: 22rem;
+  font: inherit;
+  font-size: 0.92rem;
+  color: var(--text);
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.3rem 0.55rem;
+  cursor: pointer;
+}
+
+.project-switcher:hover,
+.project-switcher[aria-expanded="true"] {
+  background: var(--hover);
+}
+
+.project-switcher > svg:last-child {
+  flex: none;
+  color: var(--muted);
+}
+
+.project-switcher-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-badge {
+  flex: none;
+  width: 1rem;
+  height: 1rem;
+  overflow: hidden;
+  border-radius: 25%;
+  color: var(--mono-light);
+  background: color-mix(in srgb, currentColor 14%, transparent);
+  font-family: var(--font-mono);
+  user-select: none;
+}
+
+.project-badge.no-project {
+  --mono-light: var(--muted);
+  --mono-dark: var(--muted);
+  background: none;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.2;
+  stroke-dasharray: 2 1.6;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .project-badge {
+    color: var(--mono-dark);
+  }
+}
+
+:root[data-theme="dark"] .project-badge {
+  color: var(--mono-dark);
+}
+
+/* Tabs and controls */
+
+.home-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-top: 1.75rem;
+}
+
+.home-tabs {
+  display: flex;
+  gap: 0.25rem;
+}
+
+.home-tab {
+  font: inherit;
+  font-size: 1rem;
+  color: var(--text);
+  background: none;
+  border: none;
+  border-radius: 10px;
+  padding: 0.4rem 0.9rem;
+  cursor: pointer;
+}
+
+.home-tab:hover {
+  background: var(--hover);
+}
+
+.home-tab[aria-selected="true"] {
+  background: color-mix(in srgb, var(--text) 14%, transparent);
+}
+
+.home-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.home-icon-button {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  color: var(--text);
+  background: none;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.home-icon-button:hover,
+.home-icon-button[aria-expanded="true"] {
+  background: var(--hover);
+}
+
+/* A filter is on. */
+.home-icon-button.active::after {
+  content: "";
+  position: absolute;
+  top: 0.4rem;
+  right: 0.4rem;
+  width: 0.4rem;
+  height: 0.4rem;
+  border-radius: 999px;
+  background: var(--accent);
+}
+
+.home-search {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  width: 18rem;
+  height: 2.25rem;
+  padding: 0 0.35rem 0 0.65rem;
+  color: var(--muted);
+  background: var(--surface);
+  border: 1px solid var(--input);
+  border-radius: 8px;
+}
+
+.home-search:focus-within {
+  border-color: var(--ring);
+}
+
+.home-search input {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--text);
+}
+
+.home-search input:focus {
+  outline: none;
+}
+
+.home-search input::-webkit-search-cancel-button {
+  display: none;
+}
+
+.home-search-clear {
+  display: inline-grid;
+  place-items: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  color: var(--muted);
+  background: none;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.home-search-clear:hover {
+  color: var(--text);
+  background: var(--hover);
+}
+
+/* Menus */
+
+.home-menu-wrap {
+  position: relative;
+}
+
+.home-menu {
+  position: absolute;
+  z-index: 30;
+  top: calc(100% + 0.35rem);
+  min-width: 13rem;
+  max-width: 20rem;
+  padding: 0.3rem;
+  background: var(--popover);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 10px 30px rgb(0 0 0 / 0.18);
+  font-size: 0.9rem;
+}
+
+.home-menu.align-end {
+  right: 0;
+}
+
+.home-menu.align-start {
+  left: 0;
+}
+
+.home-menu-scroll {
+  max-height: 16rem;
+  overflow-y: auto;
+}
+
+.home-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  width: 100%;
+  font: inherit;
+  text-align: left;
+  color: var(--text);
+  background: none;
+  border: none;
+  border-radius: 6px;
+  padding: 0.38rem 0.5rem;
+  cursor: pointer;
+}
+
+.home-menu-item:hover,
+.home-menu-item:focus-visible {
+  background: var(--hover);
+  outline: none;
+}
+
+.home-menu-item:disabled {
+  color: var(--text-subtle);
+  cursor: default;
+}
+
+.home-menu-item.danger {
+  color: var(--danger);
+}
+
+.home-menu-item-icon {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 1rem;
+  color: var(--muted);
+}
+
+.home-menu-item-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.home-menu-item-check {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 1rem;
+  color: var(--text);
+}
+
+.home-menu-label {
+  padding: 0.4rem 0.5rem 0.2rem;
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-weight: 500;
+}
+
+.home-menu-separator {
+  height: 1px;
+  margin: 0.3rem 0.2rem;
+  background: var(--border);
+}
+
+.home-section-label {
+  margin: 0 0 0.75rem;
+  font-family: var(--font-sans);
+  font-size: 0.95rem;
+  font-weight: 400;
+  letter-spacing: normal;
+  color: var(--muted);
+}
+
+/* The faint squiggle behind previews, as in Claude's. */
+.doc-card-paper::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: currentColor;
+  opacity: 0.12;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 180 128' fill='none' stroke='black' stroke-width='9' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M14 60c8 22 14 40 20 40s8-30 14-30 6 24 12 24 10-44 18-44'/%3E%3Cpath d='M128 112c4-14 10-30 16-30s6 18 12 18 8-26 16-26'/%3E%3C/svg%3E")
+    center / cover no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 180 128' fill='none' stroke='black' stroke-width='9' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M14 60c8 22 14 40 20 40s8-30 14-30 6 24 12 24 10-44 18-44'/%3E%3Cpath d='M128 112c4-14 10-30 16-30s6 18 12 18 8-26 16-26'/%3E%3C/svg%3E")
+    center / cover no-repeat;
+  pointer-events: none;
+}
+
+/* Card grid */
+
+.doc-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(17.5rem, 1fr));
+  gap: 2rem;
+  margin-top: 3rem;
+}
+
+.doc-card {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface);
+  /* Off-screen cards skip layout and paint, so hundreds stay cheap. */
+  content-visibility: auto;
+  contain-intrinsic-size: auto 18.5rem;
+}
+
+.doc-card-link {
+  display: block;
+  color: inherit;
+  text-decoration: none;
+}
+
+.doc-card-link:focus-visible {
+  outline: none;
+}
+
+.doc-card:has(.doc-card-link:focus-visible) {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+.doc-card-paper {
+  position: relative;
+  height: 12.5rem;
+  overflow: hidden;
+  color: color-mix(in srgb, var(--accent) 30%, white);
+  background: var(--home-tint);
+}
+
+/* The sheet behind, for the stacked-paper look. */
+.doc-card-paper::after {
+  content: "";
+  position: absolute;
+  top: 2.15rem;
+  left: 22%;
+  right: 18%;
+  height: 12rem;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--surface) 82%, var(--accent));
+  border: 1px solid color-mix(in srgb, var(--text) 12%, transparent);
+  transform: rotate(2deg);
+}
+
+.doc-card-sheet {
+  position: absolute;
+  z-index: 1;
+  top: 2.4rem;
+  left: 20%;
+  right: 20%;
+  height: 12rem;
+  overflow: hidden;
+  padding: 0.95rem 1rem;
+  border-radius: 10px;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid color-mix(in srgb, var(--text) 12%, transparent);
+  box-shadow: 0 2px 12px rgb(0 0 0 / 0.12);
+  font-size: 0.42rem;
+  line-height: 1.5;
+  -webkit-mask: linear-gradient(to bottom, black 70%, transparent);
+  mask: linear-gradient(to bottom, black 70%, transparent);
+}
+
+.doc-card:hover .doc-card-sheet {
+  box-shadow: 0 4px 18px rgb(0 0 0 / 0.2);
+}
+
+.doc-card-sheet-title {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  font-family: var(--font-serif);
+  font-size: 0.78rem;
+  line-height: 1.25;
+}
+
+.doc-card-sheet-meta {
+  display: flex;
+  gap: 0.25rem;
+  margin: 0.35rem 0 0.6rem;
+}
+
+.doc-card-sheet-meta .doc-card-chip {
+  padding: 0.05rem 0.3rem;
+  border-radius: 3px;
+  font-size: 0.34rem;
+}
+
+.doc-card-sheet-heading {
+  margin: 0.55rem 0 0.2rem;
+  font-family: var(--font-serif);
+  font-size: 0.56rem;
+}
+
+.doc-card-sheet p {
+  margin: 0 0 0.35rem;
+  color: color-mix(in srgb, var(--text) 82%, transparent);
+}
+
+.doc-card-sheet-empty {
+  height: 0.3rem;
+  width: 60%;
+  border-radius: 999px;
+  background: var(--chip-bg);
+}
+
+.doc-card-chip {
+  display: inline-block;
+  padding: 0.05rem 0.45rem;
+  border-radius: 6px;
+  background: var(--chip-bg);
+  color: var(--chip-text);
+  font-size: 0.78rem;
+  white-space: nowrap;
+}
+
+.doc-card-footer {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 1.2rem 1.25rem;
+}
+
+.doc-card-icon {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 3.1rem;
+  height: 3.1rem;
+  border-radius: 10px;
+  color: color-mix(in srgb, var(--accent) 45%, var(--text));
+  background: var(--home-tint-soft);
+}
+
+.doc-card-text {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+}
+
+.doc-card-title,
+.doc-card-meta {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.doc-card-title {
+  font-size: 1.08rem;
+}
+
+.doc-card-meta {
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
+.doc-card-mark {
+  flex: none;
+  display: inline-grid;
+  color: var(--muted);
+}
+
+.doc-card-menu {
+  position: absolute;
+  z-index: 2;
+  top: 0.6rem;
+  right: 0.6rem;
+}
+
+.doc-card-menu .home-icon-button {
+  width: 2rem;
+  height: 2rem;
+  color: var(--text);
+  background: color-mix(in srgb, var(--surface) 85%, transparent);
+  opacity: 0;
+}
+
+.doc-card:hover .doc-card-menu .home-icon-button,
+.doc-card-menu .home-icon-button:focus-visible,
+.doc-card-menu .home-icon-button[aria-expanded="true"] {
+  opacity: 1;
+}
+
+/* The grid's first tile, sized and styled like a doc card. */
+.doc-card-new {
+  display: block;
+  width: 100%;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.doc-card-new:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+.doc-card-new-paper {
+  display: grid;
+  place-items: center;
+}
+
+.doc-card-new-paper::after {
+  content: none;
+}
+
+.doc-card-new-paper > svg {
+  position: relative;
+}
+
+.doc-card-new:hover .doc-card-new-paper {
+  background: color-mix(in srgb, var(--accent) 72%, var(--bg));
+}
+
+/* The card's menu must not be clipped by its own overflow. */
+.doc-card:has(.home-menu) {
+  overflow: visible;
+  content-visibility: visible;
+  z-index: 5;
+}
+
+/* List view */
+
+.doc-table {
+  width: 100%;
+  margin-top: 3rem;
+  border-collapse: collapse;
+  font-size: 0.92rem;
+}
+
+.doc-table th {
+  padding: 0.5rem 0.75rem;
+  color: var(--muted);
+  font-weight: 400;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+}
+
+.doc-table td {
+  padding: 0.6rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+.doc-row {
+  cursor: pointer;
+  content-visibility: auto;
+  contain-intrinsic-size: auto 2.75rem;
+}
+
+.doc-row:hover {
+  background: var(--hover);
+}
+
+.doc-row-title {
+  width: 40%;
+  max-width: 0;
+}
+
+.doc-row-title a {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  color: var(--text);
+  text-decoration: none;
+}
+
+.doc-row-title a > svg {
+  flex: none;
+  color: var(--muted);
+}
+
+.doc-row-title-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.doc-row-title-text > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.doc-row-snippet {
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.doc-row-project {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.doc-row-muted {
+  color: var(--muted);
+}
+
+.doc-row-actions {
+  width: 2.5rem;
+  text-align: right;
+}
+
+.doc-row-actions .home-icon-button {
+  width: 1.9rem;
+  height: 1.9rem;
+}
+
+.home-empty {
+  margin-top: 3rem;
+  color: var(--muted);
+}
+
+.doc-grid + .home-empty,
+.doc-table + .home-empty {
+  margin-top: 1.5rem;
+}
+
+.doc-row-new button {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  width: 100%;
+  padding: 0;
+  font: inherit;
+  color: var(--text);
+  text-align: left;
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+.doc-row-new button > svg {
+  flex: none;
+  color: var(--muted);
+}
+
+.doc-row-new button:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+/* New doc and rename */
+
+.title-dialog {
+  width: min(26rem, calc(100vw - 2rem));
+  padding: 1.25rem;
+  color: var(--text);
+  background: var(--popover);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 20px 50px rgb(0 0 0 / 0.3);
+}
+
+.title-dialog::backdrop {
+  background: rgb(0 0 0 / 0.4);
+}
+
+.title-dialog h2 {
+  margin: 0;
+  font-size: 1.25rem;
+}
+
+.title-dialog p {
+  margin: 0.2rem 0 0;
+}
+
+.title-dialog input {
+  width: 100%;
+  margin-top: 1rem;
+}
+
+.title-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
+
+@media (max-width: 640px) {
+  .home {
+    padding: 1.5rem 1rem 4rem;
+  }
+
+  .home-toolbar {
+    flex-wrap: wrap;
+  }
+
+  .home-search {
+    width: 12rem;
+  }
+
+  .doc-table th:nth-child(n + 3):not(:last-child),
+  .doc-table td:nth-child(n + 3):not(:last-child) {
+    display: none;
+  }
+}

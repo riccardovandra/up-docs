@@ -1,0 +1,120 @@
+/* Project files, when T3 Code serves them */
+
+.local-files {
+  margin-top: 2.25rem;
+}
+
+.local-files-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.local-files-new {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font: inherit;
+  font-size: 0.85rem;
+  color: var(--muted);
+  background: none;
+  border: none;
+  border-radius: 8px;
+  padding: 0.25rem 0.5rem;
+  cursor: pointer;
+}
+
+.local-files-new:hover {
+  color: var(--text);
+  background: var(--hover);
+}
+
+.local-files .home-empty {
+  margin-top: 0;
+}
+
+.local-files-tree {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.local-folder,
+.local-file {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  min-width: 0;
+  padding: 0.4rem 0.6rem;
+  border-radius: 8px;
+  color: var(--text);
+  text-decoration: none;
+}
+
+.local-folder {
+  font: inherit;
+  text-align: left;
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+.local-folder:disabled {
+  cursor: default;
+}
+
+.local-folder:hover:not(:disabled),
+.local-file:hover {
+  background: var(--hover);
+}
+
+.local-folder svg,
+.local-file svg {
+  flex: none;
+  color: var(--muted);
+}
+
+.local-folder-chevron {
+  display: inline-flex;
+  flex: none;
+  width: 14px;
+  transform: rotate(-90deg);
+}
+
+.local-folder-chevron[data-open] {
+  transform: none;
+}
+
+.local-file-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.local-folder-count,
+.local-file-badge {
+  flex: none;
+  margin-left: auto;
+  font-size: 0.7rem;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.local-file-path {
+  display: none;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  color: var(--text-subtle);
+}
+
+.local-file:hover .local-file-path,
+.local-file:focus-visible .local-file-path {
+  display: block;
+}

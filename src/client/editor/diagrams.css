@@ -1,0 +1,111 @@
+.diagram-block {
+  position: relative;
+  margin: 1em 0;
+}
+
+.diagram-block .pele {
+  --pele-bg: var(--surface);
+  --pele-fg: var(--text);
+  --pele-muted: var(--muted);
+  --pele-line: var(--muted);
+  --pele-surface: var(--code-bg);
+  --pele-surface-alt: var(--bg);
+  --pele-border: color-mix(in srgb, var(--text) 28%, transparent);
+  --pele-accent: var(--accent);
+  --pele-critical: var(--danger);
+  --pele-font: var(--font-sans);
+}
+
+.tab-editor .ProseMirror .diagram-block pre.diagram-source {
+  display: none;
+  margin: 0 0 0.5rem;
+}
+
+/* The source shows while editing, and while the diagram is loading or broken. */
+.tab-editor
+  .ProseMirror
+  .diagram-block:is([data-editing], :not([data-state="rendered"]))
+  pre.diagram-source {
+  display: block;
+}
+
+.diagram-chrome {
+  border: 1px solid transparent;
+  border-radius: 8px;
+  padding: 0.75rem;
+  cursor: pointer;
+}
+
+.diagram-block:hover .diagram-chrome,
+.diagram-block.ProseMirror-selectednode .diagram-chrome,
+.diagram-block[data-editing] .diagram-chrome {
+  border-color: var(--border);
+}
+
+.diagram-block.ProseMirror-selectednode .diagram-chrome {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+
+.diagram-block[data-editing] .diagram-chrome {
+  cursor: default;
+}
+
+.diagram-render {
+  display: flex;
+  justify-content: center;
+  overflow-x: auto;
+}
+
+.diagram-block[data-state="loading"] .diagram-render {
+  display: none;
+}
+
+.diagram-error {
+  margin: 0;
+  color: var(--danger);
+  font-size: 0.85rem;
+  white-space: pre-wrap;
+}
+
+.diagram-edit {
+  position: absolute;
+  top: 0.4rem;
+  right: 0.4rem;
+  font: inherit;
+  font-size: 0.8rem;
+  color: var(--muted);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.15rem 0.5rem;
+  cursor: pointer;
+}
+
+.diagram-edit:hover {
+  color: var(--text);
+}
+
+.diagram-block[data-editing] .diagram-edit {
+  display: none;
+}
+
+@media print {
+  .diagram-edit {
+    display: none;
+  }
+
+  .diagram-chrome {
+    border-color: transparent !important;
+    outline: none !important;
+    padding: 0;
+  }
+
+  .tab-editor .ProseMirror .diagram-block[data-state="rendered"] pre.diagram-source {
+    display: none;
+  }
+
+  .diagram-render {
+    overflow: visible;
+  }
+}
