@@ -5,7 +5,7 @@ import StarterKit from "@tiptap/starter-kit";
 
 import { DocsCodeBlock } from "./codeBlock.ts";
 import { HeadingFold } from "./headingFold.ts";
-import { DocImage, type DocImageOptions } from "./image.ts";
+import { DocImage, type DocImageOptions, DocParagraph } from "./image.ts";
 
 /**
  * The editor's whole extension list. Every extension must round-trip through
@@ -15,7 +15,8 @@ import { DocImage, type DocImageOptions } from "./image.ts";
 export const createEditorExtensions = (
   images: DocImageOptions = { upload: null, onUploadError: () => undefined },
 ) => [
-  StarterKit.configure({ link: { openOnClick: false }, codeBlock: false }),
+  StarterKit.configure({ link: { openOnClick: false }, codeBlock: false, paragraph: false }),
+  DocParagraph,
   DocsCodeBlock,
   TaskList,
   TaskItem.configure({ nested: true }),

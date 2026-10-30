@@ -1,6 +1,7 @@
-import { mergeAttributes, Node } from "@tiptap/core";
+import { flattenExtensions, mergeAttributes, Node } from "@tiptap/core";
 import { Plugin } from "@tiptap/pm/state";
 import type { EditorView } from "@tiptap/pm/view";
+import StarterKit from "@tiptap/starter-kit";
 
 import { IMAGE_TYPES, isDocImageSrc } from "../../shared/images.ts";
 
@@ -21,6 +22,27 @@ export const imageAttributes = (src: string, file: File) => ({
 
 const escapeAlt = (alt: string) => alt.replace(/([\\[\]])/g, "\\$1");
 const markdownDestination = (src: string) => (/[\s()<>]/.test(src) ? `<${src}>` : src);
+
+const stockParagraph = flattenExtensions([StarterKit]).find(
+  (extension) => extension.name === "paragraph",
+) as Node;
+
+/**
+ * StarterKit's paragraph, keeping an image alone on its line inside it. The
+ * stock parser unwraps that image, assuming images are blocks, but DocImage is
+ * inline, so the result breaks the schema and the first transaction on it
+ * throws. The paragraph comes from StarterKit because its own package is not a
+ * direct dependency.
+ */
+export const DocParagraph = stockParagraph.extend({
+  parseMarkdown: (token, helpers) => {
+    const tokens = token.tokens ?? [];
+    if (tokens.length === 1 && tokens[0]?.type === "image") {
+      return helpers.createNode("paragraph", undefined, helpers.parseInline(tokens));
+    }
+    return stockParagraph.config.parseMarkdown?.(token, helpers) ?? [];
+  },
+});
 
 /**
  * Markdown images. Only our own `/api/images/...` sources are loaded (the CSP
