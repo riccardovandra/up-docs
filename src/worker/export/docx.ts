@@ -5,6 +5,7 @@
 import { Lexer, type Token, type Tokens } from "marked";
 
 import { isSafeUrl, parseTable, type ChipColor, type RichTable } from "../../shared/table.ts";
+import { parseVideoBlock, VIDEO_LANGUAGE, videoLabel } from "../../shared/video.ts";
 import { slugify } from "../export.ts";
 import { zipStored } from "./zip.ts";
 
@@ -284,6 +285,15 @@ class DocxWriter {
       const parsed = parseTable(code.text);
       if (parsed.ok) {
         this.richTable(parsed.table);
+        return;
+      }
+    }
+    if (language === VIDEO_LANGUAGE) {
+      const video = parseVideoBlock(code.text);
+      if (video) {
+        // An uploaded file's URL is relative; Word needs the whole address.
+        const href = new URL(video.watchUrl, this.docUrl).href;
+        this.body.push(paragraph(this.hyperlink(href, run(videoLabel(video), { link: true }))));
         return;
       }
     }

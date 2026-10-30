@@ -1,14 +1,15 @@
 // The words a reader sees in a tab, for search and card previews: rich tables
-// read as their headers and cells and diagrams as their labels, never as the
-// JSON or code they are stored as. Worker only: diagrams load Babel's parser,
+// read as their headers and cells, diagrams as their labels and videos as
+// their titles, never as the JSON, code or URL they are stored as. Worker only: diagrams load Babel's parser,
 // which the client keeps out of its main bundle.
 
 import { markdownToText } from "./anchors.ts";
 import { cellText, findFences, parseTable, TABLE_LANGUAGE } from "./table.ts";
+import { parseVideoBlock, VIDEO_LANGUAGE } from "./video.ts";
 import { WIDGET_LANGUAGE } from "./widget/fence.ts";
 import { analyzeWidget } from "./widget/validate.ts";
 
-/** A rich table's or diagram's visible lines; null for any other fenced block. */
+/** A rich table's, diagram's or video's visible lines; null for any other fenced block. */
 export function richBlockText(language: string, body: string): ReadonlyArray<string> | null {
   if (language === TABLE_LANGUAGE) {
     const parsed = parseTable(body);
@@ -18,6 +19,10 @@ export function richBlockText(language: string, body: string): ReadonlyArray<str
       ...columns.map((column) => column.name),
       ...rows.flatMap((row) => columns.map((column) => cellText(row.cells[column.id]))),
     ].filter((text) => text.trim() !== "");
+  }
+  if (language === VIDEO_LANGUAGE) {
+    const title = parseVideoBlock(body)?.title;
+    return title ? [title] : [];
   }
   if (language === WIDGET_LANGUAGE) return analyzeWidget(body).labels.map((label) => label.text);
   return null;

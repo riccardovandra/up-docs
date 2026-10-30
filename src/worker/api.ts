@@ -29,6 +29,8 @@ import * as Images from "./images.ts";
 import { IMAGE_TYPES, isImageDocId } from "../shared/images.ts";
 import { widgetProblems } from "./widgets.ts";
 import { checkTablesIn } from "../shared/table.ts";
+import { MAX_VIDEO_PARTS, VIDEO_PART_BYTES, videoFileType } from "../shared/video.ts";
+import * as Videos from "./videos.ts";
 
 /** The ordered write path for a doc; production routes it to the doc's DocRoom. */
 export interface DocRooms {
@@ -102,6 +104,8 @@ export interface ApiDeps {
   readonly owners: ReadonlySet<string>;
   readonly rooms: DocRooms;
   readonly images: Images.ImageStore;
+  /** Null without an R2 bucket: uploads are refused, and video links still work. */
+  readonly videos: Videos.VideoStore | null;
   /** Whether sign-in codes and invites can reach anyone. */
   readonly emailEnabled: boolean;
   readonly adminPassword: string | undefined;
@@ -364,6 +368,7 @@ export async function handleApi(request: Request, deps: ApiDeps): Promise<Respon
       await need(id, "owner");
       await deps.rooms.deleteDoc(id, { origin: url.searchParams.get("clientId") });
       deps.waitUntil(deps.images.deletePrefix(Images.docImagesPrefix(id)));
+      if (deps.videos) deps.waitUntil(deps.videos.deletePrefix(Videos.docVideosPrefix(id)));
       return json({ ok: true });
     }
 
@@ -382,6 +387,25 @@ export async function handleApi(request: Request, deps: ApiDeps): Promise<Respon
       );
     }
 
+    if (resource === "docs" && id && sub === "videos" && segments.length <= 4) {
+      const response = await handleVideoUpload(
+        request,
+        { id, file: subId, method, url },
+        deps,
+        need,
+      );
+      if (response) return response;
+    }
+
+    if (resource === "videos" && id && sub && segments.length === 3 && SAFE_METHODS.has(method)) {
+      if (!isImageDocId(id)) return error(404, "not_found");
+      await need(id, "viewer");
+      const served = deps.videos
+        ? await Videos.videoResponse(deps.videos, { docId: id, file: sub, request })
+        : null;
+      return served ?? error(404, "not_found");
+    }
+
     if (resource === "docs" && id && sub === "threads") {
       const response = await handleDocThreads(request, { id, subId, method, url, principal }, deps);
       if (response) return response;
@@ -390,7 +414,7 @@ export async function handleApi(request: Request, deps: ApiDeps): Promise<Respon
     if (resource === "docs" && id && sub === "export.md" && method === "GET") {
       await need(id, "viewer");
       const doc = await Docs.getDoc(deps.db, id);
-      return Export.markdownResponse(Export.docMarkdown(doc), doc.doc.title);
+      return Export.markdownResponse(Export.docMarkdown(doc, deps.publicOrigin), doc.doc.title);
     }
 
     if (resource === "docs" && id && sub === "export.docx" && method === "GET") {
@@ -435,7 +459,7 @@ export async function handleApi(request: Request, deps: ApiDeps): Promise<Respon
     if (resource === "tabs" && id && sub === "export.md" && method === "GET") {
       const tab = await Docs.getTab(deps.db, id);
       await need(tab.docId, "viewer");
-      return Export.markdownResponse(Export.tabMarkdown(tab), tab.title);
+      return Export.markdownResponse(Export.tabMarkdown(tab, deps.publicOrigin), tab.title);
     }
 
     if (resource === "tabs" && id && sub === "export.docx" && method === "GET") {
@@ -531,6 +555,88 @@ export async function handleApi(request: Request, deps: ApiDeps): Promise<Respon
     if (cause instanceof Docs.LastTabError) return error(409, "last_tab");
     throw cause;
   }
+}
+
+function videoParts(value: unknown): ReadonlyArray<Videos.VideoPart> | null {
+  if (!Array.isArray(value) || value.length === 0 || value.length > MAX_VIDEO_PARTS) return null;
+  const parts: Array<Videos.VideoPart> = [];
+  for (const [index, entry] of (value as Array<unknown>).entries()) {
+    if (!entry || typeof entry !== "object") return null;
+    const { partNumber, etag } = entry as Record<string, unknown>;
+    if (partNumber !== index + 1 || typeof etag !== "string" || etag === "") return null;
+    parts.push({ partNumber, etag });
+  }
+  return parts;
+}
+
+/** Uploading a video in parts; returns null when the method is not one of these routes. */
+async function handleVideoUpload(
+  request: Request,
+  route: {
+    readonly id: string;
+    readonly file: string | undefined;
+    readonly method: string;
+    readonly url: URL;
+  },
+  deps: ApiDeps,
+  need: (docId: string, role: DocRole) => Promise<DocRole>,
+): Promise<Response | null> {
+  const { id, file, method, url } = route;
+  const routed = file ? ["PUT", "POST", "DELETE"].includes(method) : method === "POST";
+  if (!routed) return null;
+  await need(id, "editor");
+  if (!deps.videos) return error(503, "video_storage_unavailable");
+
+  if (!file) {
+    const body = await readJson(request);
+    const started = await Videos.startVideoUpload(deps.videos, {
+      docId: id,
+      type: body.type,
+      size: body.size,
+    });
+    if (!started.ok) return error(started.status, started.error);
+    const { file: name, uploadId, partBytes } = started;
+    return json({ file: name, uploadId, partBytes }, 201);
+  }
+
+  if (!videoFileType(file)) return error(404, "not_found");
+  const key = Videos.videoKey(id, file);
+
+  if (method === "PUT") {
+    const uploadId = url.searchParams.get("uploadId");
+    const partNumber = Number(url.searchParams.get("part"));
+    if (!uploadId) return error(400, "invalid_upload");
+    if (!Number.isInteger(partNumber) || partNumber < 1 || partNumber > MAX_VIDEO_PARTS) {
+      return error(400, "invalid_part");
+    }
+    const length = Number(request.headers.get("Content-Length") ?? "0");
+    if (length > VIDEO_PART_BYTES) return error(413, "too_large");
+    if (!Number.isInteger(length) || length <= 0 || !request.body) {
+      return error(400, "invalid_part");
+    }
+    const etag = await deps.videos.uploadPart(key, uploadId, partNumber, request.body);
+    return etag === null ? error(404, "upload_not_found") : json({ partNumber, etag });
+  }
+
+  if (method === "POST") {
+    const body = await readJson(request);
+    const uploadId = str(body.uploadId, 2048);
+    const parts = videoParts(body.parts);
+    if (!uploadId) return error(400, "invalid_upload");
+    if (!parts) return error(400, "invalid_parts");
+    const result = await Videos.completeVideoUpload(deps.videos, {
+      docId: id,
+      file,
+      uploadId,
+      parts,
+    });
+    return result.ok ? json({ url: result.url }, 201) : error(result.status, result.error);
+  }
+
+  const uploadId = url.searchParams.get("uploadId");
+  if (!uploadId) return error(400, "invalid_upload");
+  await deps.videos.abort(key, uploadId);
+  return json({ ok: true });
 }
 
 /**

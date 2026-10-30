@@ -40,6 +40,7 @@ import { OutlineRail } from "../doc/OutlineRail.tsx";
 import { useColumnWidth } from "../doc/toolbar/columnWidth.ts";
 import { DocToolbar } from "../doc/toolbar/DocToolbar.tsx";
 import { imageAttributes } from "../editor/image.ts";
+import { insertVideoFile } from "../editor/video/insertVideo.ts";
 import { useStableCallback } from "../doc/useStableCallback.ts";
 import { TabSaver } from "../doc/tabSaver.ts";
 import { applyPlacements, orderTabs, removeTabs } from "../doc/tabTree.ts";
@@ -435,7 +436,9 @@ export function DocPage(props: { readonly docId: string; readonly tabId: string 
   const deleteDoc = useStableCallback(() => {
     if (!doc) return;
     if (
-      !window.confirm(`Delete "${doc.title}" for everyone? Its tabs, comments and images go too.`)
+      !window.confirm(
+        `Delete "${doc.title}" for everyone? Its tabs, comments, images and videos go too.`,
+      )
     )
       return;
     void api.deleteDoc(props.docId).then(
@@ -521,6 +524,35 @@ export function DocPage(props: { readonly docId: string; readonly tabId: string 
     }, imageFailed);
   });
 
+  const videoFailed = useStableCallback((cause: unknown) => {
+    const code = cause instanceof ApiError ? cause.body.error : undefined;
+    setNotice(
+      code === "too_large"
+        ? "That video is over 1 GB."
+        : code === "unsupported_type" || code === "invalid_video"
+          ? "Only MP4, WebM and MOV videos can be added."
+          : code === "video_storage_unavailable"
+            ? "This deployment has no R2 bucket, so videos cannot be uploaded. Video links still work."
+            : "Could not upload the video. Try again.",
+    );
+  });
+  const insertVideo = useStableCallback((file: File, at: number | null = null) => {
+    const target = editor;
+    setNotice(`Uploading ${file.name}...`);
+    void api
+      .uploadVideo(props.docId, file, (fraction) =>
+        setNotice(`Uploading ${file.name}: ${Math.round(fraction * 100)}%`),
+      )
+      .then((src) => {
+        if (target && !target.isDestroyed) {
+          setNotice(null);
+          insertVideoFile(target, src, file, at);
+        } else {
+          setNotice(`${file.name} uploaded, but its tab was closed. Upload it again to add it.`);
+        }
+      }, videoFailed);
+  });
+
   const me = useMe();
   const [width, toggleWidth] = useColumnWidth(me?.user.id ?? "");
   const [commentsOpen, setCommentsOpen] = useState(true);
@@ -591,6 +623,7 @@ export function DocPage(props: { readonly docId: string; readonly tabId: string 
             width={width}
             onToggleWidth={toggleWidth}
             onInsertImage={insertImage}
+            onInsertVideo={insertVideo}
             {...tabActions}
           />
           <div className="doc-toolbar-aside">
@@ -671,6 +704,7 @@ export function DocPage(props: { readonly docId: string; readonly tabId: string 
                   editable={abilities.edit}
                   uploadImage={uploadImage}
                   onUploadError={imageFailed}
+                  onVideoFile={insertVideo}
                   onChange={(markdown) => saver.current?.schedule(markdown)}
                   onEditor={setEditor}
                 />

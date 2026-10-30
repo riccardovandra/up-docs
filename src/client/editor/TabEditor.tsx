@@ -16,6 +16,8 @@ interface TabEditorProps {
   /** Uploads a pasted or dropped image; resolves to its URL. */
   readonly uploadImage: (file: File) => Promise<string>;
   readonly onUploadError: (error: unknown) => void;
+  /** Takes a pasted or dropped video; `at` is the drop position. */
+  readonly onVideoFile: (file: File, at: number | null) => void;
 }
 
 /** Shown when a tab's markdown cannot be opened. It never writes, so the stored text stays safe. */
@@ -79,15 +81,20 @@ function MarkdownEditor(props: TabEditorProps) {
   });
   const knownMarkdown = useRef(props.markdown);
   const images = useRef({ upload: props.uploadImage, onUploadError: props.onUploadError });
+  const onVideoFile = useRef(props.onVideoFile);
   useLayoutEffect(() => {
     images.current = { upload: props.uploadImage, onUploadError: props.onUploadError };
+    onVideoFile.current = props.onVideoFile;
   });
 
   const editor = useEditor({
-    extensions: createEditorExtensions({
-      upload: (file) => images.current.upload(file),
-      onUploadError: (error) => images.current.onUploadError(error),
-    }),
+    extensions: createEditorExtensions(
+      {
+        upload: (file) => images.current.upload(file),
+        onUploadError: (error) => images.current.onUploadError(error),
+      },
+      { onFiles: (files, at) => files.forEach((file) => onVideoFile.current(file, at)) },
+    ),
     editable: props.editable,
     content: props.markdown,
     contentType: "markdown",

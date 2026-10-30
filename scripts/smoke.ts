@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
-// End-to-end check of a deployed UP Docs: sign-in, docs, images, tokens, /mcp and
-// sharing. Removes what it creates. Run against a test deployment.
+// End-to-end check of a deployed UP Docs: sign-in, docs, images, videos, tokens,
+// /mcp and sharing. Removes what it creates. Run against a test deployment.
 //   ADMIN_PASSWORD=... bun scripts/smoke.ts https://up-docs.example.workers.dev
 // Prints a line per step and never prints the password, the session or a token.
 
@@ -22,6 +22,8 @@ const PNG = Uint8Array.from(
   ),
   (char) => char.charCodeAt(0),
 );
+// The leading bytes of an MP4, enough to pass the upload check.
+const MP4 = new TextEncoder().encode("\0\0\0\x18ftypisom\0\0\x02\0isomiso2");
 const sha256 = (bytes: Uint8Array) =>
   createHash("sha256").update(bytes).digest("hex");
 
@@ -111,6 +113,7 @@ let docId = "";
 let tabId = "";
 let version = 0;
 let imageUrl = "";
+let videoUrl = "";
 let tokenId = "";
 const original = "# Smoke\n\nmcp-placeholder\n";
 const edited = `${original}\nEdited through the API.\n`;
@@ -191,6 +194,53 @@ async function mainFlow(): Promise<void> {
     });
   }
 
+  const videoUploaded = await step("upload MP4 in parts", async () => {
+    const started = await api("POST", `/api/docs/${docId}/videos`, {
+      type: "video/mp4",
+      size: MP4.length,
+    });
+    const path = `/api/docs/${docId}/videos/${started.file}`;
+    const query = `uploadId=${encodeURIComponent(started.uploadId)}&part=1`;
+    const response = await fetch(`${base}${path}?${query}`, {
+      method: "PUT",
+      headers: { Cookie: session },
+      body: MP4,
+    });
+    const part = (await response.json().catch(() => ({}))) as {
+      etag?: string;
+      error?: string;
+    };
+    check(
+      response.ok && part.etag,
+      `${response.status} ${part.error ?? ""}`.trim(),
+    );
+    const done = await api("POST", path, {
+      uploadId: started.uploadId,
+      parts: [{ partNumber: 1, etag: part.etag }],
+    });
+    videoUrl = done.url;
+    check(videoUrl, "no video URL");
+  });
+
+  if (videoUploaded) {
+    await step("fetch MP4 back, hash matches", async () => {
+      const response = await fetch(`${base}${videoUrl}`, {
+        headers: { Cookie: session },
+      });
+      check(response.ok, `${response.status}`);
+      const bytes = new Uint8Array(await response.arrayBuffer());
+      check(sha256(bytes) === sha256(MP4), "hash differs");
+    });
+    await step("fetch a range of the MP4", async () => {
+      const response = await fetch(`${base}${videoUrl}`, {
+        headers: { Cookie: session, Range: "bytes=4-7" },
+      });
+      check(response.status === 206, `${response.status}`);
+      const text = new TextDecoder().decode(await response.arrayBuffer());
+      check(text === "ftyp", "wrong bytes");
+    });
+  }
+
   const hasToken = await step("create API token", async () => {
     const data = await api("POST", "/api/tokens", { name: "smoke" });
     tokenId = data.id;
@@ -264,6 +314,12 @@ async function cleanUp(): Promise<void> {
           headers: { Cookie: session },
         });
         check(gone.status === 404, `image still answers ${gone.status}`);
+      }
+      if (videoUrl) {
+        const gone = await fetch(`${base}${videoUrl}`, {
+          headers: { Cookie: session },
+        });
+        check(gone.status === 404, `video still answers ${gone.status}`);
       }
     });
   }

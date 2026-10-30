@@ -3,6 +3,7 @@ import { memo, type ReactNode } from "react";
 
 import { IMAGE_TYPES } from "../../../shared/images.ts";
 import type { Tab } from "../../../shared/protocol.ts";
+import { VIDEO_TYPES } from "../../../shared/video.ts";
 import type { ColumnWidth } from "./columnWidth.ts";
 import {
   ChecklistIcon,
@@ -17,10 +18,10 @@ import { getInsertAction, useInsertActions } from "./insertActions.ts";
 import { MenuItem, Popover } from "./Popover.tsx";
 import { TabSwitcher, type TabActions } from "./TabSwitcher.tsx";
 
-function chooseImage(onFile: (file: File) => void): void {
+function chooseFile(accept: ReadonlyArray<string>, onFile: (file: File) => void): void {
   const input = document.createElement("input");
   input.type = "file";
-  input.accept = Object.keys(IMAGE_TYPES).join(",");
+  input.accept = accept.join(",");
   input.addEventListener("change", () => {
     const file = input.files?.[0];
     if (file) onFile(file);
@@ -42,14 +43,23 @@ export const DocToolbar = memo(function DocToolbar(
     readonly width: ColumnWidth;
     readonly onToggleWidth: () => void;
     readonly onInsertImage: (file: File) => void;
+    readonly onInsertVideo: (file: File) => void;
   },
 ) {
   const menu = useInsertActions();
-  const { editor, onInsertImage } = props;
+  const { editor, onInsertImage, onInsertVideo } = props;
   const run = (id: string) => {
     const action = getInsertAction(id);
     if (!action || !editor) return;
-    action.run({ editor, pickImage: () => chooseImage(onInsertImage) });
+    action.run({
+      editor,
+      pickImage: () => chooseFile(Object.keys(IMAGE_TYPES), onInsertImage),
+      pickVideo: () =>
+        chooseFile(
+          [...Object.keys(VIDEO_TYPES), ...Object.values(VIDEO_TYPES).map((ext) => `.${ext}`)],
+          onInsertVideo,
+        ),
+    });
   };
 
   const tool = (id: string, label: string, icon: ReactNode) => (

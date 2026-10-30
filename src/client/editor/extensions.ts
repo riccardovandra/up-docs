@@ -7,6 +7,7 @@ import { DocsCodeBlock } from "./codeBlock.ts";
 import { HeadingFold } from "./headingFold.ts";
 import { DocImage, type DocImageOptions, DocParagraph } from "./image.ts";
 import { LinkClick } from "./linkClick.ts";
+import { VideoDrop, type VideoDropOptions } from "./video/videoDrop.ts";
 
 /**
  * The editor's whole extension list. Every extension must round-trip through
@@ -15,6 +16,7 @@ import { LinkClick } from "./linkClick.ts";
  */
 export const createEditorExtensions = (
   images: DocImageOptions = { upload: null, onUploadError: () => undefined },
+  videos: VideoDropOptions = { onFiles: null },
 ) => [
   StarterKit.configure({ link: { openOnClick: false }, codeBlock: false, paragraph: false }),
   DocParagraph,
@@ -23,6 +25,7 @@ export const createEditorExtensions = (
   TaskItem.configure({ nested: true }),
   TableKit.configure({ table: { resizable: false } }),
   DocImage.configure(images),
+  VideoDrop.configure(videos),
   HeadingFold,
   LinkClick,
   Markdown,

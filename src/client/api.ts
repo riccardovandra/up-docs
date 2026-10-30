@@ -19,6 +19,26 @@ import type {
   Tab,
   TabPlacement,
 } from "../shared/protocol.ts";
+import { MAX_VIDEO_BYTES, videoTypeOf } from "../shared/video.ts";
+
+const PART_ATTEMPTS = 3;
+const PART_RETRY_MS = 1000;
+
+/** Stores one part, retrying network failures and server errors. Returns its etag. */
+async function uploadVideoPart(url: string, part: Blob): Promise<string> {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      const response = await fetch(url, { method: "PUT", credentials: "same-origin", body: part });
+      const data = (await response.json().catch(() => ({}))) as { etag?: string; error?: string };
+      if (response.ok && data.etag) return data.etag;
+      const failure = new ApiError(response.status, data);
+      if (response.status < 500 || attempt === PART_ATTEMPTS) throw failure;
+    } catch (cause) {
+      if (cause instanceof ApiError || attempt === PART_ATTEMPTS) throw cause;
+    }
+    await new Promise((resolve) => setTimeout(resolve, PART_RETRY_MS * attempt));
+  }
+}
 
 export class ApiError extends Error {
   readonly status: number;
@@ -127,7 +147,7 @@ export const api = {
     request<{ doc: DocSummary }>("PATCH", `/api/docs/${docId}`, { projectId, clientId }),
   renameDoc: (docId: string, title: string) =>
     request<{ doc: DocSummary }>("PATCH", `/api/docs/${docId}`, { title, clientId }),
-  /** Owner only; removes the doc, its tabs, comments, people and images. */
+  /** Owner only; removes the doc, its tabs, comments, people, images and videos. */
   deleteDoc: (docId: string) =>
     request<{ ok: true }>("DELETE", `/api/docs/${docId}?clientId=${encodeURIComponent(clientId)}`),
   uploadImage: async (docId: string, file: File): Promise<string> => {
@@ -140,6 +160,43 @@ export const api = {
     const data = (await response.json().catch(() => ({}))) as { url?: string; error?: string };
     if (!response.ok || !data.url) throw new ApiError(response.status, data);
     return data.url;
+  },
+  /** Uploads in parts and returns the video's URL. `onProgress` gets 0 to 1 as parts finish. */
+  uploadVideo: async (
+    docId: string,
+    file: File,
+    onProgress: (fraction: number) => void,
+  ): Promise<string> => {
+    const type = videoTypeOf(file);
+    if (!type) throw new ApiError(415, { error: "unsupported_type" });
+    if (file.size > MAX_VIDEO_BYTES) throw new ApiError(413, { error: "too_large" });
+    const {
+      file: name,
+      uploadId,
+      partBytes,
+    } = await request<{ file: string; uploadId: string; partBytes: number }>(
+      "POST",
+      `/api/docs/${docId}/videos`,
+      { type, size: file.size },
+    );
+    const path = `/api/docs/${docId}/videos/${name}`;
+    const id = encodeURIComponent(uploadId);
+    try {
+      const count = Math.ceil(file.size / partBytes);
+      const parts: Array<{ partNumber: number; etag: string }> = [];
+      for (let index = 0; index < count; index += 1) {
+        const partNumber = index + 1;
+        const blob = file.slice(index * partBytes, partNumber * partBytes);
+        const url = `${path}?uploadId=${id}&part=${partNumber}`;
+        parts.push({ partNumber, etag: await uploadVideoPart(url, blob) });
+        onProgress(partNumber / count);
+      }
+      const { url } = await request<{ url: string }>("POST", path, { uploadId, parts });
+      return url;
+    } catch (cause) {
+      void request("DELETE", `${path}?uploadId=${id}`).catch(() => undefined);
+      throw cause;
+    }
   },
   docThreads: (docId: string) =>
     request<{ threads: Array<DocThreadLink> }>("GET", `/api/docs/${docId}/threads`),

@@ -9,6 +9,7 @@ import { resolvePublicOrigin, type Env } from "./env.ts";
 import { withEmbedPolicy } from "./embed.ts";
 import { d1ImageStore, r2ImageStore } from "./images.ts";
 import { handleMcp } from "./mcp.ts";
+import { r2VideoStore } from "./videos.ts";
 import { emailEnabled, isLocalRequest, sendDocInvite, sendLoginCode } from "./email.ts";
 
 export { DocRoom } from "./docRoom.ts";
@@ -47,6 +48,7 @@ function apiDeps(request: Request, env: Env, ctx: ExecutionContext): ApiDeps {
       closeSockets: (docId, userId) => docRoom(env, docId).closeSockets(userId),
     },
     images: env.IMAGES ? r2ImageStore(env.IMAGES) : d1ImageStore(env.DB),
+    videos: env.IMAGES ? r2VideoStore(env.IMAGES) : null,
     emailEnabled: emailEnabled(env, local),
     adminPassword: env.ADMIN_PASSWORD,
     sendLoginCode: (email, code) => sendLoginCode(env, local, email, code),

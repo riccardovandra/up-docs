@@ -6,10 +6,12 @@ import type { NodeView } from "@tiptap/pm/view";
 
 import type { DiagramCache, DiagramRender } from "./diagramCache.ts";
 import "./diagrams.css";
+import { isVideoLanguage } from "../../shared/video.ts";
 import { widgetInfo } from "../../shared/widget/fence.ts";
 import { WidgetView } from "./widget/WidgetView.ts";
 import { tableSelectionPlugin } from "./table/tableBlock.ts";
 import { isTableNode, TableView } from "./table/TableView.ts";
+import { VideoView } from "./video/VideoView.ts";
 
 let loadedCache: DiagramCache | null = null;
 // Imported on demand so the renderer loads with a tab's first diagram. Once it
@@ -22,6 +24,9 @@ const isMermaid = (node: ProseMirrorNode) => node.attrs.language === "mermaid";
 const isWidget = (node: ProseMirrorNode) =>
   widgetInfo(node.attrs.language as string | null) !== null;
 const isDiagram = (node: ProseMirrorNode) => isMermaid(node) || isWidget(node);
+const isVideo = (node: ProseMirrorNode) => isVideoLanguage(node.attrs.language as string | null);
+/** Blocks shown as something other than their source until the caret enters them. */
+const hidesSource = (node: ProseMirrorNode) => isDiagram(node) || isVideo(node);
 
 /**
  * A fence that opens and closes `text` safely. CommonMark ends a block at the
@@ -70,23 +75,23 @@ export const DocsCodeBlock = CodeBlock.extend({
     const parent = this.parent?.() ?? {};
     return {
       ...parent,
-      // Leave the source and show the diagram, with the block selected.
+      // Leave the source and show the diagram or video, with the block selected.
       Escape: ({ editor }) => {
         const { $from } = editor.state.selection;
-        if ($from.parent.type.name !== this.name || !isDiagram($from.parent)) return false;
+        if ($from.parent.type.name !== this.name || !hidesSource($from.parent)) return false;
         const pos = $from.before();
         editor.view.dispatch(
           editor.state.tr.setSelection(NodeSelection.create(editor.state.doc, pos)),
         );
         return true;
       },
-      // Enter on a selected diagram opens its source.
+      // Enter on a selected diagram or video opens its source.
       Enter: (props) => {
         const { selection } = props.editor.state;
         if (
           selection instanceof NodeSelection &&
           selection.node.type.name === this.name &&
-          isDiagram(selection.node)
+          hidesSource(selection.node)
         ) {
           editSource(props.editor, selection.from, selection.node);
           return true;
@@ -105,6 +110,7 @@ export const DocsCodeBlock = CodeBlock.extend({
       // ```t3-table: a rich table whose JSON is the block's text.
       if (isTableNode(props.node)) return new TableView(props);
       if (isWidget(props.node)) return new WidgetView(props, editSource);
+      if (isVideo(props.node)) return new VideoView(props, editSource);
       return isMermaid(props.node) ? new DiagramView(props) : new PlainCodeView(props);
     };
   },
@@ -128,7 +134,7 @@ class PlainCodeView implements NodeView {
   }
 
   update(node: ProseMirrorNode) {
-    if (node.type.name !== "codeBlock" || isDiagram(node) || isTableNode(node)) return false;
+    if (node.type.name !== "codeBlock" || hidesSource(node) || isTableNode(node)) return false;
     this.setLanguage(node);
     return true;
   }

@@ -233,6 +233,23 @@ describe("markdown to Word", () => {
     expect(document.match(/<w:tc>/g)).toHaveLength(12);
   });
 
+  it("turns a video into a link paragraph, with uploaded files made absolute", () => {
+    const file = "00000000-0000-4000-8000-000000000000.mp4";
+    const { document, rels } = render(
+      `\`\`\`t3-video\nhttps://youtu.be/dQw4w9WgXcQ\nThe walkthrough\n\`\`\`\n\n\`\`\`t3-video\n/api/videos/d/${file}\n\`\`\`\n`,
+    );
+    expect(document).not.toContain("t3-video");
+    expect(document).toContain(">The walkthrough</w:t>");
+    expect(rels).toContain('Target="https://www.youtube.com/watch?v=dQw4w9WgXcQ"');
+    expect(rels).toContain(`Target="${new URL(`/api/videos/d/${file}`, DOC_URL).href}"`);
+  });
+
+  it("keeps an invalid video as a code block", () => {
+    const { document, rels } = render("```t3-video\njavascript:alert(1)\n```");
+    expect(document).toContain("CodeBlock");
+    expect(rels).not.toContain("javascript:");
+  });
+
   it("keeps an invalid rich table as a code block", () => {
     const { document } = render("```t3-table\n{nope\n```");
     expect(document).toContain(

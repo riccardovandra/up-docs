@@ -28,6 +28,11 @@ Rich tables (status chips, links, per-cell comments): a \`\`\`t3-table block who
 {"id":"requests","columns":[{"id":"req","name":"Request","type":"text"},{"id":"status","name":"Status","type":"select","options":[{"value":"Not started","color":"gray"},{"value":"Done","color":"green"}]},{"id":"ticket","name":"Ticket","type":"link"}],"rows":[{"id":"r1","cells":{"req":"Fix Zebra MCP","status":"Not started","ticket":{"text":"TASK-5575","url":"https://example.atlassian.net/browse/TASK-5575"}}}]}
 \`\`\`
 Change one cell with update_table_cell and add rows with add_table_row rather than rewriting the block. Plain markdown tables still work for static data.
+Videos play inside the doc from a \`\`\`t3-video block. Its first line is the source and its optional second line is the title, nothing else. The source is a YouTube link (watch, youtu.be, shorts, embed), a Loom link (share, embed), or a /api/videos/<docId>/<file> URL already uploaded in the editor; agents cannot upload files. Bare links stay plain links. Example:
+\`\`\`t3-video
+https://www.youtube.com/watch?v=dQw4w9WgXcQ
+Release walkthrough
+\`\`\`
 Comments: when asked to review or address comments, list_comments, make the requested edits in the doc, reply_comment in each thread saying what changed (or answering the question), and resolve_comment once a thread is fully handled. To raise a point on a passage, create_comment with a short exact quote from the tab; on a table cell, pass anchor {"kind":"cell","blockId":<table id>,"rowId","colId"} instead, and on a diagram label {"kind":"label","blockId":<diagram id>,"textId"}.
 Sharing: docs are private to the people on them. share_doc gives someone access by email (owner, editor, commenter or viewer); list_members and unshare_doc manage it. You act with the role of the person whose token you use.
 Diagrams use Claude's widget format: a fenced block \`\`\`t3-widget id=<slug>\` whose body is ONE JS/JSX module, \`export default () => <svg viewBox='0 0 760 H' role='img' aria-label='<title words>'>…</svg>;\` (a block body with consts and lowercase helpers is fine). The id names the diagram in its tab and never changes. Writes with an invalid diagram are refused with rule names and line:col.
