@@ -1,6 +1,16 @@
 import { IMAGE_TYPES, imageFileType, imageUrl, MAX_IMAGE_BYTES } from "../shared/images.ts";
 
-/** Where image bytes live; production is the `IMAGES` R2 bucket. */
+declare global {
+  // In workerd, and not yet in the ES2023 lib.
+  interface Uint8Array {
+    toBase64(): string;
+  }
+  interface Uint8ArrayConstructor {
+    fromBase64(text: string): Uint8Array;
+  }
+}
+
+/** Where image bytes live: the `IMAGES` R2 bucket when bound, otherwise D1. */
 export interface ImageStore {
   put(key: string, body: ArrayBuffer, contentType: string): Promise<void>;
   get(key: string): Promise<{ readonly body: ReadableStream | ArrayBuffer } | null>;
@@ -33,7 +43,11 @@ function matchesType(bytes: Uint8Array, type: string): boolean {
 
 export type ImageUploadResult =
   | { readonly ok: true; readonly url: string }
-  | { readonly ok: false; readonly status: 400 | 413 | 415; readonly error: string };
+  | {
+      readonly ok: false;
+      readonly status: 400 | 413 | 415;
+      readonly error: string;
+    };
 
 /** Validates and stores one upload for `docId`. The caller has checked the editor role. */
 export async function uploadImage(
@@ -90,10 +104,80 @@ export function r2ImageStore(bucket: R2Bucket): ImageStore {
     deletePrefix: async (prefix) => {
       let cursor: string | undefined;
       do {
-        const listed = await bucket.list({ prefix, ...(cursor ? { cursor } : {}) });
+        const listed = await bucket.list({
+          prefix,
+          ...(cursor ? { cursor } : {}),
+        });
         if (listed.objects.length > 0) await bucket.delete(listed.objects.map((o) => o.key));
         cursor = listed.truncated ? listed.cursor : undefined;
       } while (cursor);
+    },
+  };
+}
+
+/**
+ * Image bytes in one `image_chunks` row. D1 caps a value or row at 2,000,000
+ * bytes, and this is 1,800,000 in base64, leaving a margin for the other columns.
+ */
+export const D1_CHUNK_BYTES = 1_350_000;
+const D1_CHUNK_CHARS = (D1_CHUNK_BYTES / 3) * 4;
+
+/** Splits `images/<docId>/<file>` or the doc prefix into its parts. */
+const keyParts = (key: string) => key.split("/") as [string, string, string];
+
+/**
+ * Keeps images in `image_chunks`, for a deployment with no R2 bucket. Each row
+ * says how many chunks the image has, so a set with one missing reads as absent.
+ * The stores do not share data: switching stores leaves existing images behind.
+ *
+ * Chunks are base64 text, not BLOBs. D1 sends a bound BLOB as a JSON array of
+ * numbers, so a 10 MB batch exceeds its 32 MiB RPC limit and costs far more CPU
+ * than a Free plan Worker has. Base64 is done natively and fits.
+ */
+export function d1ImageStore(db: D1Database): ImageStore {
+  return {
+    put: async (key, body) => {
+      const [, docId, file] = keyParts(key);
+      const text = new Uint8Array(body).toBase64();
+      const total = Math.ceil(text.length / D1_CHUNK_CHARS);
+      const insert = db.prepare(
+        "INSERT INTO image_chunks (doc_id, file, seq, total, data) VALUES (?1, ?2, ?3, ?4, ?5)",
+      );
+      // One transaction: readers see the whole image or none of it.
+      await db.batch([
+        db.prepare("DELETE FROM image_chunks WHERE doc_id = ?1 AND file = ?2").bind(docId, file),
+        ...Array.from({ length: total }, (_, seq) =>
+          insert.bind(
+            docId,
+            file,
+            seq,
+            total,
+            text.slice(seq * D1_CHUNK_CHARS, (seq + 1) * D1_CHUNK_CHARS),
+          ),
+        ),
+      ]);
+    },
+    get: async (key) => {
+      const [, docId, file] = keyParts(key);
+      const { results } = await db
+        .prepare(
+          "SELECT seq, total, data FROM image_chunks WHERE doc_id = ?1 AND file = ?2 ORDER BY seq",
+        )
+        .bind(docId, file)
+        .all<{ seq: number; total: number; data: string }>();
+      if (
+        results.length === 0 ||
+        results.some((r, i) => r.seq !== i || r.total !== results.length)
+      ) {
+        return null;
+      }
+      // Chunks are a multiple of 3 bytes, so only the last one carries padding.
+      const bytes = Uint8Array.fromBase64(results.map((row) => row.data).join(""));
+      return { body: bytes.buffer as ArrayBuffer };
+    },
+    deletePrefix: async (prefix) => {
+      const [, docId] = keyParts(prefix);
+      await db.prepare("DELETE FROM image_chunks WHERE doc_id = ?1").bind(docId).run();
     },
   };
 }
