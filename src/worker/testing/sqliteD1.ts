@@ -1,6 +1,12 @@
 import * as NodeFS from "node:fs";
 import * as NodeSqlite from "node:sqlite";
 
+// workerd has these natively; Node 24 does not.
+Uint8Array.prototype.toBase64 ??= function (this: Uint8Array) {
+  return Buffer.from(this).toString("base64");
+};
+Uint8Array.fromBase64 ??= (text) => new Uint8Array(Buffer.from(text, "base64"));
+
 const MIGRATIONS = new URL("../../../migrations/", import.meta.url);
 
 const migrationFiles = () =>
@@ -25,7 +31,11 @@ export function makeTestD1(options: { readonly before?: string } = {}): D1Databa
     bind: (...values: Array<unknown>) => statement(sql, values as Array<NodeSqlite.SQLInputValue>),
     first: async () => (sqlite.prepare(sql).get(...params) as unknown) ?? null,
     rows: () => sqlite.prepare(sql).all(...params),
-    all: async () => ({ results: sqlite.prepare(sql).all(...params), success: true, meta: {} }),
+    all: async () => ({
+      results: sqlite.prepare(sql).all(...params),
+      success: true,
+      meta: {},
+    }),
     run: async () => {
       const prepared = sqlite.prepare(sql);
       // RETURNING statements must be stepped with all() to apply.
@@ -34,7 +44,11 @@ export function makeTestD1(options: { readonly before?: string } = {}): D1Databa
         return { results: [], success: true, meta: { changes: rows.length } };
       }
       const result = prepared.run(...params);
-      return { results: [], success: true, meta: { changes: Number(result.changes) } };
+      return {
+        results: [],
+        success: true,
+        meta: { changes: Number(result.changes) },
+      };
     },
   });
 

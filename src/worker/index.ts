@@ -7,7 +7,7 @@ import { docRoom, SOCKET_USER_HEADER } from "./docRoom.ts";
 import { reviveError, type TabWriteResult } from "./docs.ts";
 import { resolvePublicOrigin, type Env } from "./env.ts";
 import { withEmbedPolicy } from "./embed.ts";
-import { r2ImageStore } from "./images.ts";
+import { d1ImageStore, r2ImageStore } from "./images.ts";
 import { handleMcp } from "./mcp.ts";
 import { emailEnabled, isLocalRequest, sendDocInvite, sendLoginCode } from "./email.ts";
 
@@ -46,7 +46,7 @@ function apiDeps(request: Request, env: Env, ctx: ExecutionContext): ApiDeps {
       },
       closeSockets: (docId, userId) => docRoom(env, docId).closeSockets(userId),
     },
-    images: r2ImageStore(env.IMAGES),
+    images: env.IMAGES ? r2ImageStore(env.IMAGES) : d1ImageStore(env.DB),
     emailEnabled: emailEnabled(env, local),
     adminPassword: env.ADMIN_PASSWORD,
     sendLoginCode: (email, code) => sendLoginCode(env, local, email, code),
