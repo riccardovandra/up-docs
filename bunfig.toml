@@ -1,0 +1,3 @@
+[install]
+# Refuse packages younger than 7 days, including transitive ones.
+minimumReleaseAge = 604800

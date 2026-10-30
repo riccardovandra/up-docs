@@ -1,0 +1,456 @@
+/* Share button and its popover panel, after Claude Docs' Share panel. */
+
+.share-wrap {
+  position: relative;
+  font-size: 0.85rem;
+}
+
+.share-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font: inherit;
+  padding: 0.25rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.share-button:hover,
+.share-button[aria-expanded="true"] {
+  background: var(--hover);
+}
+
+.share-panel {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 0.4rem);
+  z-index: 20;
+  width: 26rem;
+  max-width: calc(100vw - 2rem);
+  padding: 1.1rem 1.25rem 0;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--popover);
+  color: var(--text);
+  box-shadow: 0 12px 32px rgb(0 0 0 / 0.18);
+  text-align: left;
+}
+
+.share-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.9rem;
+}
+
+.share-title {
+  flex: 1;
+  margin: 0;
+  font-family: var(--font-sans);
+  font-size: 0.95rem;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.share-icon-button {
+  display: inline-flex;
+  padding: 0.3rem;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.share-icon-button:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+
+.share-segments {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2px;
+  padding: 2px;
+  margin-bottom: 0.9rem;
+  border-radius: 8px;
+  background: var(--code-bg);
+}
+
+.share-segments [role="tab"] {
+  font: inherit;
+  padding: 0.3rem;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.share-segments [role="tab"][aria-selected="true"] {
+  border-color: var(--border);
+  background: var(--surface);
+  color: var(--text);
+}
+
+.share-invite {
+  position: relative;
+  margin-bottom: 1rem;
+}
+
+.share-invite-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.share-input {
+  flex: 1;
+  min-width: 0;
+  padding: 0.4rem 0.65rem;
+  border-color: var(--input);
+}
+
+.share-input[aria-invalid="true"] {
+  border-color: var(--danger);
+}
+
+.share-suggestions {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 2.4rem;
+  z-index: 2;
+  margin: 0;
+  padding: 0.3rem;
+  list-style: none;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--popover);
+  box-shadow: 0 6px 20px rgb(0 0 0 / 0.12);
+}
+
+.share-suggestions [role="option"] {
+  display: flex;
+  flex-direction: column;
+  padding: 0.35rem 0.55rem;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.share-suggestions [role="option"]:hover,
+.share-suggestions [role="option"][aria-selected="true"] {
+  background: var(--hover);
+}
+
+.share-section-label {
+  margin: 0 0 0.4rem;
+  font-family: var(--font-sans);
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: var(--muted);
+}
+
+.share-members {
+  margin: 0 -0.25rem;
+  padding: 0;
+  list-style: none;
+  max-height: 18rem;
+  overflow-y: auto;
+}
+
+.share-member {
+  padding: 0.4rem 0.25rem;
+}
+
+.share-member-main {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+}
+
+.share-avatar {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 999px;
+  background: var(--chip-bg);
+  color: var(--chip-text);
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.share-member-text {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+}
+
+.share-member-name,
+.share-member-email {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.share-member-email {
+  font-size: 0.8rem;
+}
+
+.share-role {
+  position: relative;
+  flex: none;
+}
+
+.share-role-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font: inherit;
+  padding: 0.25rem 0.4rem;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.share-role-button:hover,
+.share-role-button[aria-expanded="true"] {
+  background: var(--hover);
+}
+
+.share-role-button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.share-role-static {
+  flex: none;
+  padding: 0.25rem 0.4rem;
+  color: var(--muted);
+}
+
+.share-menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 0.25rem);
+  z-index: 3;
+  min-width: 9rem;
+  padding: 0.3rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--popover);
+  box-shadow: 0 6px 20px rgb(0 0 0 / 0.12);
+}
+
+.share-menu button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  font: inherit;
+  padding: 0.35rem 0.55rem;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.share-menu button:hover,
+.share-menu button:focus-visible {
+  background: var(--hover);
+  outline: none;
+}
+
+.share-menu button.danger {
+  color: var(--danger);
+}
+
+.share-menu-divider {
+  height: 1px;
+  margin: 0.25rem 0;
+  background: var(--border);
+}
+
+.share-error {
+  margin: 0.35rem 0 0;
+  font-size: 0.8rem;
+  color: var(--danger);
+}
+
+.share-status {
+  margin: 0.4rem 0;
+  font-size: 0.8rem;
+}
+
+.share-export {
+  padding-bottom: 1rem;
+}
+
+.share-export-card {
+  display: flex;
+  gap: 0.75rem;
+  padding: 0.9rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+}
+
+.share-export-card-icon {
+  flex: none;
+  color: var(--muted);
+  padding-top: 0.1rem;
+}
+
+.share-export-card-title {
+  margin: 0;
+  font-family: var(--font-sans);
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.share-export-card-text {
+  margin: 0.3rem 0 0.7rem;
+  font-size: 0.8rem;
+}
+
+.share-export-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.share-export-card-foot {
+  margin: 0.7rem 0 0;
+  font-size: 0.75rem;
+}
+
+.share-export-scope {
+  display: flex;
+  gap: 0.25rem;
+  margin-top: 0.8rem;
+}
+
+.share-export-scope button {
+  font: inherit;
+  font-size: 0.75rem;
+  padding: 0.15rem 0.55rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.share-export-scope button[aria-checked="true"] {
+  background: var(--selected);
+  color: var(--text);
+}
+
+.share-export-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0.6rem -0.4rem 0;
+  padding: 0;
+  list-style: none;
+}
+
+.share-export-row {
+  position: relative;
+}
+
+.share-export-action {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  width: 100%;
+  font: inherit;
+  padding: 0.45rem 0.5rem;
+  border: none;
+  border-radius: 8px;
+  background: none;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.share-export-action:hover:not(:disabled) {
+  background: var(--hover);
+}
+
+.share-export-action:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.share-export-text {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  font-size: 0.78rem;
+}
+
+.share-export-name {
+  font-size: 0.85rem;
+  font-weight: 500;
+}
+
+.share-export-icon {
+  flex: none;
+  display: inline-flex;
+  color: var(--muted);
+}
+
+/* Leaves room for the row's own download icon. */
+.share-export-copy {
+  position: absolute;
+  top: 50%;
+  right: 2.1rem;
+  transform: translateY(-50%);
+  color: var(--muted);
+}
+
+.share-export-badge {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.9rem;
+  height: 1.9rem;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface);
+  font-family: var(--font-sans);
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.share-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin: 1rem -1.25rem 0;
+  padding: 0.8rem 1.25rem;
+  border-top: 1px solid var(--border);
+  font-size: 0.8rem;
+}
+
+.share-foot .button {
+  flex: none;
+}

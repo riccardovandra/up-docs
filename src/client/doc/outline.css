@@ -1,0 +1,163 @@
+/* Live outline (right rail). Animations here run once; nothing loops. */
+
+.outline-rail {
+  position: sticky;
+  top: calc(2.5rem + var(--open-tabs-height));
+  max-height: calc(100vh - 5rem - var(--open-tabs-height));
+  overflow-y: auto;
+}
+
+.outline-toggle {
+  display: none;
+}
+
+.outline-label {
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  margin: 0 0 0.5rem;
+  padding: 0 0.6rem;
+}
+
+.outline-empty {
+  color: var(--muted);
+  font-size: 0.85rem;
+  margin: 0;
+  padding: 0 0.6rem;
+}
+
+.outline-rail ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.outline-item {
+  display: block;
+  width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+  font: inherit;
+  font-size: 0.85rem;
+  line-height: 1.4;
+  background: none;
+  border: none;
+  border-left: 2px solid transparent;
+  padding: 0.3rem 0.6rem;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.outline-item.level-2 {
+  padding-left: 1.35rem;
+}
+
+.outline-item.level-3 {
+  padding-left: 2.1rem;
+  font-size: 0.8rem;
+}
+
+.outline-item:hover {
+  color: var(--text);
+}
+
+.outline-item.active {
+  color: var(--text);
+  border-left-color: var(--accent);
+  font-weight: 500;
+}
+
+.outline-item-new {
+  animation: outline-item-in 240ms ease-out 1;
+}
+
+@keyframes outline-item-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
+.tab-editor .ProseMirror :is(h1, h2, h3) {
+  scroll-margin-top: 1.5rem;
+}
+
+/* Added by a node decoration for about 1.6s when a heading arrives remotely. */
+.tab-editor .ProseMirror .outline-flash {
+  animation: outline-flash 1.6s ease-out 1;
+}
+
+@keyframes outline-flash {
+  from {
+    background: color-mix(in srgb, var(--accent) 22%, transparent);
+  }
+  to {
+    background: transparent;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .outline-item-new {
+    animation: none;
+  }
+  .tab-editor .ProseMirror .outline-flash {
+    animation: none;
+    background: color-mix(in srgb, var(--accent) 14%, transparent);
+  }
+}
+
+/* Narrow: the shared layout hides the right rail; show it as a floating toggle. */
+@media (max-width: 960px) {
+  .doc-layout .doc-rail-right {
+    display: block;
+    padding: 0;
+  }
+  .outline-rail {
+    position: fixed;
+    right: 1rem;
+    bottom: 1rem;
+    top: auto;
+    z-index: 20;
+    max-height: none;
+    overflow: visible;
+    display: flex;
+    flex-direction: column-reverse;
+    align-items: flex-end;
+    gap: 0.5rem;
+  }
+  .outline-toggle {
+    display: block;
+    font: inherit;
+    font-size: 0.85rem;
+    font-weight: 500;
+    background: var(--surface);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 0.4rem 0.9rem;
+    cursor: pointer;
+  }
+  .outline-panel {
+    display: none;
+    width: min(18rem, calc(100vw - 2rem));
+    max-height: 60vh;
+    overflow-y: auto;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 0.75rem 0.25rem;
+  }
+  .outline-rail.open .outline-panel {
+    display: block;
+  }
+}
+
+@media print {
+  .outline-rail {
+    display: none;
+  }
+}

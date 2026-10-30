@@ -1,0 +1,45 @@
+{
+  "name": "up-docs",
+  "main": "src/worker/index.ts",
+  "compatibility_date": "2026-05-15",
+  // This file holds no deployer-specific values and runs `wrangler dev` as is.
+  // `bun run deploy` fills in the custom domain, D1 database_id and the vars
+  // marked below from the gitignored deploy.env (see deploy.env.example).
+
+  // The SPA is served from Vite's build output, and falls back to index.html.
+  // The Worker runs first on every path so each response carries the
+  // FRAME_ANCESTORS policy.
+  "assets": {
+    "directory": "./dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": true,
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "up-docs",
+      "migrations_dir": "migrations",
+    },
+  ],
+  // Images uploaded into docs, served through /api/images with the doc's access check.
+  "r2_buckets": [{ "binding": "IMAGES", "bucket_name": "up-docs-images" }],
+  "durable_objects": {
+    "bindings": [{ "name": "DOC_ROOM", "class_name": "DocRoom" }],
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["DocRoom"] }],
+  "vars": {
+    // Local values; deploy.env replaces OWNER_EMAILS, EMAIL_FROM and
+    // PUBLIC_ORIGIN. PUBLIC_ORIGIN is the base of every URL the app hands
+    // out; `wrangler dev` on another port overrides it in `.dev.vars`.
+    "OWNER_EMAILS": "owner@example.com",
+    "EMAIL_FROM": "UP Docs <docs@example.com>",
+    "PUBLIC_ORIGIN": "http://localhost:8787",
+    // Origins allowed to embed the app (CSP frame-ancestors): app.t3.codes (and preview),
+    // local `npx t3` and Vite dev, tailnet-served T3 Code, and the desktop
+    // renderer (t3code://app, t3code-dev://app in dev builds).
+    "FRAME_ANCESTORS": "https://app.t3.codes https://preview.t3.codes http://localhost:* http://127.0.0.1:* https://*.ts.net t3code://app t3code-dev://app",
+  },
+  // Secret: RESEND_API_KEY (`wrangler secret put RESEND_API_KEY`). Unset locally,
+  // codes are printed to the wrangler dev console.
+}

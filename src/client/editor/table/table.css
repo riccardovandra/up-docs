@@ -1,0 +1,419 @@
+/* Rich tables (```t3-table). Colours come from the theme variables; chip
+   colours mix a fixed status hue into the surface and text colours so they
+   read in light and dark themes alike. */
+
+.t3-table {
+  position: relative;
+  margin: 0.75rem 0;
+  font-size: 0.9rem;
+}
+
+.t3-table.selected .t3-table-scroll {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+.t3-table-scroll {
+  overflow-x: auto;
+  padding-bottom: 0.25rem;
+}
+
+/* A styled scrollbar stays visible where the platform would overlay and
+   hide it, so a table wider than the column reads as scrollable. */
+.t3-table-scroll::-webkit-scrollbar {
+  height: 8px;
+}
+
+.t3-table-scroll::-webkit-scrollbar-thumb {
+  border-radius: 4px;
+  background: var(--border);
+}
+
+.t3-table-scroll::-webkit-scrollbar-thumb:hover {
+  background: var(--muted);
+}
+
+@supports not selector(::-webkit-scrollbar) {
+  .t3-table-scroll {
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+  }
+}
+
+.t3-table.overflow-right::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0.75rem;
+  width: 2.5rem;
+  z-index: 2;
+  pointer-events: none;
+  background: linear-gradient(to right, transparent, var(--bg));
+}
+
+/* The table fills the doc column and wraps cell text as the page narrows;
+   it only scrolls once every column is at its minimum width. Headers wrap
+   so a long name does not widen a column of short values. */
+.t3-table table {
+  border-collapse: separate;
+  border-spacing: 0;
+  width: 100%;
+}
+
+.t3-table th,
+.t3-table td {
+  border-right: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  padding: 0.4rem 0.65rem;
+  text-align: left;
+  vertical-align: top;
+  background: var(--bg);
+  min-width: 4rem;
+  white-space: pre-wrap;
+  /* Not anywhere: that lets a column shrink below its longest word. */
+  overflow-wrap: break-word;
+}
+
+.t3-table td:is([data-type="date"], [data-type="number"], [data-type="select"]) {
+  white-space: nowrap;
+}
+
+.t3-table th.t3-long {
+  min-width: 11rem;
+}
+
+.t3-table tr > :first-child {
+  border-left: 1px solid var(--border);
+}
+
+.t3-table thead th {
+  border-top: 1px solid var(--border);
+  font-weight: 500;
+  color: var(--muted);
+}
+
+.t3-table th.editable {
+  cursor: pointer;
+}
+
+.t3-table th.editable:hover {
+  background: var(--hover);
+}
+
+/* The row handle and the first column stay put while the table scrolls. */
+.t3-table .t3-row-handle {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  min-width: 1.75rem;
+  width: 1.75rem;
+  padding: 0.3rem 0.1rem;
+  text-align: center;
+}
+
+.t3-table tr > :nth-child(2) {
+  position: sticky;
+  left: 1.75rem;
+  z-index: 1;
+}
+
+.t3-table .t3-col-add {
+  min-width: 2.25rem;
+  width: 2.25rem;
+  padding: 0.3rem;
+}
+
+.t3-table td[data-col-id] {
+  cursor: text;
+}
+
+.t3-table td[data-type="number"] {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.t3-table td[data-type="select"] {
+  cursor: pointer;
+}
+
+.t3-table td a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.t3-table td a:hover {
+  text-decoration: underline;
+}
+
+.t3-table td.editing {
+  box-shadow: inset 0 0 0 2px var(--ring);
+}
+
+.t3-table td.has-comment {
+  background: color-mix(in srgb, var(--accent) 14%, var(--bg));
+}
+
+.t3-table td.comment-active {
+  background: color-mix(in srgb, var(--accent) 26%, var(--bg));
+}
+
+.t3-row-handle .t3-icon-button {
+  opacity: 0;
+}
+
+.t3-table tr:hover .t3-row-handle .t3-icon-button,
+.t3-row-handle .t3-icon-button:focus-visible {
+  opacity: 1;
+}
+
+.t3-icon-button {
+  font: inherit;
+  line-height: 1;
+  padding: 0.2rem 0.35rem;
+  border: none;
+  border-radius: 4px;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.t3-icon-button:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+
+.t3-row-add {
+  font: inherit;
+  font-size: 0.85rem;
+  margin-top: 0.35rem;
+  padding: 0.2rem 0.5rem;
+  border: none;
+  border-radius: 4px;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.t3-row-add:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+
+.t3-cell-comment {
+  position: absolute;
+  z-index: 3;
+  transform: translate(-100%, 0);
+  font: inherit;
+  font-size: 0.75rem;
+  padding: 0.05rem 0.4rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--popover);
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.t3-cell-comment:hover {
+  color: var(--text);
+}
+
+/* Cell editors fill their cell. */
+
+.t3-cell-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  margin: -0.2rem -0.35rem;
+}
+
+.t3-cell-input {
+  font: inherit;
+  width: 100%;
+  min-width: 0;
+  padding: 0.2rem 0.35rem;
+  border: 1px solid var(--input);
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--text);
+  resize: none;
+  overflow: hidden;
+}
+
+.t3-cell-input::placeholder {
+  color: var(--text-subtle);
+}
+
+.t3-cell-input:focus {
+  outline: none;
+  border-color: var(--ring);
+}
+
+/* Chips */
+
+.t3-chip {
+  --chip-hue: transparent;
+  display: inline-block;
+  max-width: 100%;
+  padding: 0.05rem 0.5rem;
+  border-radius: 4px;
+  font-size: 0.8rem;
+  line-height: 1.5;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: middle;
+  background: color-mix(in srgb, var(--chip-hue) 20%, var(--surface));
+  color: color-mix(in srgb, var(--chip-hue) 65%, var(--text));
+}
+
+.t3-chip[data-color="gray"] {
+  background: var(--chip-bg);
+  color: var(--chip-text);
+}
+
+[data-color="blue"] {
+  --chip-hue: #3b82f6;
+}
+[data-color="green"] {
+  --chip-hue: #22a35a;
+}
+[data-color="yellow"] {
+  --chip-hue: #d4a20b;
+}
+[data-color="orange"] {
+  --chip-hue: #ea7a1a;
+}
+[data-color="red"] {
+  --chip-hue: #e04646;
+}
+[data-color="purple"] {
+  --chip-hue: #8b5cf6;
+}
+[data-color="pink"] {
+  --chip-hue: #e0569b;
+}
+
+.t3-table td[data-type="select"] .t3-chip::after {
+  content: " \25BE";
+  opacity: 0.6;
+}
+
+/* Popovers: the chip dropdown, row menu and column menu. */
+
+.t3-table-popover {
+  position: absolute;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  min-width: 12rem;
+  max-width: 20rem;
+  max-height: 22rem;
+  overflow-y: auto;
+  padding: 0.4rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--popover);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.14);
+}
+
+.t3-select-options {
+  display: flex;
+  flex-direction: column;
+}
+
+.t3-select-option {
+  font: inherit;
+  text-align: left;
+  padding: 0.25rem 0.4rem;
+  border: none;
+  border-radius: 4px;
+  background: none;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.t3-select-option.muted {
+  color: var(--muted);
+}
+
+.t3-select-option:hover,
+.t3-select-option.active {
+  background: var(--hover);
+}
+
+.t3-select-option[aria-current="true"] {
+  background: var(--selected);
+}
+
+.t3-option-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.25rem 0;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+
+.t3-option-row {
+  display: flex;
+  gap: 0.25rem;
+  align-items: center;
+}
+
+.t3-option-color {
+  width: 6rem;
+  flex: none;
+}
+
+/* Empty or invalid blocks. */
+
+.t3-table-message {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.5rem;
+  padding: 0.75rem;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  color: var(--muted);
+}
+
+.t3-table-message.error {
+  background: var(--danger-surface);
+  color: var(--danger);
+}
+
+.t3-table-message p {
+  margin: 0;
+}
+
+.t3-table-source {
+  width: 100%;
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  padding: 0.5rem;
+  border: 1px solid var(--input);
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--text);
+}
+
+@media print {
+  .t3-table-scroll {
+    overflow: visible;
+  }
+
+  .t3-table .t3-row-handle,
+  .t3-table .t3-col-add,
+  .t3-row-add,
+  .t3-cell-comment,
+  .t3-table.overflow-right::after {
+    display: none;
+  }
+
+  .t3-table tr > :nth-child(2) {
+    border-left: 1px solid var(--border);
+  }
+}
