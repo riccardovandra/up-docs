@@ -6,6 +6,7 @@ import StarterKit from "@tiptap/starter-kit";
 import { DocsCodeBlock } from "./codeBlock.ts";
 import { HeadingFold } from "./headingFold.ts";
 import { DocImage, type DocImageOptions, DocParagraph } from "./image.ts";
+import { LinkClick } from "./linkClick.ts";
 
 /**
  * The editor's whole extension list. Every extension must round-trip through
@@ -23,5 +24,6 @@ export const createEditorExtensions = (
   TableKit.configure({ table: { resizable: false } }),
   DocImage.configure(images),
   HeadingFold,
+  LinkClick,
   Markdown,
 ];
