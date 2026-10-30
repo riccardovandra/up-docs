@@ -34,9 +34,10 @@
   },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["DocRoom"] }],
   "vars": {
-    // OWNER_EMAILS signs in as the admin user. EMAIL_FROM is the sender of
-    // sign-in codes and invites; its domain must be verified in Resend.
-    "OWNER_EMAILS": "owner@example.com",
+    // OWNER_EMAILS: comma-separated addresses that sign in as the admin user by
+    // email code. EMAIL_FROM is the sender of sign-in codes and invites; its
+    // domain must be verified in Resend.
+    "OWNER_EMAILS": "",
     "EMAIL_FROM": "UP Docs <docs@example.com>",
     // Origins allowed to embed the app (CSP frame-ancestors): app.t3.codes (and preview),
     // local `npx t3` and Vite dev, tailnet-served T3 Code, and the desktop

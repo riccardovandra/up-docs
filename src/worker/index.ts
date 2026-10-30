@@ -9,7 +9,7 @@ import { resolvePublicOrigin, type Env } from "./env.ts";
 import { withEmbedPolicy } from "./embed.ts";
 import { r2ImageStore } from "./images.ts";
 import { handleMcp } from "./mcp.ts";
-import { sendDocInvite, sendLoginCode } from "./email.ts";
+import { emailEnabled, isLocalRequest, sendDocInvite, sendLoginCode } from "./email.ts";
 
 export { DocRoom } from "./docRoom.ts";
 
@@ -21,10 +21,11 @@ async function revive<A>(call: PromiseLike<A>): Promise<A> {
   }
 }
 
-function apiDeps(env: Env, ctx: ExecutionContext, publicOrigin: string): ApiDeps {
+function apiDeps(request: Request, env: Env, ctx: ExecutionContext): ApiDeps {
+  const local = isLocalRequest(request);
   return {
     db: env.DB,
-    publicOrigin,
+    publicOrigin: resolvePublicOrigin(env.PUBLIC_ORIGIN, request.url),
     owners: parseOwnerEmails(env.OWNER_EMAILS),
     rooms: {
       createTab: (docId, input) => revive(docRoom(env, docId).createTab({ docId, ...input })),
@@ -46,8 +47,10 @@ function apiDeps(env: Env, ctx: ExecutionContext, publicOrigin: string): ApiDeps
       closeSockets: (docId, userId) => docRoom(env, docId).closeSockets(userId),
     },
     images: r2ImageStore(env.IMAGES),
-    sendLoginCode: (email, code) => sendLoginCode(env, email, code),
-    sendDocInvite: (invite) => sendDocInvite(env, invite),
+    emailEnabled: emailEnabled(env, local),
+    adminPassword: env.ADMIN_PASSWORD,
+    sendLoginCode: (email, code) => sendLoginCode(env, local, email, code),
+    sendDocInvite: (invite) => sendDocInvite(env, local, invite),
     waitUntil: (promise) => ctx.waitUntil(promise),
     now: () => Date.now(),
   };
@@ -56,18 +59,17 @@ function apiDeps(env: Env, ctx: ExecutionContext, publicOrigin: string): ApiDeps
 export default {
   async fetch(request, env, ctx): Promise<Response> {
     const { pathname } = new URL(request.url);
-    const publicOrigin = resolvePublicOrigin(env.PUBLIC_ORIGIN, request.url);
     if (pathname === "/api" || pathname.startsWith("/api/")) {
-      return handleApi(request, apiDeps(env, ctx, publicOrigin));
+      return handleApi(request, apiDeps(request, env, ctx));
     }
     if (pathname === "/mcp" || pathname.startsWith("/mcp/")) {
-      return handleMcp(request, apiDeps(env, ctx, publicOrigin));
+      return handleMcp(request, apiDeps(request, env, ctx));
     }
     return withAssetCaching(
       await withEmbedPolicy(
         await env.ASSETS.fetch(request),
         parseEmbedOrigins(env.FRAME_ANCESTORS),
-        publicOrigin,
+        resolvePublicOrigin(env.PUBLIC_ORIGIN, request.url),
       ),
       pathname,
     );

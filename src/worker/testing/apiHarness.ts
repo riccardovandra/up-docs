@@ -1,3 +1,4 @@
+import type { EmailDelivery } from "../../shared/access.ts";
 import type { RoomMessage } from "../../shared/protocol.ts";
 import { handleApi, type ApiDeps } from "../api.ts";
 import { parseOwnerEmails } from "../auth.ts";
@@ -11,7 +12,7 @@ export const ORIGIN = "https://docs.test";
 export const OWNER = "owner@example.com";
 
 /** Runs the real API against an in-memory D1, with DocRooms that apply writes inline and record broadcasts. */
-export function makeApiHarness() {
+export function makeApiHarness(overrides: Partial<ApiDeps> = {}) {
   const db = makeTestD1();
   const clock = { now: 1_000_000 };
   const sentCodes: Array<{ email: string; code: string }> = [];
@@ -19,6 +20,7 @@ export function makeApiHarness() {
   const invites: Array<DocInvite> = [];
   const sockets: Array<{ docId: string; userId: string; open: boolean }> = [];
   const images = new Map<string, { body: ArrayBuffer; contentType: string }>();
+  const mail: { delivery: EmailDelivery } = { delivery: "sent" };
   const deps: ApiDeps = {
     db,
     publicOrigin: ORIGIN,
@@ -93,15 +95,19 @@ export function makeApiHarness() {
         for (const key of [...images.keys()]) if (key.startsWith(prefix)) images.delete(key);
       },
     },
+    emailEnabled: true,
+    adminPassword: undefined,
     sendLoginCode: async (email, code) => {
       sentCodes.push({ email, code });
     },
     sendDocInvite: async (invite) => {
       invites.push(invite);
+      return mail.delivery;
     },
     // Run inline so tests see the invite once the request returns.
     waitUntil: (promise) => void promise,
     now: () => clock.now,
+    ...overrides,
   };
 
   const call = (
@@ -132,5 +138,5 @@ export function makeApiHarness() {
     return cookie.split(";")[0]!;
   };
 
-  return { db, clock, deps, sentCodes, broadcasts, invites, sockets, images, call, signIn };
+  return { db, clock, deps, mail, sentCodes, broadcasts, invites, sockets, images, call, signIn };
 }
