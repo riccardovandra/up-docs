@@ -1,18 +1,12 @@
 import type { Editor } from "@tiptap/core";
 import { EditorContent, useEditor } from "@tiptap/react";
-import { useEffect, useLayoutEffect, useRef } from "react";
+import { Component, type ReactNode, useEffect, useLayoutEffect, useRef } from "react";
 
 import { createEditorExtensions } from "./extensions.ts";
 
 export const EXTERNAL_CONTENT_META = "docsCloudExternalContent";
 
-/**
- * A TipTap editor over one tab's markdown. Mount it keyed by tab id. The
- * editor owns its content while the user types; a new `revision` means the
- * tab changed elsewhere and `markdown` replaces the content. Echoes of our own
- * saves do not bump the revision, so they never reset the caret.
- */
-export function TabEditor(props: {
+interface TabEditorProps {
   readonly markdown: string;
   readonly revision: number;
   readonly onChange: (markdown: string) => void;
@@ -22,7 +16,63 @@ export function TabEditor(props: {
   /** Uploads a pasted or dropped image; resolves to its URL. */
   readonly uploadImage: (file: File) => Promise<string>;
   readonly onUploadError: (error: unknown) => void;
-}) {
+}
+
+/** Shown when a tab's markdown cannot be opened. It never writes, so the stored text stays safe. */
+export function TabEditorFallback(props: { readonly markdown: string }) {
+  return (
+    <div className="tab-editor-fallback" role="alert">
+      <p>This tab could not be opened in the editor. Its text is unchanged and shown below.</p>
+      <pre>{props.markdown}</pre>
+    </div>
+  );
+}
+
+/**
+ * Contains an editor crash to its tab, so bad content cannot blank the page.
+ * New markdown gets a fresh attempt.
+ */
+export class TabEditorBoundary extends Component<
+  { readonly markdown: string; readonly children: ReactNode },
+  { readonly failed: boolean }
+> {
+  override state = { failed: false };
+
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+
+  override componentDidCatch(error: unknown) {
+    console.error("Tab editor crashed", error);
+  }
+
+  override componentDidUpdate(previous: { readonly markdown: string }) {
+    if (this.state.failed && previous.markdown !== this.props.markdown) {
+      this.setState({ failed: false });
+    }
+  }
+
+  override render() {
+    if (this.state.failed) return <TabEditorFallback markdown={this.props.markdown} />;
+    return this.props.children;
+  }
+}
+
+export function TabEditor(props: TabEditorProps) {
+  return (
+    <TabEditorBoundary markdown={props.markdown}>
+      <MarkdownEditor {...props} />
+    </TabEditorBoundary>
+  );
+}
+
+/**
+ * A TipTap editor over one tab's markdown. Mount it keyed by tab id. The
+ * editor owns its content while the user types; a new `revision` means the
+ * tab changed elsewhere and `markdown` replaces the content. Echoes of our own
+ * saves do not bump the revision, so they never reset the caret.
+ */
+function MarkdownEditor(props: TabEditorProps) {
   const onChange = useRef(props.onChange);
   useLayoutEffect(() => {
     onChange.current = props.onChange;
