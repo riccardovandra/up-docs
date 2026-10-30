@@ -22,8 +22,11 @@
       "migrations_dir": "migrations",
     },
   ],
-  // Images uploaded into docs, served through /api/images with the doc's access check.
-  "r2_buckets": [{ "binding": "IMAGES", "bucket_name": "up-docs-images" }],
+  // Images uploaded into docs are stored in D1, and served through /api/images
+  // with the doc's access check. To store them in R2 instead, create the bucket
+  // and add the line below. Images already stored are not migrated: after a
+  // switch in either direction, images uploaded before it stop loading.
+  // "r2_buckets": [{ "binding": "IMAGES", "bucket_name": "up-docs-images" }],
   "durable_objects": {
     "bindings": [{ "name": "DOC_ROOM", "class_name": "DocRoom" }],
   },

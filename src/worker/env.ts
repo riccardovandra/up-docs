@@ -4,8 +4,8 @@ export interface Env {
   readonly DB: D1Database;
   readonly DOC_ROOM: DurableObjectNamespace<DocRoom>;
   readonly ASSETS: Fetcher;
-  /** Doc images, keyed `images/<docId>/<uuid>.<ext>`. */
-  readonly IMAGES: R2Bucket;
+  /** Doc images, keyed `images/<docId>/<uuid>.<ext>`. Unset: they are stored in D1. */
+  readonly IMAGES?: R2Bucket;
   /** Comma-separated; every address signs in as the one admin user, who owns all pre-sharing data. */
   readonly OWNER_EMAILS: string;
   readonly EMAIL_FROM: string;

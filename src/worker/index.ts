@@ -7,7 +7,7 @@ import { docRoom, SOCKET_USER_HEADER } from "./docRoom.ts";
 import { reviveError, type TabWriteResult } from "./docs.ts";
 import type { Env } from "./env.ts";
 import { withEmbedPolicy } from "./embed.ts";
-import { r2ImageStore } from "./images.ts";
+import { d1ImageStore, r2ImageStore } from "./images.ts";
 import { handleMcp } from "./mcp.ts";
 import { sendDocInvite, sendLoginCode } from "./email.ts";
 
@@ -45,7 +45,7 @@ function apiDeps(env: Env, ctx: ExecutionContext): ApiDeps {
       },
       closeSockets: (docId, userId) => docRoom(env, docId).closeSockets(userId),
     },
-    images: r2ImageStore(env.IMAGES),
+    images: env.IMAGES ? r2ImageStore(env.IMAGES) : d1ImageStore(env.DB),
     sendLoginCode: (email, code) => sendLoginCode(env, email, code),
     sendDocInvite: (invite) => sendDocInvite(env, invite),
     waitUntil: (promise) => ctx.waitUntil(promise),
