@@ -6,6 +6,7 @@ import StarterKit from "@tiptap/starter-kit";
 import { DocsCodeBlock } from "./codeBlock.ts";
 import { HeadingFold } from "./headingFold.ts";
 import { DocImage, type DocImageOptions } from "./image.ts";
+import { LinkClick } from "./linkClick.ts";
 import { VideoDrop, type VideoDropOptions } from "./video/videoDrop.ts";
 
 /**
@@ -25,5 +26,6 @@ export const createEditorExtensions = (
   DocImage.configure(images),
   VideoDrop.configure(videos),
   HeadingFold,
+  LinkClick,
   Markdown,
 ];
