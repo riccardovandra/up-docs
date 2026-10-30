@@ -895,6 +895,11 @@ span.tab-row-toggle {
   outline-offset: 2px;
 }
 
+.tab-editor-fallback pre {
+  overflow-x: auto;
+  white-space: pre-wrap;
+}
+
 .tab-editor .ProseMirror .doc-image-blocked {
   color: var(--muted);
   font-size: 0.9em;
