@@ -2,9 +2,11 @@
   "name": "up-docs",
   "main": "src/worker/index.ts",
   "compatibility_date": "2026-05-15",
-  // This file holds no deployer-specific values and runs `wrangler dev` as is.
-  // `bun run deploy` fills in the custom domain, D1 database_id and the vars
-  // marked below from the gitignored deploy.env (see deploy.env.example).
+  // Deploys leave vars set in the dashboard, such as PUBLIC_ORIGIN, in place.
+  "keep_vars": true,
+  // Works as is on any account: `wrangler dev` locally, `bun run deploy` or the
+  // Deploy to Cloudflare button on workers.dev. A deployment needs no custom
+  // domain. To use one, add it to the Worker and set PUBLIC_ORIGIN.
 
   // The SPA is served from Vite's build output, and falls back to index.html.
   // The Worker runs first on every path so each response carries the
@@ -15,6 +17,9 @@
     "not_found_handling": "single-page-application",
     "run_worker_first": true,
   },
+  // No database_id: `wrangler deploy` creates or finds the database by name, and
+  // the Deploy to Cloudflare button writes the id of the one it creates here.
+  // Refer to it by the binding name, DB, since the button lets the name change.
   "d1_databases": [
     {
       "binding": "DB",
@@ -32,17 +37,18 @@
   },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["DocRoom"] }],
   "vars": {
-    // Local values; deploy.env replaces OWNER_EMAILS, EMAIL_FROM and
-    // PUBLIC_ORIGIN. PUBLIC_ORIGIN is the base of every URL the app hands
-    // out; `wrangler dev` on another port overrides it in `.dev.vars`.
+    // OWNER_EMAILS: comma-separated addresses that sign in as the admin user by
+    // email code. EMAIL_FROM is the sender of sign-in codes and invites; its
+    // domain must be verified in Resend.
     "OWNER_EMAILS": "",
     "EMAIL_FROM": "UP Docs <docs@example.com>",
-    "PUBLIC_ORIGIN": "http://localhost:8787",
     // Origins allowed to embed the app (CSP frame-ancestors): app.t3.codes (and preview),
     // local `npx t3` and Vite dev, tailnet-served T3 Code, and the desktop
     // renderer (t3code://app, t3code-dev://app in dev builds).
     "FRAME_ANCESTORS": "https://app.t3.codes https://preview.t3.codes http://localhost:* http://127.0.0.1:* https://*.ts.net t3code://app t3code-dev://app",
   },
-  // Secret: RESEND_API_KEY (`wrangler secret put RESEND_API_KEY`). Unset locally,
-  // codes are printed to the wrangler dev console.
+  // Optional var PUBLIC_ORIGIN, the base of every URL the app hands out. Unset,
+  // the app uses the origin of each request.
+  // Secrets: ADMIN_PASSWORD, RESEND_API_KEY (`wrangler secret put <NAME>`). Without
+  // RESEND_API_KEY, sign-in codes are printed to the wrangler dev console.
 }

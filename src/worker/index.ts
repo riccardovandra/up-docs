@@ -5,7 +5,7 @@ import { parseEmbedOrigins } from "../shared/embed.ts";
 import type { CommentOpResult } from "./comments.ts";
 import { docRoom, SOCKET_USER_HEADER } from "./docRoom.ts";
 import { reviveError, type TabWriteResult } from "./docs.ts";
-import type { Env } from "./env.ts";
+import { resolvePublicOrigin, type Env } from "./env.ts";
 import { withEmbedPolicy } from "./embed.ts";
 import { d1ImageStore, r2ImageStore } from "./images.ts";
 import { handleMcp } from "./mcp.ts";
@@ -25,7 +25,7 @@ function apiDeps(request: Request, env: Env, ctx: ExecutionContext): ApiDeps {
   const local = isLocalRequest(request);
   return {
     db: env.DB,
-    publicOrigin: env.PUBLIC_ORIGIN,
+    publicOrigin: resolvePublicOrigin(env.PUBLIC_ORIGIN, request.url),
     owners: parseOwnerEmails(env.OWNER_EMAILS),
     rooms: {
       createTab: (docId, input) => revive(docRoom(env, docId).createTab({ docId, ...input })),
@@ -69,7 +69,7 @@ export default {
       await withEmbedPolicy(
         await env.ASSETS.fetch(request),
         parseEmbedOrigins(env.FRAME_ANCESTORS),
-        env.PUBLIC_ORIGIN,
+        resolvePublicOrigin(env.PUBLIC_ORIGIN, request.url),
       ),
       pathname,
     );

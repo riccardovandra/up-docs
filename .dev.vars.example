@@ -1,0 +1,2 @@
+# Password for signing in as the admin user, 12 or more characters. Empty or shorter turns password sign-in off.
+ADMIN_PASSWORD=

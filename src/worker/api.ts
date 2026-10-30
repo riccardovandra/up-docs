@@ -95,9 +95,8 @@ export interface DocRooms {
 export interface ApiDeps {
   readonly db: D1Database;
   /**
-   * The app's public origin, for URLs handed out and the same-origin check.
-   * `wrangler dev` rewrites request.url to the custom domain, so the request
-   * cannot tell us where the app is really served from.
+   * The app's public origin, for URLs handed out and the same-origin check:
+   * PUBLIC_ORIGIN when set, else the request's own origin.
    */
   readonly publicOrigin: string;
   readonly owners: ReadonlySet<string>;
