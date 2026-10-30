@@ -32,7 +32,7 @@
     // Local values; deploy.env replaces OWNER_EMAILS, EMAIL_FROM and
     // PUBLIC_ORIGIN. PUBLIC_ORIGIN is the base of every URL the app hands
     // out; `wrangler dev` on another port overrides it in `.dev.vars`.
-    "OWNER_EMAILS": "owner@example.com",
+    "OWNER_EMAILS": "",
     "EMAIL_FROM": "UP Docs <docs@example.com>",
     "PUBLIC_ORIGIN": "http://localhost:8787",
     // Origins allowed to embed the app (CSP frame-ancestors): app.t3.codes (and preview),

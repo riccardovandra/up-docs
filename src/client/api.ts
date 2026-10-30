@@ -1,4 +1,11 @@
-import type { DocMember, DocRole, DocView, Me, UserSummary } from "../shared/access.ts";
+import type {
+  DocMember,
+  DocRole,
+  DocView,
+  EmailDelivery,
+  Me,
+  UserSummary,
+} from "../shared/access.ts";
 import type { DocAnchor, StructuredAnchor } from "../shared/anchors.ts";
 import type { HomeLibrary, SearchHit } from "../shared/home.ts";
 import type {
@@ -53,6 +60,10 @@ export const api = {
   /** People on any doc the caller is on, for the share picker. */
   people: () =>
     request<{ people: Array<Pick<UserSummary, "name" | "email">> }>("GET", "/api/people"),
+  authConfig: () =>
+    request<{ emailEnabled: boolean; passwordEnabled: boolean }>("GET", "/api/auth/config"),
+  signInWithPassword: (password: string) =>
+    request<{ email: string }>("POST", "/api/auth/password", { password }),
   requestCode: (email: string) =>
     request<{ ok: true }>("POST", "/api/auth/request-code", { email }),
   verifyCode: (email: string, code: string) =>
@@ -91,7 +102,12 @@ export const api = {
     request<{ members: Array<DocMember> }>("GET", `/api/docs/${docId}/members`),
   /** Adds the person, or changes their role if they already have access. */
   shareDoc: (docId: string, input: { email: string; role: DocRole }) =>
-    request<{ member: DocMember; members: Array<DocMember> }>(
+    request<{
+      member: DocMember;
+      members: Array<DocMember>;
+      /** Null when nobody new was added, so no email was due. */
+      emailDelivery: EmailDelivery | null;
+    }>(
       "POST",
       `/api/docs/${docId}/members`,
       input,

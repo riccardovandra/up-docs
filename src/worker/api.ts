@@ -6,7 +6,7 @@ import {
   type Tab,
   type TabPlacement,
 } from "../shared/protocol.ts";
-import { isDocRole, type DocRole } from "../shared/access.ts";
+import { isDocRole, type DocRole, type EmailDelivery } from "../shared/access.ts";
 import {
   locateAnchor,
   markdownToText,
@@ -103,8 +103,11 @@ export interface ApiDeps {
   readonly owners: ReadonlySet<string>;
   readonly rooms: DocRooms;
   readonly images: Images.ImageStore;
-  readonly sendLoginCode: (email: string, code: string) => Promise<void>;
-  readonly sendDocInvite: (invite: DocInvite) => Promise<void>;
+  /** Whether sign-in codes and invites can reach anyone. */
+  readonly emailEnabled: boolean;
+  readonly adminPassword: string | undefined;
+  readonly sendLoginCode: (email: string, code: string) => Promise<unknown>;
+  readonly sendDocInvite: (invite: DocInvite) => Promise<EmailDelivery>;
   readonly waitUntil: (promise: Promise<unknown>) => void;
   readonly now: () => number;
 }
@@ -524,6 +527,7 @@ export async function handleApi(request: Request, deps: ApiDeps): Promise<Respon
     }
     if (cause instanceof Access.LastOwnerError) return error(409, "last_owner");
     if (cause instanceof Access.SelfShareError) return error(409, "self");
+    if (cause instanceof Access.ReservedEmailError) return error(400, "invalid_email");
     if (cause instanceof Docs.InvalidMoveError) return error(400, "invalid_move");
     if (cause instanceof Docs.LastTabError) return error(409, "last_tab");
     throw cause;
@@ -590,7 +594,11 @@ async function commentActor(
     ? {
         kind: "person",
         email: principal.email,
-        emails: await Access.userEmails(deps.db, principal.userId, deps.owners),
+        // A password session writes as ADMIN_SESSION_EMAIL, whatever OWNER_EMAILS says.
+        emails: [
+          ...(await Access.userEmails(deps.db, principal.userId, deps.owners)),
+          ...(Access.isAdmin(principal.userId) ? [Access.ADMIN_SESSION_EMAIL] : []),
+        ],
         docRole,
       }
     : { kind: "agent", name: principal.tokenName, docRole };
@@ -747,8 +755,11 @@ async function handleMembers(
       owners: deps.owners,
       now: deps.now(),
     });
-    if (created) deps.waitUntil(inviteByEmail(deps, { docId: id, to: member.email, principal }));
-    return json({ member, members: await members() }, created ? 201 : 200);
+    // Awaited so the response can say whether the email went out.
+    const emailDelivery = created
+      ? await inviteByEmail(deps, { docId: id, to: member.email, principal })
+      : null;
+    return json({ member, members: await members(), emailDelivery }, created ? 201 : 200);
   }
 
   if (subId && method === "PATCH") {
@@ -776,17 +787,17 @@ async function handleMembers(
   return null;
 }
 
-/** Tells a newly added person the doc is theirs to open. Failures only log: the share stands. */
+/** Tells a newly added person the doc is theirs to open. The share stands whatever this returns. */
 export async function inviteByEmail(
   deps: ApiDeps,
   input: { readonly docId: string; readonly to: string; readonly principal: Auth.Principal },
-): Promise<void> {
+): Promise<EmailDelivery> {
   const [inviter, { doc, tabs }] = await Promise.all([
     Access.getUser(deps.db, input.principal.userId, deps.owners),
     Docs.getDoc(deps.db, input.docId),
   ]);
   const firstTab = tabs.find((tab) => tab.parentTabId === null);
-  await deps.sendDocInvite({
+  return deps.sendDocInvite({
     to: input.to,
     inviterName: inviter.name.trim() || inviter.email,
     docTitle: doc.title,
@@ -795,6 +806,12 @@ export async function inviteByEmail(
 }
 
 async function handleAuth(request: Request, path: string, deps: ApiDeps): Promise<Response> {
+  if (path === "/api/auth/config" && request.method === "GET") {
+    return json({
+      emailEnabled: deps.emailEnabled,
+      passwordEnabled: Auth.isUsableAdminPassword(deps.adminPassword),
+    });
+  }
   if (request.method !== "POST") return error(405, "method_not_allowed");
   if (!isSameOriginWrite(request, deps)) return error(403, "forbidden_origin");
   const body = await readJson(request);
@@ -803,6 +820,8 @@ async function handleAuth(request: Request, path: string, deps: ApiDeps): Promis
   if (path === "/api/auth/request-code") {
     const email = str(body.email, 320);
     if (!email) return error(400, "invalid_email");
+    // Answers the same for every address, so it reveals nothing about who has access.
+    if (!deps.emailEnabled) return error(503, "email_not_configured");
     const code = await Auth.issueLoginCode(deps.db, { email, owners: deps.owners, now });
     // Delivery happens after the response so owners and strangers answer alike.
     if (code) deps.waitUntil(deps.sendLoginCode(Auth.normalizeEmail(email), code));
@@ -817,6 +836,26 @@ async function handleAuth(request: Request, path: string, deps: ApiDeps): Promis
     if (!token) return error(401, "invalid_code");
     return json({ email: Auth.normalizeEmail(email) }, 200, {
       "Set-Cookie": Auth.sessionCookie(token, Auth.SESSION_TTL_MS),
+    });
+  }
+
+  if (path === "/api/auth/password") {
+    if (!Auth.isUsableAdminPassword(deps.adminPassword)) {
+      return error(503, "password_not_configured");
+    }
+    // Not `str`: a password is compared exactly, spaces included.
+    const candidate = typeof body.password === "string" ? body.password : "";
+    if (!candidate) return error(401, "invalid_password");
+    const result = await Auth.verifyAdminPassword(deps.db, {
+      password: deps.adminPassword,
+      candidate,
+      now,
+    });
+    if (!result.ok) {
+      return result.locked ? error(429, "too_many_attempts") : error(401, "invalid_password");
+    }
+    return json({ email: Access.ADMIN_SESSION_EMAIL }, 200, {
+      "Set-Cookie": Auth.sessionCookie(result.token, Auth.SESSION_TTL_MS),
     });
   }
 

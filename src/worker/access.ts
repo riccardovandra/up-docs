@@ -1,6 +1,7 @@
 // People, doc membership and permission checks, shared by the REST API, the
 // MCP tools and sign-in. Every address in OWNER_EMAILS is the admin user
-// OWNER_USER_ID; everyone else is a `users` row reached through `user_emails`.
+// OWNER_USER_ID, and so is ADMIN_SESSION_EMAIL; everyone else is a `users` row
+// reached through `user_emails`.
 
 import {
   hasRole,
@@ -18,6 +19,20 @@ import { randomId } from "./crypto.ts";
 import { NotFoundError } from "./docs.ts";
 
 export { isAdmin, OWNER_USER_ID } from "../shared/access.ts";
+
+/**
+ * The identity of a password session, which needs no OWNER_EMAILS. `.invalid`
+ * can never receive mail, and only `verifyAdminPassword` creates a session for
+ * it: `canSignIn` and `shareDoc` refuse it everywhere else.
+ */
+export const ADMIN_SESSION_EMAIL = "admin@up-docs.invalid";
+
+/** The address is ADMIN_SESSION_EMAIL, which nobody can be invited as. */
+export class ReservedEmailError extends Error {
+  constructor() {
+    super("reserved_email");
+  }
+}
 
 /** A member asked for more than their role allows. Non-members get NotFoundError instead. */
 export class ForbiddenError extends Error {
@@ -49,7 +64,8 @@ interface UserRow {
   name: string;
 }
 
-const firstOwnerEmail = (owners: ReadonlySet<string>) => owners.values().next().value ?? "";
+const firstOwnerEmail = (owners: ReadonlySet<string>) =>
+  owners.values().next().value ?? ADMIN_SESSION_EMAIL;
 
 const toUser = (row: UserRow, owners: ReadonlySet<string>): UserSummary => ({
   id: row.id,
@@ -63,7 +79,7 @@ export async function userIdForEmail(
   owners: ReadonlySet<string>,
 ): Promise<string | null> {
   const address = normalizeEmail(email);
-  if (owners.has(address)) return OWNER_USER_ID;
+  if (address === ADMIN_SESSION_EMAIL || owners.has(address)) return OWNER_USER_ID;
   const row = await db
     .prepare("SELECT user_id FROM user_emails WHERE email = ?")
     .bind(address)
@@ -78,6 +94,7 @@ export async function canSignIn(
   owners: ReadonlySet<string>,
 ): Promise<boolean> {
   const address = normalizeEmail(email);
+  if (address === ADMIN_SESSION_EMAIL) return false;
   if (owners.has(address)) return true;
   const row = await db
     .prepare(
@@ -145,7 +162,7 @@ export async function userEmails(
   userId: string,
   owners: ReadonlySet<string>,
 ): Promise<ReadonlyArray<string>> {
-  if (isAdmin(userId)) return [...owners];
+  if (isAdmin(userId)) return owners.size > 0 ? [...owners] : [ADMIN_SESSION_EMAIL];
   const { results } = await db
     .prepare("SELECT email FROM user_emails WHERE user_id = ? ORDER BY created_at, email")
     .bind(userId)
@@ -314,6 +331,7 @@ export async function shareDoc(
   },
 ): Promise<{ readonly member: DocMember; readonly created: boolean }> {
   const address = normalizeEmail(input.email);
+  if (address === ADMIN_SESSION_EMAIL) throw new ReservedEmailError();
   // Without this, sharing to your own other address edits your own role.
   if ((await userIdForEmail(db, address, input.owners)) === input.addedBy) {
     throw new SelfShareError();
@@ -462,7 +480,7 @@ export async function listPeople(
         ? { name: "", email: row.pending_email ?? "" }
         : toUser({ id: row.user_id, email: row.user_email, name: row.name ?? "" }, owners);
     // A signed-in person outranks a pending invite to the same address.
-    if (person.email && !people.get(person.email)?.name) {
+    if (person.email && person.email !== ADMIN_SESSION_EMAIL && !people.get(person.email)?.name) {
       people.set(person.email, { name: person.name, email: person.email });
     }
   }
