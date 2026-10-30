@@ -36,7 +36,10 @@
     "vitest": "5.0.5",
     "wrangler": "4.152.0"
   },
-  "trustedDependencies": ["esbuild", "workerd"],
+  "trustedDependencies": [
+    "esbuild",
+    "workerd"
+  ],
   "cloudflare": {
     "bindings": {
       "ADMIN_PASSWORD": {

@@ -7,6 +7,8 @@ Collaborative markdown docs on Cloudflare Workers, D1 and Durable Objects. Tooli
 - `bun install --frozen-lockfile`: install. New dependencies need the owner's approval; `bunfig.toml` refuses packages younger than 7 days.
 - `bun run dev`: build, apply local D1 migrations, start `wrangler dev` on :8787.
 - `bun run test`, `bun run typecheck`, `bun run build`.
+- `bun run deploy`: build, apply remote D1 migrations, deploy. Needs a POSIX shell.
+- `ADMIN_PASSWORD=... bun scripts/smoke.ts <url>`: end-to-end check of a deployed app. Only against a test deployment; it removes what it creates.
 - `scripts/scan-public.sh`: secret and identity scan of the working tree. Add `--all-refs` to cover all history. Run it before any push.
 
 ## Rules
