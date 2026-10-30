@@ -393,6 +393,30 @@ describe("email delivery", () => {
     log.mockRestore();
   });
 
+  it("counts a missing or blank EMAIL_FROM as not configured, and calls nothing", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const send = vi.fn(async () => new Response("{}"));
+    vi.stubGlobal("fetch", send);
+    for (const from of [undefined, "", "  "]) {
+      const noSender = { RESEND_API_KEY: "key", EMAIL_FROM: from } as unknown as Env;
+      expect(emailEnabled(noSender, false)).toBe(false);
+      expect(await sendLoginCode(noSender, false, "a@example.com", "123456")).toBe(
+        "not_configured",
+      );
+      expect(await sendDocInvite(noSender, false, invite)).toBe("not_configured");
+    }
+    expect(send).not.toHaveBeenCalled();
+    expect(error.mock.calls.join()).toContain("EMAIL_FROM");
+    expect(error.mock.calls.join()).not.toContain("123456");
+    error.mockRestore();
+  });
+
+  it("works with neither EMAIL_FROM nor RESEND_API_KEY defined", async () => {
+    const unset = {} as unknown as Env;
+    expect(emailEnabled(unset, false)).toBe(false);
+    expect(await sendDocInvite(unset, false, invite)).toBe("not_configured");
+  });
+
   it("reports a Resend rejection without logging the code", async () => {
     const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
     vi.stubGlobal("fetch", async () => new Response("{}", { status: 422 }));

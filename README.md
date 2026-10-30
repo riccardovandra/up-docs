@@ -1,10 +1,70 @@
 # UP Docs
 
-Collaborative markdown docs for people and agents, on your own Cloudflare account. One Cloudflare Worker serves the web app, a JSON API under `/api`, and an MCP endpoint under `/mcp` for agents. Each doc has a Durable Object that applies every write in order and pushes it to open editors over WebSocket. Data lives in D1, doc images in R2.
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/riccardovandra/up-docs)
+
+Collaborative markdown docs for people and agents, on your own Cloudflare account. One Cloudflare Worker serves the web app, a JSON API under `/api`, and an MCP endpoint under `/mcp` for agents. Each doc has a Durable Object that applies every write in order and pushes it to open editors over WebSocket. Data lives in D1, doc images in R2, or in D1 if you remove the R2 binding.
 
 UP Docs can run inside [T3 Code](https://github.com/pingdotgg/t3code)'s Docs panel. `FRAME_ANCESTORS` in `wrangler.jsonc` lists the origins allowed to frame the app. `src/shared/embed.ts` holds the postMessage protocol.
 
-The admin signs in with the `ADMIN_PASSWORD` secret (at least 12 characters; unset turns it off), no email needed. Everyone else signs in with a 6-digit code by email through Resend, which needs `RESEND_API_KEY`. Without it, sharing still records the person, tells you no email was sent, and they cannot sign in until email is configured. Every address in `OWNER_EMAILS` (optional) also signs in as the admin user. Anyone else can sign in once a doc has been shared with their address. Agents use bearer tokens created under Settings, and act as the person who created the token.
+## Deploy
+
+### Before you click
+
+- **R2 may need a payment method.** Images go to an R2 bucket by default, and Cloudflare may require a payment method on the account before it creates one. We have not confirmed this on an account with no card. If the deploy fails on the R2 bucket, either add a payment method, or remove the `r2_buckets` line from `wrangler.jsonc` and deploy again. Images are then stored in D1.
+- **Choose an admin password** of 12 or more characters. Shorter or empty turns password sign-in off, and with no email set up you then cannot sign in at all.
+
+### What the button does
+
+The button itself has not been pressed in testing. These steps were run through the same Workers Builds service with the same commands, and the setup page is described from Cloudflare's documentation.
+
+1. Cloudflare copies this repo to your GitHub or GitLab account, and asks for the project and Worker names, the resource names, and `ADMIN_PASSWORD`.
+2. It prefills the build command and deploy command from `package.json`. Keep them, for example `bun run build` and `bun run deploy`. The deploy command needs a POSIX shell, which the Workers Builds image has.
+3. Workers Builds installs with `bun install --frozen-lockfile`, builds, creates the D1 database and R2 bucket, applies the migrations, and deploys.
+4. On the first deploy the log shows `Couldn't find a D1 DB`, marked as an error. This is expected: the database does not exist until the deploy creates it. The build continues and ends with `Success! Build completed`.
+
+Your app is live at `https://<worker>.<your-subdomain>.workers.dev`. Sign in there with the password.
+
+### After deploying
+
+- **Add agents.** In the app, open Settings and create an API token. In T3 Code, open Settings -> MCP servers and add `https://<your-worker-url>/mcp` with that token. Agents act as the person who created the token.
+- **Add email, for invites and other people's sign-in.** Without it, sharing still records the person and tells you no email was sent, and they cannot sign in until email works. To add it, verify a domain in [Resend](https://resend.com/domains), then in the Worker's settings add the secret `RESEND_API_KEY` and the variable `EMAIL_FROM`, such as `UP Docs <docs@example.com>`. Both are needed: with only the key, the app reports email as not configured and sends nothing. Deploys keep values set in the dashboard.
+- **Sign in as admin by email (optional).** Set the variable `OWNER_EMAILS` to a comma-separated list of addresses. Anyone else can sign in once a doc has been shared with their address.
+- **Use a custom domain (optional).** Add it to the Worker, then set the variable `PUBLIC_ORIGIN` to its origin, such as `https://docs.example.com`. Unset, the app uses the origin of each request.
+- **Embedding.** `FRAME_ANCESTORS` in `wrangler.jsonc` controls who may frame the app. The default allows T3 Code and its local origins.
+
+### Deploy with Wrangler
+
+Requires [Bun](https://bun.sh) and a POSIX shell, so on Windows use WSL.
+
+```sh
+git clone https://github.com/riccardovandra/up-docs
+cd up-docs
+bun install --frozen-lockfile
+bunx wrangler login
+bun run deploy
+bunx wrangler secret put ADMIN_PASSWORD
+```
+
+`bun run deploy` builds, applies migrations and deploys, creating the D1 database and R2 bucket when they are missing. The same `Couldn't find a D1 DB` message appears on the first run.
+
+### Check a deployment
+
+```sh
+ADMIN_PASSWORD=<password> bun scripts/smoke.ts https://<your-worker-url>
+```
+
+It signs in, creates and edits a doc, uploads an image, uses `/mcp` with a new API token, checks sharing, then removes what it created. The sharing step fails when email is configured, because it expects no email to be sent.
+
+### Cloudflare plan limits
+
+UP Docs has not been tested on the Workers Free plan, so we do not claim it works there. Free allows 10 ms of CPU per request, and we measured, on a single account whose plan limits we did not verify, with a 10 MiB image:
+
+| Image store | Upload CPU   | Fetch CPU         |
+| ----------- | ------------ | ----------------- |
+| R2          | 7 to 16 ms   | 1 to 2 ms         |
+| D1          | 49 to 133 ms | not measured here |
+
+Both uploads can exceed the 10 ms limit, the D1 path by far, so expect large image uploads to be at risk on Free. Smaller images use less. R2 and D1 have their own usage limits; check Cloudflare's current pricing.
 
 ## Local development
 

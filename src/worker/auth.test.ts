@@ -13,6 +13,14 @@ import { makeTestD1 } from "./testing/sqliteD1.ts";
 
 const owners = parseOwnerEmails(`${OWNER},Second@Example.com`);
 
+describe("parseOwnerEmails", () => {
+  it("is empty when OWNER_EMAILS is undefined or blank", () => {
+    expect(parseOwnerEmails(undefined).size).toBe(0);
+    expect(parseOwnerEmails("").size).toBe(0);
+    expect(parseOwnerEmails(" , ").size).toBe(0);
+  });
+});
+
 describe("login codes", () => {
   it("signs in any allowlisted email, ignoring case and whitespace", async () => {
     const db = makeTestD1();

@@ -1,4 +1,4 @@
-// Doc images: uploaded to R2 and referenced from markdown by a relative URL
+// Doc images: uploaded to R2, or D1 without a bucket, and referenced from markdown by a relative URL
 // that the API serves to anyone who can read the doc.
 
 export const MAX_IMAGE_BYTES = 10 * 1024 * 1024;

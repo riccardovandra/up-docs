@@ -27,28 +27,30 @@
       "migrations_dir": "migrations",
     },
   ],
-  // Images uploaded into docs are stored in D1, and served through /api/images
-  // with the doc's access check. To store them in R2 instead, create the bucket
-  // and add the line below. Images already stored are not migrated: after a
-  // switch in either direction, images uploaded before it stop loading.
-  // "r2_buckets": [{ "binding": "IMAGES", "bucket_name": "up-docs-images" }],
+  // Images uploaded into docs are stored in this R2 bucket, and served through
+  // /api/images with the doc's access check. `wrangler deploy` creates the bucket
+  // if it is missing. Without this binding, images fall back to D1. Images already
+  // stored are not migrated: after a switch in either direction, images uploaded
+  // before it stop loading.
+  "r2_buckets": [{ "binding": "IMAGES", "bucket_name": "up-docs-images" }],
   "durable_objects": {
     "bindings": [{ "name": "DOC_ROOM", "class_name": "DocRoom" }],
   },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["DocRoom"] }],
   "vars": {
-    // OWNER_EMAILS: comma-separated addresses that sign in as the admin user by
-    // email code. EMAIL_FROM is the sender of sign-in codes and invites; its
-    // domain must be verified in Resend.
-    "OWNER_EMAILS": "",
-    "EMAIL_FROM": "UP Docs <docs@example.com>",
     // Origins allowed to embed the app (CSP frame-ancestors): app.t3.codes (and preview),
     // local `npx t3` and Vite dev, tailnet-served T3 Code, and the desktop
     // renderer (t3code://app, t3code-dev://app in dev builds).
     "FRAME_ANCESTORS": "https://app.t3.codes https://preview.t3.codes http://localhost:* http://127.0.0.1:* https://*.ts.net t3code://app t3code-dev://app",
   },
-  // Optional var PUBLIC_ORIGIN, the base of every URL the app hands out. Unset,
-  // the app uses the origin of each request.
+  // Optional vars, set in the dashboard or `.dev.vars` and left out of this file so
+  // a deploy keeps them:
+  // - PUBLIC_ORIGIN: the base of every URL the app hands out. Unset, the app uses
+  //   the origin of each request.
+  // - OWNER_EMAILS: comma-separated addresses that sign in as the admin user by
+  //   email code.
+  // - EMAIL_FROM: the sender of sign-in codes and invites, its domain verified in
+  //   Resend. Without it, email counts as not configured.
   // Secrets: ADMIN_PASSWORD, RESEND_API_KEY (`wrangler secret put <NAME>`). Without
   // RESEND_API_KEY, sign-in codes are printed to the wrangler dev console.
 }

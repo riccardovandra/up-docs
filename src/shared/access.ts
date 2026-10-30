@@ -44,7 +44,7 @@ export function emailDeliveryNotice(delivery: EmailDelivery, to: string): string
   if (delivery === "sent") return null;
   const reason =
     delivery === "not_configured"
-      ? "email is not set up on this server (RESEND_API_KEY)"
+      ? "email is not set up on this server (RESEND_API_KEY and EMAIL_FROM)"
       : "the email provider did not accept it";
   return `No email was sent to ${to}: ${reason}. They are on the doc, but cannot sign in until email is configured and working. Send them the doc link yourself.`;
 }
