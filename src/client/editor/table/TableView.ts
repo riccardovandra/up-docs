@@ -3,6 +3,7 @@ import type { Node as ProseMirrorNode } from "@tiptap/pm/model";
 import type { Decoration, NodeView } from "@tiptap/pm/view";
 
 import type { StructuredAnchor } from "../../../shared/anchors.ts";
+import { followClickedLink } from "../../docLinks.ts";
 import {
   CHIP_COLORS,
   changeColumnType,
@@ -371,6 +372,7 @@ export class TableView implements NodeView {
         link.href = value.url;
         link.target = "_blank";
         link.rel = "noopener noreferrer";
+        if (this.editable) link.title = "Alt+click to edit";
         td.append(link);
       } else {
         td.textContent = value.text;
@@ -451,9 +453,9 @@ export class TableView implements NodeView {
     }
     const td = target.closest("td[data-col-id]");
     if (!(td instanceof HTMLTableCellElement)) return;
-    // Cmd/Ctrl+click follows a link; a plain click edits the cell.
+    // A click follows a link; Alt+click, or a click beside it, edits the cell.
     const link = target.closest("a");
-    if (link && (event.metaKey || event.ctrlKey || !this.editable)) return;
+    if (link && followClickedLink(event)) return;
     if (link) event.preventDefault();
     if (td.querySelector(".t3-cell-editor")) return;
     const threads = this.commentsOn(td);
