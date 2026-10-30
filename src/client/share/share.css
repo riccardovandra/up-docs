@@ -290,6 +290,19 @@
   color: var(--danger);
 }
 
+.share-email-notice {
+  margin: 0.5rem 0 0;
+  font-size: 0.8rem;
+}
+
+.share-email-notice p {
+  margin: 0 0 0.4rem;
+}
+
+.share-email-link {
+  overflow-wrap: anywhere;
+}
+
 .share-status {
   margin: 0.4rem 0;
   font-size: 0.8rem;

@@ -1,11 +1,14 @@
 import type { ApiTokenSummary } from "../shared/protocol.ts";
-import { canSignIn, claimInvites, userIdForEmail } from "./access.ts";
+import { ADMIN_SESSION_EMAIL, canSignIn, claimInvites, userIdForEmail } from "./access.ts";
 import { randomId, randomSixDigitCode, randomToken, sha256Hex, timingSafeEqual } from "./crypto.ts";
 
 export const LOGIN_CODE_TTL_MS = 10 * 60 * 1000;
 export const LOGIN_CODE_MAX_ATTEMPTS = 5;
 /** A repeat request inside this window keeps the code already sent. */
 export const LOGIN_CODE_RESEND_INTERVAL_MS = 30 * 1000;
+export const ADMIN_PASSWORD_MIN_LENGTH = 12;
+export const ADMIN_LOGIN_MAX_ATTEMPTS = 10;
+export const ADMIN_LOGIN_WINDOW_MS = 15 * 60 * 1000;
 export const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 export const SESSION_COOKIE = "docs_session";
 const API_TOKEN_PREFIX = "dct_";
@@ -24,7 +27,7 @@ export function normalizeEmail(email: string): string {
   return email.trim().toLowerCase();
 }
 
-export function parseOwnerEmails(value: string): ReadonlySet<string> {
+export function parseOwnerEmails(value = ""): ReadonlySet<string> {
   return new Set(value.split(",").map(normalizeEmail).filter(Boolean));
 }
 
@@ -92,6 +95,48 @@ export async function verifyLoginCode(
   if (consumed.meta.changes !== 1) return null;
   await claimInvites(db, email, input.owners, input.now);
   return createSession(db, email, input.now);
+}
+
+/** Too short counts as not configured, so a weak value can never sign anyone in. */
+export const isUsableAdminPassword = (password: string | undefined): password is string =>
+  password !== undefined && password.trim().length >= ADMIN_PASSWORD_MIN_LENGTH;
+
+/**
+ * Spends one guess from the global budget. Returns false when it is used up.
+ * The window restarts once it has passed, which is how a lockout recovers.
+ */
+async function spendAdminLoginAttempt(db: D1Database, now: number): Promise<boolean> {
+  const windowExpired = now - ADMIN_LOGIN_WINDOW_MS;
+  const row = await db
+    .prepare(
+      `INSERT INTO admin_login_attempts (id, attempts, window_started_at) VALUES (1, 1, ?)
+       ON CONFLICT(id) DO UPDATE SET
+         attempts = CASE WHEN window_started_at <= ? THEN 1 ELSE attempts + 1 END,
+         window_started_at = CASE WHEN window_started_at <= ? THEN ? ELSE window_started_at END
+       WHERE window_started_at <= ? OR attempts < ?
+       RETURNING attempts`,
+    )
+    .bind(now, windowExpired, windowExpired, now, windowExpired, ADMIN_LOGIN_MAX_ATTEMPTS)
+    .first<{ attempts: number }>();
+  return row !== null;
+}
+
+/** Signs in as the admin. `password` must already have passed `isUsableAdminPassword`. */
+export async function verifyAdminPassword(
+  db: D1Database,
+  input: { readonly password: string; readonly candidate: string; readonly now: number },
+): Promise<
+  { readonly ok: true; readonly token: string } | { readonly ok: false; readonly locked: boolean }
+> {
+  // Spend before comparing, as verifyLoginCode does, so parallel guesses all count.
+  if (!(await spendAdminLoginAttempt(db, input.now))) return { ok: false, locked: true };
+  const [candidate, expected] = await Promise.all([
+    sha256Hex(input.candidate),
+    sha256Hex(input.password),
+  ]);
+  if (!timingSafeEqual(candidate, expected)) return { ok: false, locked: false };
+  await db.prepare("DELETE FROM admin_login_attempts").run();
+  return { ok: true, token: await createSession(db, ADMIN_SESSION_EMAIL, input.now) };
 }
 
 export async function createSession(db: D1Database, email: string, now: number): Promise<string> {

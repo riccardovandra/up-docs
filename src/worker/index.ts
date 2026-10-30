@@ -9,7 +9,7 @@ import type { Env } from "./env.ts";
 import { withEmbedPolicy } from "./embed.ts";
 import { d1ImageStore, r2ImageStore } from "./images.ts";
 import { handleMcp } from "./mcp.ts";
-import { sendDocInvite, sendLoginCode } from "./email.ts";
+import { emailEnabled, isLocalRequest, sendDocInvite, sendLoginCode } from "./email.ts";
 
 export { DocRoom } from "./docRoom.ts";
 
@@ -21,7 +21,8 @@ async function revive<A>(call: PromiseLike<A>): Promise<A> {
   }
 }
 
-function apiDeps(env: Env, ctx: ExecutionContext): ApiDeps {
+function apiDeps(request: Request, env: Env, ctx: ExecutionContext): ApiDeps {
+  const local = isLocalRequest(request);
   return {
     db: env.DB,
     publicOrigin: env.PUBLIC_ORIGIN,
@@ -46,8 +47,10 @@ function apiDeps(env: Env, ctx: ExecutionContext): ApiDeps {
       closeSockets: (docId, userId) => docRoom(env, docId).closeSockets(userId),
     },
     images: env.IMAGES ? r2ImageStore(env.IMAGES) : d1ImageStore(env.DB),
-    sendLoginCode: (email, code) => sendLoginCode(env, email, code),
-    sendDocInvite: (invite) => sendDocInvite(env, invite),
+    emailEnabled: emailEnabled(env, local),
+    adminPassword: env.ADMIN_PASSWORD,
+    sendLoginCode: (email, code) => sendLoginCode(env, local, email, code),
+    sendDocInvite: (invite) => sendDocInvite(env, local, invite),
     waitUntil: (promise) => ctx.waitUntil(promise),
     now: () => Date.now(),
   };
@@ -57,10 +60,10 @@ export default {
   async fetch(request, env, ctx): Promise<Response> {
     const { pathname } = new URL(request.url);
     if (pathname === "/api" || pathname.startsWith("/api/")) {
-      return handleApi(request, apiDeps(env, ctx));
+      return handleApi(request, apiDeps(request, env, ctx));
     }
     if (pathname === "/mcp" || pathname.startsWith("/mcp/")) {
-      return handleMcp(request, apiDeps(env, ctx));
+      return handleMcp(request, apiDeps(request, env, ctx));
     }
     return withAssetCaching(
       await withEmbedPolicy(
