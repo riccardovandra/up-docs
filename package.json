@@ -43,10 +43,10 @@
         "description": "Password for signing in as the admin user. Use 12 or more characters. Leave it empty to turn password sign-in off."
       },
       "OWNER_EMAILS": {
-        "description": "Comma-separated email addresses that sign in as the admin user by email code. Optional."
+        "description": "Optional, not needed to deploy. Comma-separated email addresses that sign in as the admin user by email code. Set it later in the Worker's settings."
       },
       "EMAIL_FROM": {
-        "description": "Sender of sign-in codes and invites, such as `UP Docs <docs@example.com>`. Its domain must be verified in [Resend](https://resend.com/domains)."
+        "description": "Optional, not needed to deploy. Sender of sign-in codes and invites, such as `UP Docs <docs@example.com>`, with its domain verified in [Resend](https://resend.com/domains). Set it later in the Worker's settings, with the `RESEND_API_KEY` secret."
       }
     }
   }

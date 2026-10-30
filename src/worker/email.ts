@@ -9,11 +9,14 @@ export function isLocalRequest(request: Request): boolean {
   return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "[::1]";
 }
 
-export const emailEnabled = (env: Env, local: boolean) => Boolean(env.RESEND_API_KEY) || local;
+const emailSender = (env: Env) => env.EMAIL_FROM?.trim() || undefined;
+
+export const emailEnabled = (env: Env, local: boolean) =>
+  Boolean(env.RESEND_API_KEY && emailSender(env)) || local;
 
 /**
- * Sends through Resend. With no key, local dev logs the message and anywhere
- * else nothing is sent or logged, because the message can hold a sign-in code.
+ * Sends through Resend. With no key or no sender, local dev logs the message and
+ * anywhere else nothing is sent or logged, because the message can hold a sign-in code.
  * Failures log no part of the message, for the same reason.
  */
 async function sendEmail(
@@ -21,8 +24,12 @@ async function sendEmail(
   local: boolean,
   message: { readonly to: string; readonly subject: string; readonly text: string },
 ): Promise<EmailDelivery> {
-  if (!env.RESEND_API_KEY) {
-    if (!local) return "not_configured";
+  const from = emailSender(env);
+  if (!env.RESEND_API_KEY || !from) {
+    if (!local) {
+      if (env.RESEND_API_KEY) console.error("[up-docs] RESEND_API_KEY is set but EMAIL_FROM is not");
+      return "not_configured";
+    }
     console.log(`[up-docs] email to ${message.to}: ${message.subject}\n${message.text}`);
     return "sent";
   }
@@ -34,7 +41,7 @@ async function sendEmail(
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        from: env.EMAIL_FROM,
+        from,
         to: [message.to],
         subject: message.subject,
         text: message.text,
