@@ -174,8 +174,7 @@
   overflow-wrap: break-word;
 }
 
-.t3-table
-  td:is([data-type="date"], [data-type="number"], [data-type="select"]) {
+.t3-table td:is([data-type="date"], [data-type="number"], [data-type="select"]) {
   white-space: nowrap;
 }
 

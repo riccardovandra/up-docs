@@ -14,8 +14,7 @@ export interface Breakout {
   readonly width: number;
 }
 
-export const overlaps = (a: Band, b: Band) =>
-  a.top < b.bottom && b.top < a.bottom;
+export const overlaps = (a: Band, b: Band) => a.top < b.bottom && b.top < a.bottom;
 
 /**
  * How far a table leaves the text column. A table that fits stays in the
@@ -31,9 +30,7 @@ export function breakoutFor(input: {
   const { required, column, page, commentBeside } = input;
   if (required <= column.right - column.left) return null;
   const left = Math.min(page.left, column.left);
-  const right = commentBeside
-    ? column.right
-    : Math.max(page.right, column.right);
+  const right = commentBeside ? column.right : Math.max(page.right, column.right);
   if (left === column.left && right === column.right) return null;
   return { offset: left - column.left, width: right - left };
 }

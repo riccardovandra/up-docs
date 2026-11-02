@@ -61,8 +61,7 @@ const COLUMN_TYPE_LABEL: Record<ColumnType, string> = {
   date: "Date",
 };
 
-const cellKey = (rowId: string, columnId: string) =>
-  `${rowId}\u0000${columnId}`;
+const cellKey = (rowId: string, columnId: string) => `${rowId}\u0000${columnId}`;
 
 function element<K extends keyof HTMLElementTagNameMap>(
   tag: K,
@@ -75,12 +74,7 @@ function element<K extends keyof HTMLElementTagNameMap>(
   return node;
 }
 
-function button(
-  className: string,
-  text: string,
-  onClick: () => void,
-  label?: string,
-) {
+function button(className: string, text: string, onClick: () => void, label?: string) {
   const node = element("button", className, text);
   node.type = "button";
   if (label) node.setAttribute("aria-label", label);
@@ -160,8 +154,7 @@ export class TableView implements NodeView {
     const relevant = mutations.some(
       (mutation) =>
         mutation.target === this.docBody ||
-        (mutation.target instanceof Element &&
-          mutation.target.closest(".comment-margin")),
+        (mutation.target instanceof Element && mutation.target.closest(".comment-margin")),
     );
     if (relevant) this.scheduleFit();
   });
@@ -256,11 +249,7 @@ export class TableView implements NodeView {
     this.source = text;
     const { state } = this.editor;
     this.editor.view.dispatch(
-      state.tr.replaceWith(
-        pos + 1,
-        pos + 1 + this.node.content.size,
-        state.schema.text(text),
-      ),
+      state.tr.replaceWith(pos + 1, pos + 1 + this.node.content.size, state.schema.text(text)),
     );
   }
 
@@ -289,10 +278,7 @@ export class TableView implements NodeView {
 
   private markOverflow() {
     const { scrollLeft, scrollWidth, clientWidth } = this.scroll;
-    this.shell.classList.toggle(
-      "overflow-right",
-      scrollLeft + clientWidth < scrollWidth - 1,
-    );
+    this.shell.classList.toggle("overflow-right", scrollLeft + clientWidth < scrollWidth - 1);
   }
 
   private scheduleFit() {
@@ -330,22 +316,15 @@ export class TableView implements NodeView {
     const parent = this.dom.parentElement;
     const tableNode = this.scroll.querySelector("table");
     const breakout =
-      main && parent && tableNode
-        ? this.measureBreakout(main, parent, tableNode)
-        : null;
+      main && parent && tableNode ? this.measureBreakout(main, parent, tableNode) : null;
     const width = breakout ? `${breakout.width}px` : "";
     const marginLeft = breakout ? `${breakout.offset}px` : "";
     if (this.dom.style.width !== width) this.dom.style.width = width;
-    if (this.dom.style.marginLeft !== marginLeft)
-      this.dom.style.marginLeft = marginLeft;
+    if (this.dom.style.marginLeft !== marginLeft) this.dom.style.marginLeft = marginLeft;
     this.dom.classList.toggle("t3-table-wide", breakout !== null);
   }
 
-  private measureBreakout(
-    main: Element,
-    parent: Element,
-    tableNode: HTMLTableElement,
-  ) {
+  private measureBreakout(main: Element, parent: Element, tableNode: HTMLTableElement) {
     // Measured at the column's floors, so the wide floors below cannot flip the answer.
     this.dom.classList.remove("t3-table-wide");
     tableNode.style.width = "min-content";
@@ -356,9 +335,7 @@ export class TableView implements NodeView {
     const pageBox = main.getBoundingClientRect();
     const pageStyle = getComputedStyle(main);
     const band = this.dom.getBoundingClientRect();
-    const margin = this.dom
-      .closest(".doc-body")
-      ?.querySelector(".comment-margin");
+    const margin = this.dom.closest(".doc-body")?.querySelector(".comment-margin");
     const commentBeside = [...(margin?.children ?? [])].some((item) =>
       overlaps(band, item.getBoundingClientRect()),
     );
@@ -416,13 +393,9 @@ export class TableView implements NodeView {
   private updateBar() {
     const table = this.table;
     this.bar.hidden = !table && !this.fullscreen;
-    this.barTitle.textContent = this.fullscreen
-      ? this.precedingHeading() || "Table"
-      : "";
+    this.barTitle.textContent = this.fullscreen ? this.precedingHeading() || "Table" : "";
     this.barCount.textContent =
-      this.fullscreen && table
-        ? `${table.rows.length} rows, ${table.columns.length} columns`
-        : "";
+      this.fullscreen && table ? `${table.rows.length} rows, ${table.columns.length} columns` : "";
   }
 
   private renderEmpty() {
@@ -431,9 +404,7 @@ export class TableView implements NodeView {
     const box = element("div", "t3-table-message", "Empty table.");
     if (this.editable) {
       box.append(
-        button("button small", "Create table", () =>
-          this.commitAndRender(starterTable()),
-        ),
+        button("button small", "Create table", () => this.commitAndRender(starterTable())),
       );
     }
     this.scroll.replaceChildren(box);
@@ -515,14 +486,7 @@ export class TableView implements NodeView {
       tr.dataset.rowId = row.id;
       const handle = element("td", "t3-row-handle");
       if (this.editable) {
-        handle.append(
-          button(
-            "t3-icon-button",
-            "⋮",
-            () => this.openRowMenu(row.id, handle),
-            "Row",
-          ),
-        );
+        handle.append(button("t3-icon-button", "⋮", () => this.openRowMenu(row.id, handle), "Row"));
       }
       tr.append(handle);
       for (const column of table.columns) {
@@ -561,20 +525,11 @@ export class TableView implements NodeView {
     }
   }
 
-  private paintCell(
-    td: HTMLTableCellElement,
-    column: TableColumn,
-    value: CellValue | undefined,
-  ) {
+  private paintCell(td: HTMLTableCellElement, column: TableColumn, value: CellValue | undefined) {
     td.replaceChildren();
     if (value === null || value === undefined || cellText(value) === "") return;
     if (column.type === "select" && typeof value === "string") {
-      td.append(
-        chip(
-          value,
-          column.options?.find((option) => option.value === value)?.color,
-        ),
-      );
+      td.append(chip(value, column.options?.find((option) => option.value === value)?.color));
     } else if (column.type === "link" && typeof value === "object") {
       if (value.url && isSafeUrl(value.url)) {
         const link = element("a", "", value.text || value.url);
@@ -605,8 +560,7 @@ export class TableView implements NodeView {
       const td = this.cells.get(cellKey(cell.rowId, cell.colId));
       if (!td) continue;
       td.classList.add("has-comment");
-      if (cell.id === this.comments.activeId)
-        td.classList.add("comment-active");
+      if (cell.id === this.comments.activeId) td.classList.add("comment-active");
     }
   }
 
@@ -623,14 +577,7 @@ export class TableView implements NodeView {
 
   private commentOn(td: HTMLTableCellElement | null) {
     const table = this.table;
-    if (
-      !td ||
-      !table ||
-      !this.comments ||
-      !td.dataset.rowId ||
-      !td.dataset.colId
-    )
-      return;
+    if (!td || !table || !this.comments || !td.dataset.rowId || !td.dataset.colId) return;
     // Comment cards live in the page margin, which full screen covers.
     const thread = this.fullscreen ? this.commentsOn(td)[0] : undefined;
     this.setFullscreen(false);
@@ -638,9 +585,7 @@ export class TableView implements NodeView {
       this.comments.onActivate(thread.id);
       return;
     }
-    const row = table.rows.find(
-      (candidate) => candidate.id === td.dataset.rowId,
-    );
+    const row = table.rows.find((candidate) => candidate.id === td.dataset.rowId);
     this.comments.onComment(
       {
         kind: "cell",
@@ -659,9 +604,7 @@ export class TableView implements NodeView {
       return;
     }
     this.commentButton.textContent =
-      this.fullscreen && this.commentsOn(td).length > 0
-        ? "Open comment"
-        : "Comment";
+      this.fullscreen && this.commentsOn(td).length > 0 ? "Open comment" : "Comment";
     const box = this.shell.getBoundingClientRect();
     const rect = td.getBoundingClientRect();
     const scroller = this.scroll.getBoundingClientRect();
@@ -699,9 +642,7 @@ export class TableView implements NodeView {
   };
 
   private editingCell() {
-    return this.editing
-      ? this.cells.get(cellKey(this.editing.rowId, this.editing.columnId))
-      : null;
+    return this.editing ? this.cells.get(cellKey(this.editing.rowId, this.editing.columnId)) : null;
   }
 
   /** Opens the cell's editor. `draft` restores an edit in progress across a re-render. */
@@ -710,14 +651,10 @@ export class TableView implements NodeView {
     this.closePopover();
     const table = this.table;
     const td = this.cells.get(cellKey(rowId, columnId));
-    const column = table?.columns.find(
-      (candidate) => candidate.id === columnId,
-    );
+    const column = table?.columns.find((candidate) => candidate.id === columnId);
     if (!table || !td || !column) return;
     const value =
-      draft !== undefined
-        ? draft
-        : table.rows.find((row) => row.id === rowId)?.cells[columnId];
+      draft !== undefined ? draft : table.rows.find((row) => row.id === rowId)?.cells[columnId];
     td.classList.add("editing");
     this.showCommentButton(td);
 
@@ -748,9 +685,7 @@ export class TableView implements NodeView {
           url.reportValidity();
           return undefined;
         }
-        return text.value.trim() || next
-          ? { text: text.value.trim(), url: next }
-          : null;
+        return text.value.trim() || next ? { text: text.value.trim(), url: next } : null;
       };
     } else if (column.type === "text") {
       const area = element("textarea", "t3-cell-input");
@@ -775,8 +710,7 @@ export class TableView implements NodeView {
       read = () => {
         const raw = input.value.trim();
         if (raw === "") return null;
-        if (column.type === "date")
-          return /^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw : undefined;
+        if (column.type === "date") return /^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw : undefined;
         const number = Number(raw.replace(/,/g, ""));
         return Number.isFinite(number) ? number : undefined;
       };
@@ -784,15 +718,9 @@ export class TableView implements NodeView {
 
     const editing: EditingCell = { rowId, columnId, read };
     this.editing = editing;
-    wrap.addEventListener("keydown", (event) =>
-      this.onEditorKey(event, editing),
-    );
+    wrap.addEventListener("keydown", (event) => this.onEditorKey(event, editing));
     wrap.addEventListener("focusout", (event) => {
-      if (
-        event.relatedTarget instanceof Node &&
-        wrap.contains(event.relatedTarget)
-      )
-        return;
+      if (event.relatedTarget instanceof Node && wrap.contains(event.relatedTarget)) return;
       if (this.editing === editing) this.stopEditing(true);
     });
     td.replaceChildren(wrap);
@@ -807,24 +735,15 @@ export class TableView implements NodeView {
     this.editing = null;
     const table = this.table;
     const td = this.cells.get(cellKey(editing.rowId, editing.columnId));
-    const column = table?.columns.find(
-      (candidate) => candidate.id === editing.columnId,
-    );
+    const column = table?.columns.find((candidate) => candidate.id === editing.columnId);
     td?.classList.remove("editing");
     if (!table || !td || !column) return;
-    const previous = table.rows.find((row) => row.id === editing.rowId)?.cells[
-      editing.columnId
-    ];
+    const previous = table.rows.find((row) => row.id === editing.rowId)?.cells[editing.columnId];
     const next = save ? editing.read() : undefined;
-    if (
-      next !== undefined &&
-      JSON.stringify(next ?? null) !== JSON.stringify(previous ?? null)
-    ) {
+    if (next !== undefined && JSON.stringify(next ?? null) !== JSON.stringify(previous ?? null)) {
       const updated = setCell(table, editing.rowId, editing.columnId, next);
       this.commit(updated);
-      const row = updated.rows.find(
-        (candidate) => candidate.id === editing.rowId,
-      );
+      const row = updated.rows.find((candidate) => candidate.id === editing.rowId);
       this.paintCell(td, column, row?.cells[editing.columnId]);
     } else {
       this.paintCell(td, column, previous);
@@ -832,15 +751,9 @@ export class TableView implements NodeView {
   }
 
   private onEditorKey(event: KeyboardEvent, editing: EditingCell) {
-    if (
-      (event.metaKey || event.ctrlKey) &&
-      event.altKey &&
-      event.code === "KeyM"
-    ) {
+    if ((event.metaKey || event.ctrlKey) && event.altKey && event.code === "KeyM") {
       event.preventDefault();
-      this.commentOn(
-        this.cells.get(cellKey(editing.rowId, editing.columnId)) ?? null,
-      );
+      this.commentOn(this.cells.get(cellKey(editing.rowId, editing.columnId)) ?? null);
       return;
     }
     if (event.key === "Escape") {
@@ -869,9 +782,7 @@ export class TableView implements NodeView {
     const table = this.table;
     if (!table) return;
     const rowIndex = table.rows.findIndex((row) => row.id === editing.rowId);
-    const columnIndex = table.columns.findIndex(
-      (column) => column.id === editing.columnId,
-    );
+    const columnIndex = table.columns.findIndex((column) => column.id === editing.columnId);
     if (rowIndex === -1 || columnIndex === -1) return;
     if (direction === "down") {
       const below = table.rows[rowIndex + 1];
@@ -879,8 +790,7 @@ export class TableView implements NodeView {
       return;
     }
     const width = table.columns.length;
-    const flat =
-      rowIndex * width + columnIndex + (direction === "next" ? 1 : -1);
+    const flat = rowIndex * width + columnIndex + (direction === "next" ? 1 : -1);
     if (flat < 0) return;
     if (flat >= table.rows.length * width) {
       const next = insertRow(table, table.rows.length);
@@ -888,10 +798,7 @@ export class TableView implements NodeView {
       this.startEditing(next.rowId, table.columns[0]!.id);
       return;
     }
-    this.startEditing(
-      table.rows[Math.floor(flat / width)]!.id,
-      table.columns[flat % width]!.id,
-    );
+    this.startEditing(table.rows[Math.floor(flat / width)]!.id, table.columns[flat % width]!.id);
   }
 
   private openPopover(
@@ -919,10 +826,8 @@ export class TableView implements NodeView {
     this.shell.append(box);
     // Full screen has no page below the table to scroll a low menu into view.
     if (this.fullscreen) {
-      const overflow =
-        box.getBoundingClientRect().bottom - window.innerHeight + 8;
-      if (overflow > 0)
-        box.style.top = `${Math.max(0, box.offsetTop - overflow)}px`;
+      const overflow = box.getBoundingClientRect().bottom - window.innerHeight + 8;
+      if (overflow > 0) box.style.top = `${Math.max(0, box.offsetTop - overflow)}px`;
     }
     this.popover = { node: box, close };
   }
@@ -934,27 +839,15 @@ export class TableView implements NodeView {
   }
 
   /** The chip dropdown: pick, clear, or add an option; arrows and Enter work from the filter. */
-  private openSelect(
-    rowId: string,
-    column: TableColumn,
-    td: HTMLTableCellElement,
-  ) {
-    const current = this.table?.rows.find((row) => row.id === rowId)?.cells[
-      column.id
-    ];
+  private openSelect(rowId: string, column: TableColumn, td: HTMLTableCellElement) {
+    const current = this.table?.rows.find((row) => row.id === rowId)?.cells[column.id];
     let chosen = false;
-    const choose = (
-      value: string | null,
-      move?: "next" | "previous" | "down",
-    ) => {
+    const choose = (value: string | null, move?: "next" | "previous" | "down") => {
       chosen = true;
       const table = this.table;
       if (!table) return;
       let updated = table;
-      if (
-        value !== null &&
-        !(column.options ?? []).some((option) => option.value === value)
-      ) {
+      if (value !== null && !(column.options ?? []).some((option) => option.value === value)) {
         updated = addOption(updated, column.id, value);
       }
       updated = setCell(updated, rowId, column.id, value);
@@ -982,16 +875,11 @@ export class TableView implements NodeView {
             const node = element("button", "t3-select-option");
             node.type = "button";
             node.append(chip(option.value, option.color));
-            if (option.value === current)
-              node.setAttribute("aria-current", "true");
+            if (option.value === current) node.setAttribute("aria-current", "true");
             return { value: option.value, node };
           });
           if (query && !options.some((option) => option.value === query)) {
-            const node = element(
-              "button",
-              "t3-select-option",
-              `Add "${query}"`,
-            );
+            const node = element("button", "t3-select-option", `Add "${query}"`);
             node.type = "button";
             items.push({ value: query, node });
           }
@@ -1014,12 +902,8 @@ export class TableView implements NodeView {
         filter.addEventListener("keydown", (event) => {
           if (event.key === "ArrowDown" || event.key === "ArrowUp") {
             event.preventDefault();
-            active =
-              (active + (event.key === "ArrowDown" ? 1 : -1) + items.length) %
-              items.length;
-            items.forEach((item, index) =>
-              item.node.classList.toggle("active", index === active),
-            );
+            active = (active + (event.key === "ArrowDown" ? 1 : -1) + items.length) % items.length;
+            items.forEach((item, index) => item.node.classList.toggle("active", index === active));
           } else if (event.key === "Enter") {
             event.preventDefault();
             const item = items[active];
@@ -1030,10 +914,7 @@ export class TableView implements NodeView {
             this.editing = null;
             this.closePopover();
             td.classList.remove("editing");
-            this.move(
-              { rowId, columnId: column.id },
-              event.shiftKey ? "previous" : "next",
-            );
+            this.move({ rowId, columnId: column.id }, event.shiftKey ? "previous" : "next");
           } else if (event.key === "Escape") {
             event.preventDefault();
             this.closePopover();
@@ -1081,9 +962,7 @@ export class TableView implements NodeView {
       box.classList.add("t3-menu", "t3-column-menu");
       const paint = () => {
         const table = this.table;
-        const column = table?.columns.find(
-          (candidate) => candidate.id === columnId,
-        );
+        const column = table?.columns.find((candidate) => candidate.id === columnId);
         if (!table || !column) return this.closePopover();
         const index = table.columns.indexOf(column);
         const name = element("input", "t3-cell-input");
@@ -1091,9 +970,7 @@ export class TableView implements NodeView {
         name.setAttribute("aria-label", "Column name");
         const rename = () => {
           if (name.value === column.name) return;
-          this.commitAndRender(
-            updateColumn(table, columnId, (c) => ({ ...c, name: name.value })),
-          );
+          this.commitAndRender(updateColumn(table, columnId, (c) => ({ ...c, name: name.value })));
         };
         name.addEventListener("change", rename);
         name.addEventListener("keydown", (event) => {
@@ -1115,14 +992,11 @@ export class TableView implements NodeView {
           type.append(item);
         }
         type.addEventListener("change", () => {
-          this.commitAndRender(
-            changeColumnType(table, columnId, type.value as ColumnType),
-          );
+          this.commitAndRender(changeColumnType(table, columnId, type.value as ColumnType));
           paint();
         });
         const nodes: Array<HTMLElement> = [name, type];
-        if (column.type === "select")
-          nodes.push(this.optionsEditor(columnId, paint));
+        if (column.type === "select") nodes.push(this.optionsEditor(columnId, paint));
         nodes.push(
           button("tab-menu-item", "Insert column left", () => {
             this.closePopover();
@@ -1151,9 +1025,7 @@ export class TableView implements NodeView {
   private optionsEditor(columnId: string, repaint: () => void) {
     const wrap = element("div", "t3-option-list");
     const table = this.table!;
-    const column = table.columns.find(
-      (candidate) => candidate.id === columnId,
-    )!;
+    const column = table.columns.find((candidate) => candidate.id === columnId)!;
     for (const option of column.options ?? []) {
       const line = element("div", "t3-option-row");
       const value = element("input", "t3-cell-input");
@@ -1193,9 +1065,7 @@ export class TableView implements NodeView {
           "t3-icon-button",
           "×",
           () => {
-            this.commitAndRender(
-              removeOption(this.table!, columnId, option.value),
-            );
+            this.commitAndRender(removeOption(this.table!, columnId, option.value));
             repaint();
           },
           "Remove option",
@@ -1212,22 +1082,16 @@ export class TableView implements NodeView {
       if (!value) return;
       this.commitAndRender(addOption(this.table!, columnId, value));
       repaint();
-      wrap.parentElement
-        ?.querySelector<HTMLInputElement>(".t3-option-list > input")
-        ?.focus();
+      wrap.parentElement?.querySelector<HTMLInputElement>(".t3-option-list > input")?.focus();
     });
     wrap.append(add);
     return wrap;
   }
 }
 
-function commentSpec(
-  decorations: ReadonlyArray<Decoration>,
-): TableCommentSpec | null {
+function commentSpec(decorations: ReadonlyArray<Decoration>): TableCommentSpec | null {
   for (const decoration of decorations) {
-    const spec = (decoration.spec as Record<string, unknown>)[
-      TABLE_COMMENTS_SPEC
-    ];
+    const spec = (decoration.spec as Record<string, unknown>)[TABLE_COMMENTS_SPEC];
     if (spec) return spec as TableCommentSpec;
   }
   return null;
