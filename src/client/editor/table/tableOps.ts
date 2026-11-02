@@ -12,10 +12,7 @@ import {
   type TableColumn,
 } from "../../../shared/table.ts";
 
-const uniqueId = (
-  prefix: string,
-  taken: ReadonlyArray<{ readonly id: string }>,
-) => {
+const uniqueId = (prefix: string, taken: ReadonlyArray<{ readonly id: string }>) => {
   let id = newTableId(prefix);
   while (taken.some((item) => item.id === id)) id = newTableId(prefix);
   return id;
@@ -29,9 +26,7 @@ export function setCell(
 ): RichTable {
   return {
     ...table,
-    rows: table.rows.map((row) =>
-      row.id === rowId ? withCell(row, columnId, value) : row,
-    ),
+    rows: table.rows.map((row) => (row.id === rowId ? withCell(row, columnId, value) : row)),
   };
 }
 
@@ -42,10 +37,7 @@ export function insertRow(
 ): { readonly table: RichTable; readonly rowId: string } {
   const rowId = uniqueId("r", table.rows);
   return {
-    table: {
-      ...table,
-      rows: table.rows.toSpliced(index, 0, { id: rowId, cells: {} }),
-    },
+    table: { ...table, rows: table.rows.toSpliced(index, 0, { id: rowId, cells: {} }) },
     rowId,
   };
 }
@@ -61,10 +53,7 @@ export function insertColumn(
 ): { readonly table: RichTable; readonly columnId: string } {
   const columnId = uniqueId("c", table.columns);
   const column: TableColumn = { id: columnId, name: "Column", type: "text" };
-  return {
-    table: { ...table, columns: table.columns.toSpliced(index, 0, column) },
-    columnId,
-  };
+  return { table: { ...table, columns: table.columns.toSpliced(index, 0, column) }, columnId };
 }
 
 /** Removes a column and its cells. The last column stays, since a table needs one. */
@@ -84,9 +73,7 @@ export function updateColumn(
 ): RichTable {
   return {
     ...table,
-    columns: table.columns.map((column) =>
-      column.id === columnId ? change(column) : column,
-    ),
+    columns: table.columns.map((column) => (column.id === columnId ? change(column) : column)),
   };
 }
 
@@ -94,19 +81,11 @@ const nextColor = (options: ReadonlyArray<SelectOption>): ChipColor =>
   CHIP_COLORS[options.length % CHIP_COLORS.length]!;
 
 /** Adds a select option (or finds an existing one with that value). */
-export function addOption(
-  table: RichTable,
-  columnId: string,
-  value: string,
-): RichTable {
+export function addOption(table: RichTable, columnId: string, value: string): RichTable {
   return updateColumn(table, columnId, (column) => {
     const options = column.options ?? [];
-    if (!value || options.some((option) => option.value === value))
-      return column;
-    return {
-      ...column,
-      options: [...options, { value, color: nextColor(options) }],
-    };
+    if (!value || options.some((option) => option.value === value)) return column;
+    return { ...column, options: [...options, { value, color: nextColor(options) }] };
   });
 }
 
@@ -121,8 +100,7 @@ export function editOption(
   const options = column?.options ?? [];
   if (
     !next.value ||
-    (next.value !== value &&
-      options.some((option) => option.value === next.value))
+    (next.value !== value && options.some((option) => option.value === next.value))
   ) {
     return table;
   }
@@ -140,11 +118,7 @@ export function editOption(
 }
 
 /** Removes an option and clears the cells that held it. */
-export function removeOption(
-  table: RichTable,
-  columnId: string,
-  value: string,
-): RichTable {
+export function removeOption(table: RichTable, columnId: string, value: string): RichTable {
   const updated = updateColumn(table, columnId, (column) => ({
     ...column,
     options: (column.options ?? []).filter((option) => option.value !== value),

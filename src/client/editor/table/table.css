@@ -74,6 +74,10 @@
   margin: 0;
   padding: 0.6rem 1.5rem;
   border-bottom: 1px solid var(--border);
+  /* Sits over the top sliver of the pinned header so scrolled rows never show there. */
+  position: relative;
+  z-index: 5;
+  box-shadow: 0 6px 0 var(--bg);
 }
 
 .t3-table-fullscreen .t3-table-bar-hint {
@@ -93,8 +97,6 @@
   position: sticky;
   top: 0;
   z-index: 2;
-  /* Masks the sliver between the bar and the pinned header. */
-  box-shadow: 0 -6px 0 var(--bg);
 }
 
 .t3-table-fullscreen thead tr > :is(:first-child, :nth-child(2)) {

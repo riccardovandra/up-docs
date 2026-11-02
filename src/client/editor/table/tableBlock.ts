@@ -1,11 +1,7 @@
 import type { Editor } from "@tiptap/core";
 import { NodeSelection, Plugin, PluginKey } from "@tiptap/pm/state";
 
-import {
-  formatTable,
-  starterTable,
-  TABLE_LANGUAGE,
-} from "../../../shared/table.ts";
+import { formatTable, starterTable, TABLE_LANGUAGE } from "../../../shared/table.ts";
 import { isTableNode } from "./TableView.ts";
 
 /**
@@ -19,9 +15,7 @@ export const tableSelectionPlugin = new Plugin({
     if (selection instanceof NodeSelection) return null;
     const { $from } = selection;
     if (!isTableNode($from.parent)) return null;
-    return state.tr.setSelection(
-      NodeSelection.create(state.doc, $from.before()),
-    );
+    return state.tr.setSelection(NodeSelection.create(state.doc, $from.before()));
   },
 });
 
