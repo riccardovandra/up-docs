@@ -8,6 +8,103 @@
   font-size: 0.9rem;
 }
 
+.t3-table-shell {
+  position: relative;
+}
+
+/* The bar sits above the table on the page and becomes the header in full screen. */
+.t3-table-bar {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 0.75rem;
+  min-height: 1.75rem;
+  margin-bottom: 0.25rem;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.t3-table-bar[hidden] {
+  display: none;
+}
+
+.t3-table-bar-title {
+  margin-right: auto;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.t3-table-bar-title:empty {
+  display: none;
+}
+
+.t3-table-bar-hint {
+  display: none;
+}
+
+.t3-table-bar-toggle {
+  font: inherit;
+  padding: 0.1rem 0.55rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.t3-table-bar-toggle:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+
+/* Full screen fills the tab, or the T3 panel when embedded. */
+.t3-table-fullscreen .t3-table-shell {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+}
+
+.t3-table-fullscreen .t3-table-bar {
+  flex: none;
+  justify-content: flex-start;
+  margin: 0;
+  padding: 0.6rem 1.5rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.t3-table-fullscreen .t3-table-bar-hint {
+  display: inline;
+  margin-left: auto;
+}
+
+.t3-table-fullscreen .t3-table-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: 0 1.5rem 1.5rem;
+}
+
+.t3-table-fullscreen thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  /* Masks the sliver between the bar and the pinned header. */
+  box-shadow: 0 -6px 0 var(--bg);
+}
+
+.t3-table-fullscreen thead tr > :is(:first-child, :nth-child(2)) {
+  z-index: 3;
+}
+
+.t3-table-fullscreen .t3-table-shell.overflow-right::after {
+  display: none;
+}
+
 .t3-table.selected .t3-table-scroll {
   outline: 2px solid var(--ring);
   outline-offset: 2px;
@@ -40,10 +137,10 @@
   }
 }
 
-.t3-table.overflow-right::after {
+.t3-table-shell.overflow-right::after {
   content: "";
   position: absolute;
-  top: 0;
+  top: 2rem;
   right: 0;
   bottom: 0.75rem;
   width: 2.5rem;
@@ -75,12 +172,23 @@
   overflow-wrap: break-word;
 }
 
-.t3-table td:is([data-type="date"], [data-type="number"], [data-type="select"]) {
+.t3-table
+  td:is([data-type="date"], [data-type="number"], [data-type="select"]) {
   white-space: nowrap;
 }
 
 .t3-table th.t3-long {
   min-width: 11rem;
+}
+
+/* The empty comment margin comes later in the page and would take its clicks. */
+.t3-table-wide:not(.t3-table-fullscreen) {
+  z-index: 1;
+}
+
+/* Out of the column the page width is the limit, so spend it on columns, not scrolling. */
+.t3-table-wide th.t3-long {
+  min-width: 8rem;
 }
 
 .t3-table tr > :first-child {
@@ -405,11 +513,17 @@
     overflow: visible;
   }
 
+  .t3-table {
+    width: auto !important;
+    margin-left: 0 !important;
+  }
+
+  .t3-table-bar,
   .t3-table .t3-row-handle,
   .t3-table .t3-col-add,
   .t3-row-add,
   .t3-cell-comment,
-  .t3-table.overflow-right::after {
+  .t3-table-shell.overflow-right::after {
     display: none;
   }
 
