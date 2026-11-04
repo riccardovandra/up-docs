@@ -285,6 +285,24 @@ async function mainFlow(): Promise<void> {
           "edit not visible through the API",
         );
       });
+      await step("mcp writes an embed block", async () => {
+        const block =
+          "```t3-embed\nhttps://x.com/jack/status/20\nFirst post\n```";
+        await callTool("edit_tab", {
+          tabId,
+          find: "mcp-edited",
+          replace: block,
+        });
+        const { tab } = await api("GET", `/api/tabs/${tabId}`);
+        check(tab.markdown.includes(block), "embed block not stored as written");
+      });
+      // Reaches X from the Worker, so it fails if X stops answering.
+      await step("save a copy of an X post", async () => {
+        const { embed } = await api("POST", `/api/docs/${docId}/embeds`, {
+          url: "https://x.com/jack/status/20",
+        });
+        check(embed.text === "just setting up my twttr", "post text missing");
+      });
     }
   }
 

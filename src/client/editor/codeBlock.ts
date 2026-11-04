@@ -6,11 +6,13 @@ import type { NodeView } from "@tiptap/pm/view";
 
 import type { DiagramCache, DiagramRender } from "./diagramCache.ts";
 import "./diagrams.css";
+import { isEmbedLanguage } from "../../shared/embeds.ts";
 import { isVideoLanguage } from "../../shared/video.ts";
 import { widgetInfo } from "../../shared/widget/fence.ts";
 import { WidgetView } from "./widget/WidgetView.ts";
 import { tableSelectionPlugin } from "./table/tableBlock.ts";
 import { isTableNode, TableView } from "./table/TableView.ts";
+import { EmbedView } from "./embed/EmbedView.ts";
 import { VideoView } from "./video/VideoView.ts";
 
 let loadedCache: DiagramCache | null = null;
@@ -25,8 +27,9 @@ const isWidget = (node: ProseMirrorNode) =>
   widgetInfo(node.attrs.language as string | null) !== null;
 const isDiagram = (node: ProseMirrorNode) => isMermaid(node) || isWidget(node);
 const isVideo = (node: ProseMirrorNode) => isVideoLanguage(node.attrs.language as string | null);
+const isEmbed = (node: ProseMirrorNode) => isEmbedLanguage(node.attrs.language as string | null);
 /** Blocks shown as something other than their source until the caret enters them. */
-const hidesSource = (node: ProseMirrorNode) => isDiagram(node) || isVideo(node);
+const hidesSource = (node: ProseMirrorNode) => isDiagram(node) || isVideo(node) || isEmbed(node);
 
 /**
  * A fence that opens and closes `text` safely. CommonMark ends a block at the
@@ -75,7 +78,7 @@ export const DocsCodeBlock = CodeBlock.extend({
     const parent = this.parent?.() ?? {};
     return {
       ...parent,
-      // Leave the source and show the diagram or video, with the block selected.
+      // Leave the source and show the diagram, video or embed, with the block selected.
       Escape: ({ editor }) => {
         const { $from } = editor.state.selection;
         if ($from.parent.type.name !== this.name || !hidesSource($from.parent)) return false;
@@ -85,7 +88,7 @@ export const DocsCodeBlock = CodeBlock.extend({
         );
         return true;
       },
-      // Enter on a selected diagram or video opens its source.
+      // Enter on a selected diagram, video or embed opens its source.
       Enter: (props) => {
         const { selection } = props.editor.state;
         if (
@@ -111,6 +114,7 @@ export const DocsCodeBlock = CodeBlock.extend({
       if (isTableNode(props.node)) return new TableView(props);
       if (isWidget(props.node)) return new WidgetView(props, editSource);
       if (isVideo(props.node)) return new VideoView(props, editSource);
+      if (isEmbed(props.node)) return new EmbedView(props, editSource);
       return isMermaid(props.node) ? new DiagramView(props) : new PlainCodeView(props);
     };
   },

@@ -5,6 +5,7 @@
 import { Lexer, type Token, type Tokens } from "marked";
 
 import { isSafeUrl, parseTable, type ChipColor, type RichTable } from "../../shared/table.ts";
+import { EMBED_LANGUAGE, embedLabel, parseEmbedBlock } from "../../shared/embeds.ts";
 import { parseVideoBlock, VIDEO_LANGUAGE, videoLabel } from "../../shared/video.ts";
 import { slugify } from "../export.ts";
 import { zipStored } from "./zip.ts";
@@ -294,6 +295,14 @@ class DocxWriter {
         // An uploaded file's URL is relative; Word needs the whole address.
         const href = new URL(video.watchUrl, this.docUrl).href;
         this.body.push(paragraph(this.hyperlink(href, run(videoLabel(video), { link: true }))));
+        return;
+      }
+    }
+    if (language === EMBED_LANGUAGE) {
+      const embed = parseEmbedBlock(code.text);
+      if (embed) {
+        const href = embed.target?.canonicalUrl ?? embed.url;
+        this.body.push(paragraph(this.hyperlink(href, run(embedLabel(embed), { link: true }))));
         return;
       }
     }

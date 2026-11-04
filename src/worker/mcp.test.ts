@@ -475,6 +475,30 @@ describe("MCP table tools", () => {
     expect(JSON.stringify(read.body)).toContain("The walkthrough");
   });
 
+  it("rejects writes with an invalid t3-embed block and stores valid ones as written", async () => {
+    const mcp = await makeMcpHarness();
+    const { tab } = await mcp.seedDoc("Start.");
+    const bad = "```t3-embed\njavascript:alert(1)\n```";
+    const good =
+      "```t3-embed\nhttps://www.linkedin.com/posts/p_hooks-activity-7209442266791186432-uyzh\nHook: a number\n```";
+
+    const written = await mcp.tool("write_tab", {
+      tabId: tab.tabId,
+      markdown: bad,
+      baseVersion: 2,
+    });
+    expect(written).toMatchObject({ isError: true, body: { error: "embed_invalid" } });
+    expect(written.body.message).toContain("Nothing was written.");
+    const doc = await mcp.tool("create_doc", { title: "D", markdown: bad });
+    expect(doc).toMatchObject({ isError: true, body: { error: "embed_invalid" } });
+
+    const fine = await mcp.tool("edit_tab", { tabId: tab.tabId, find: "Start.", replace: good });
+    expect(fine.isError).toBe(false);
+    const docId = (await mcp.tool("list_docs", {})).body.docs[0].docId;
+    const read = await mcp.tool("read_doc", { docId, tabId: tab.tabId });
+    expect(JSON.stringify(read.body)).toContain(JSON.stringify(good).slice(1, -1));
+  });
+
   it("rejects writes whose t3-table JSON is invalid, with the reason", async () => {
     const mcp = await makeMcpHarness();
     const { tab } = await mcp.seedDoc("Start.");

@@ -45,6 +45,13 @@ describe("markdown assembly", () => {
     expect(whole).not.toContain("t3-video");
   });
 
+  it("shows embeds as links to the post", () => {
+    const body = "```t3-embed\nhttps://twitter.com/jack/status/20\nFirst post\n```";
+    const markdown = tabMarkdown(tab("a", null, 0, "One", body), "https://docs.test");
+    expect(markdown).toContain("[First post](https://x.com/jack/status/20)");
+    expect(markdown).not.toContain("t3-embed");
+  });
+
   it("writes tabs depth-first with heading levels that follow depth", () => {
     const markdown = docMarkdown(
       doc([

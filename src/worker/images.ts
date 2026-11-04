@@ -22,7 +22,7 @@ export const imageKey = (docId: string, file: string) => `images/${docId}/${file
 export const docImagesPrefix = (docId: string) => `images/${docId}/`;
 
 /** Leading bytes of each allowed type, so a renamed HTML file is not served as an image. */
-function matchesType(bytes: Uint8Array, type: string): boolean {
+export function matchesType(bytes: Uint8Array, type: string): boolean {
   const starts = (...expected: ReadonlyArray<number>) =>
     expected.every((byte, index) => bytes[index] === byte);
   const ascii = (offset: number, text: string) =>

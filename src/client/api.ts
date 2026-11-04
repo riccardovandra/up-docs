@@ -1,3 +1,4 @@
+import type { EmbedSnapshot } from "../shared/embeds.ts";
 import type {
   DocMember,
   DocRole,
@@ -139,11 +140,7 @@ export const api = {
       members: Array<DocMember>;
       /** Null when nobody new was added, so no email was due. */
       emailDelivery: EmailDelivery | null;
-    }>(
-      "POST",
-      `/api/docs/${docId}/members`,
-      input,
-    ),
+    }>("POST", `/api/docs/${docId}/members`, input),
   setMemberRole: (docId: string, memberId: string, role: DocRole) =>
     request<{ member: DocMember; members: Array<DocMember> }>(
       "PATCH",
@@ -165,6 +162,10 @@ export const api = {
   /** Owner only; removes the doc, its tabs, comments, people, images and videos. */
   deleteDoc: (docId: string) =>
     request<{ ok: true }>("DELETE", `/api/docs/${docId}?clientId=${encodeURIComponent(clientId)}`),
+  /** The doc's saved copy of an embedded post, taken now if it has none. `refresh` needs an editor. */
+  embed: async (docId: string, url: string, refresh = false): Promise<EmbedSnapshot> =>
+    (await request<{ embed: EmbedSnapshot }>("POST", `/api/docs/${docId}/embeds`, { url, refresh }))
+      .embed,
   uploadImage: async (docId: string, file: File): Promise<string> => {
     const response = await fetch(`/api/docs/${docId}/images`, {
       method: "POST",

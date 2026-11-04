@@ -5,6 +5,7 @@
 import { orderTabs } from "../client/doc/tabTree.ts";
 import type { DocWithTabs, Tab } from "../shared/protocol.ts";
 import { richTablesToGfm } from "../shared/table.ts";
+import { embedsToLinks } from "../shared/embeds.ts";
 import { videosToLinks } from "../shared/video.ts";
 
 const MAX_HEADING_LEVEL = 6;
@@ -21,9 +22,11 @@ function startsWithTitle(body: string, title: string): boolean {
 function section(tab: Tab, depth: number, origin: string | null): string {
   const level = Math.min(depth + 1, MAX_HEADING_LEVEL);
   const heading = `${"#".repeat(level)} ${tab.title}`;
-  // Downloads are for reading, so rich tables become GFM tables and videos become links.
+  // Downloads are for reading, so rich tables become GFM tables and videos and embeds become links.
   const body = (
-    origin === null ? tab.markdown : videosToLinks(richTablesToGfm(tab.markdown), origin)
+    origin === null
+      ? tab.markdown
+      : embedsToLinks(videosToLinks(richTablesToGfm(tab.markdown), origin))
   ).trim();
   if (body && startsWithTitle(body, tab.title)) return `${body}\n`;
   return body ? `${heading}\n\n${body}\n` : `${heading}\n`;
@@ -40,7 +43,7 @@ export const docMarkdown = (doc: DocWithTabs, origin = ""): string =>
 
 /**
  * The same sections as `tabMarkdown` and `docMarkdown`, with rich tables and
- * videos left as fences for writers that render them natively, such as Word.
+ * videos and embeds left as fences for writers that render them natively, such as Word.
  */
 export const tabSourceMarkdown = (tab: Tab): string => section(tab, 0, null);
 
