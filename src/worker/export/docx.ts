@@ -4,6 +4,7 @@
 
 import { Lexer, type Token, type Tokens } from "marked";
 
+import { splitImageAlt } from "../../shared/images.ts";
 import { isSafeUrl, parseTable, type ChipColor, type RichTable } from "../../shared/table.ts";
 import { parseVideoBlock, VIDEO_LANGUAGE, videoLabel } from "../../shared/video.ts";
 import { slugify } from "../export.ts";
@@ -169,7 +170,7 @@ class DocxWriter {
       case "image": {
         // Images are not embedded; the alt text links to the picture.
         const image = token as Tokens.Image;
-        const label = run(`[${image.text || "Image"}]`, {
+        const label = run(`[${splitImageAlt(image.text).alt || "Image"}]`, {
           ...format,
           link: isLinkable(image.href),
         });

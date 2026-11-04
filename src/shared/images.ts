@@ -37,3 +37,29 @@ export function isDocImageSrc(src: string): boolean {
   const match = SRC.exec(src);
   return match !== null && imageFileType(match[2]!) !== null;
 }
+
+/** Narrowest and widest width, in CSS pixels, an image can be resized to. */
+export const MIN_IMAGE_WIDTH = 48;
+export const MAX_IMAGE_WIDTH = 4000;
+
+const ALT_WIDTH = /^(.*)\|(\d{1,4})$/s;
+
+/**
+ * Splits markdown alt text into the alt and a display width. A resized image
+ * stores its width after a pipe, as in `![Chart|480](/api/images/...)`, the
+ * convention Obsidian uses; plain alt text has no width.
+ */
+export function splitImageAlt(text: string): {
+  readonly alt: string;
+  readonly width: number | null;
+} {
+  const match = ALT_WIDTH.exec(text);
+  const width = match ? Number(match[2]) : NaN;
+  if (!match || width < MIN_IMAGE_WIDTH || width > MAX_IMAGE_WIDTH)
+    return { alt: text, width: null };
+  return { alt: match[1]!, width };
+}
+
+/** The alt text that stores `alt` and `width`; the inverse of splitImageAlt. */
+export const joinImageAlt = (alt: string, width: number | null) =>
+  width === null ? alt : `${alt}|${width}`;
