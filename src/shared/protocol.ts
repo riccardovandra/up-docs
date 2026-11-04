@@ -27,8 +27,26 @@ export interface DocSummary {
   readonly projectId: string | null;
   readonly title: string;
   readonly status: DocStatus;
+  /** The doc's group inside its project, or null for none. */
+  readonly group: string | null;
   readonly createdAt: number;
   readonly updatedAt: number;
+}
+
+/** The longest group name a doc can carry. */
+export const MAX_DOC_GROUP_LENGTH = 60;
+
+/**
+ * A group from the wire: undefined when absent, null to clear (null or blank),
+ * the trimmed name, or false when it is not text or too long.
+ */
+export function docGroupArg(value: unknown): string | null | undefined | false {
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+  if (typeof value !== "string") return false;
+  const name = value.trim().replace(/\s+/g, " ");
+  if (name.length > MAX_DOC_GROUP_LENGTH) return false;
+  return name === "" ? null : name;
 }
 
 export interface Tab {

@@ -72,6 +72,28 @@ describe("parseParentMessage", () => {
     expect(projectNameKey("  Acme   SITE ")).toBe(projectNameKey("acme site"));
   });
 
+  it("takes an optional lock and groups from apps other than T3 Code", () => {
+    expect(
+      parseParentMessage({
+        type: "t3-docs:context",
+        projectName: "Content Creation",
+        projectKey: "title:content creation",
+        lock: true,
+        groups: [" Strategy ", "Posts", "Posts", 4, "", "x".repeat(61)],
+      }),
+    ).toEqual({
+      type: "t3-docs:context",
+      projectName: "Content Creation",
+      projectKey: "title:content creation",
+      lock: true,
+      groups: ["Strategy", "Posts"],
+    });
+    // Anything but true leaves the frame unlocked, exactly as T3 Code sends it.
+    expect(
+      parseParentMessage({ type: "t3-docs:context", projectName: "Site", lock: "yes", groups: [] }),
+    ).toEqual({ type: "t3-docs:context", projectName: "Site", projectKey: null });
+  });
+
   it("validates thread links and drops malformed thread entries", () => {
     const link = {
       type: "t3-docs:link-thread",

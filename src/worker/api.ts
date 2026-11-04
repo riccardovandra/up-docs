@@ -1,5 +1,6 @@
 import {
   DOC_STATUSES,
+  docGroupArg,
   type DocStatus,
   type DocSummary,
   type DocThreadLink,
@@ -80,6 +81,10 @@ export interface DocRooms {
   setDocProject(
     docId: string,
     input: { readonly projectId: string | null; readonly origin: string | null },
+  ): Promise<DocSummary>;
+  setDocGroup(
+    docId: string,
+    input: { readonly group: string | null; readonly origin: string | null },
   ): Promise<DocSummary>;
   commentOp(
     docId: string,
@@ -306,13 +311,20 @@ export async function handleApi(request: Request, deps: ApiDeps): Promise<Respon
       const body = await readJson(request);
       const projectId = projectIdArg(body.projectId);
       const title = str(body.title);
-      if (projectId === false || !title) return error(400, "invalid_doc");
+      const group = docGroupArg(body.group);
+      if (projectId === false || !title || group === false) return error(400, "invalid_doc");
       if (projectId && !(await Access.canSeeProject(deps.db, projectId, principal.userId))) {
         return error(404, "not_found");
       }
       const ownerId = principal.userId;
       return json(
-        await Docs.createDoc(deps.db, { projectId: projectId ?? null, title, ownerId, now }),
+        await Docs.createDoc(deps.db, {
+          projectId: projectId ?? null,
+          title,
+          ownerId,
+          now,
+          group: group ?? null,
+        }),
         201,
       );
     }
@@ -343,6 +355,14 @@ export async function handleApi(request: Request, deps: ApiDeps): Promise<Respon
           return error(400, "one_change_at_a_time");
         }
         return json({ doc: await deps.rooms.renameDoc(id, { title, origin }) });
+      }
+      if (body.group !== undefined) {
+        const group = docGroupArg(body.group);
+        if (group === false || group === undefined) return error(400, "invalid_group");
+        if (body.status !== undefined || body.projectId !== undefined) {
+          return error(400, "one_change_at_a_time");
+        }
+        return json({ doc: await deps.rooms.setDocGroup(id, { group, origin }) });
       }
       const status = body.status;
       if (status !== undefined && !DOC_STATUSES.includes(status as DocStatus)) {

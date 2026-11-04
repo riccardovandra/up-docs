@@ -52,10 +52,12 @@ import { postToEmbedParent, subscribeParentMessages, useEmbedFeatures } from "..
 import { leaveDoc, setDocTabTitle } from "../openTabs.ts";
 import { docPath, navigate } from "../router.ts";
 import { useMe } from "../me.ts";
+import { useLockedProject } from "../lockedProject.ts";
 import { canonicalDocUrl } from "../share/ShareDialog.tsx";
 
 export function DocPage(props: { readonly docId: string; readonly tabId: string | null }) {
   const [doc, setDoc] = useState<DocSummary | null>(null);
+  const lock = useLockedProject();
   const [role, setRole] = useState<DocRole>("viewer");
   const [owner, setOwner] = useState<UserSummary | null>(null);
   const [threadLinks, setThreadLinks] = useState<ReadonlyArray<DocThreadLink>>([]);
@@ -433,6 +435,14 @@ export function DocPage(props: { readonly docId: string; readonly tabId: string 
       ),
   );
 
+  const setGroup = useStableCallback(
+    (group: string | null) =>
+      void api.setDocGroup(props.docId, group).then(
+        (result) => setDoc(result.doc),
+        () => setNotice("Could not move the doc. Reload and try again."),
+      ),
+  );
+
   const deleteDoc = useStableCallback(() => {
     if (!doc) return;
     if (
@@ -587,7 +597,17 @@ export function DocPage(props: { readonly docId: string; readonly tabId: string 
     [props.docId, docTitle, activeTabId, flush, embedded],
   );
 
-  if (!doc) return null;
+  if (!doc || lock.kind === "loading") return null;
+  if (lock.kind === "locked" && (lock.projectId === null || doc.projectId !== lock.projectId)) {
+    return (
+      <main className="home">
+        <p className="home-empty">This doc is not part of {lock.name}.</p>
+        <button type="button" className="button secondary" onClick={() => navigate("/")}>
+          Back to {lock.name}
+        </button>
+      </main>
+    );
+  }
 
   return (
     <div className={`doc-page column-${width}`}>
@@ -607,6 +627,9 @@ export function DocPage(props: { readonly docId: string; readonly tabId: string 
           onCopyLink={copyLink}
           onDelete={deleteDoc}
           onMoveToProject={moveDoc}
+          groups={lock.kind === "locked" ? lock.groups : null}
+          group={doc.group}
+          onSetGroup={setGroup}
           onStartChat={startWork}
           onExportResult={showMessage}
           onShareClosed={refreshRole}

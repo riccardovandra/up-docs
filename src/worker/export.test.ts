@@ -27,6 +27,7 @@ const doc = (tabs: Array<Tab>): DocWithTabs => ({
     projectId: "p",
     title: "Doc",
     status: "thinking",
+    group: null,
     createdAt: 0,
     updatedAt: 0,
   },

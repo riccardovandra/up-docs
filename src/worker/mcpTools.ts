@@ -18,6 +18,8 @@ import {
 import { MAX_PROJECT_KEY_LENGTH, normalizeProjectKey } from "../shared/embed.ts";
 import {
   DOC_STATUSES,
+  docGroupArg,
+  MAX_DOC_GROUP_LENGTH,
   type Comment,
   type DocStatus,
   type DocSummary,
@@ -313,11 +315,25 @@ const tabSummary = (ctx: ToolContext, tab: Tab) => ({
   url: tabUrl(ctx, tab),
 });
 
+/** The `group` argument: a name, or null (and blank) for none. Required fails when absent. */
+function groupArg(args: Args, required: boolean): string | null | undefined {
+  const group = docGroupArg(args.group);
+  if (group === false) {
+    fail(
+      "invalid_argument",
+      `"group" must be text of at most ${MAX_DOC_GROUP_LENGTH} characters, or null.`,
+    );
+  }
+  if (group === undefined && required) fail("invalid_argument", 'Pass "group", or null for none.');
+  return group;
+}
+
 const docSummary = (ctx: ToolContext, doc: DocSummary, firstTabId: string | undefined) => ({
   docId: doc.id,
   projectId: doc.projectId,
   title: doc.title,
   status: doc.status,
+  group: doc.group,
   updatedAt: new Date(doc.updatedAt).toISOString(),
   url: firstTabId ? tabUrl(ctx, { docId: doc.id, id: firstTabId }) : `${ctx.origin}/d/${doc.id}`,
 });
@@ -449,8 +465,25 @@ export const TOOLS = [
         projectId: { type: "string" },
         title: { type: "string" },
         markdown: { type: "string", description: "Initial markdown for the first tab." },
+        group: {
+          type: "string",
+          description: "Group inside the project, such as Strategy or Posts. Omit for none.",
+        },
       },
       required: ["title"],
+    },
+  },
+  {
+    name: "set_doc_group",
+    description:
+      "Put a doc in a group inside its project, such as Strategy, Newsletters or Posts; group: null removes it from its group. list_docs shows each doc's group.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        docId: { type: "string" },
+        group: { type: ["string", "null"] },
+      },
+      required: ["docId", "group"],
     },
   },
   {
@@ -763,6 +796,7 @@ const handlers: Record<ToolName, (args: Args, ctx: ToolContext) => Promise<objec
   create_doc: async (args, ctx) => {
     const title = requireString(args, "title");
     const markdown = markdownArg(args, "markdown", false);
+    const group = groupArg(args, false);
     const projectId = await targetProject(ctx, args);
     if (markdown) checkTables(markdown);
     if (markdown) checkVideos(markdown);
@@ -773,6 +807,7 @@ const handlers: Record<ToolName, (args: Args, ctx: ToolContext) => Promise<objec
         title,
         ownerId: ctx.principal.userId,
         now: ctx.deps.now(),
+        group: group ?? null,
       }),
       "project",
     );
@@ -801,6 +836,17 @@ const handlers: Record<ToolName, (args: Args, ctx: ToolContext) => Promise<objec
     await need(ctx, docId, "editor");
     const projectId = toNoProject ? null : await targetProject(ctx, args);
     const doc = await load(ctx.deps.rooms.setDocProject(docId, { projectId, origin: null }), "doc");
+    return { doc: docSummary(ctx, doc, undefined) };
+  },
+
+  set_doc_group: async (args, ctx) => {
+    const docId = requireString(args, "docId");
+    const group = groupArg(args, true);
+    await need(ctx, docId, "editor");
+    const doc = await load(
+      ctx.deps.rooms.setDocGroup(docId, { group: group ?? null, origin: null }),
+      "doc",
+    );
     return { doc: docSummary(ctx, doc, undefined) };
   },
 

@@ -96,6 +96,9 @@ function writeStorage(key: string, value: string): void {
 const isSort = (value: string | null): value is HomeSort =>
   HOME_SORTS.some((sort) => sort.id === value);
 
+/** The group picker's "every group" choice; otherwise a group's name, or null for none. */
+const ALL_GROUPS = "\u0000all";
+
 export function LibraryPage() {
   const me = useMe();
   const userId = me?.user.id ?? "";
@@ -105,6 +108,10 @@ export function LibraryPage() {
   const embedKey =
     embedProject === null ? null : (embedProject.key ?? titleProjectKey(embedProject.name));
   const localFiles = useLocalFilesAvailable() === true;
+  // An app that locks the frame keeps it in its project: no switcher, no other projects.
+  const locked = embedProject?.locked === true && embedKey !== null;
+  /** The group shown: ALL_GROUPS, a group's name, or null for docs in no group. */
+  const [groupPick, setGroupPick] = useState<string | null>(ALL_GROUPS);
 
   const [library, setLibrary] = useState<HomeLibrary | null>(null);
   const [failed, setFailed] = useState(false);
@@ -176,13 +183,14 @@ export function LibraryPage() {
   }, [library, embedProject, embedKey]);
 
   const scope = useMemo((): ProjectScope => {
+    if (locked && embedKey) return { kind: "project", key: embedKey };
     if (picked && picked.embedKey === embedKey) return picked.scope;
     return restoreScope({
       stored: parseStoredScope(readStorage(scopeKey(embedded))),
       embedKey,
       projectKeys: new Set(projects.map((project) => project.key)),
     });
-  }, [picked, embedKey, embedded, projects]);
+  }, [locked, picked, embedKey, embedded, projects]);
 
   const chooseScope = useCallback(
     (next: ProjectScope) => {
@@ -210,13 +218,32 @@ export function LibraryPage() {
     });
 
   const pinned = useMemo(() => new Set(pins), [pins]);
+  const inScope = useMemo(
+    () => filterEntries(entries, { tab, userId, scope, statuses }),
+    [entries, tab, userId, scope, statuses],
+  );
+  // The parent's groups in its order, then any other group a doc carries, so none is hidden.
+  const groups = useMemo((): ReadonlyArray<string> => {
+    if (!locked) return [];
+    const named = embedProject?.groups ?? [];
+    const extra = inScope
+      .map((entry) => entry.group)
+      .filter((group): group is string => group !== null && !named.includes(group));
+    return [...named, ...new Set(extra)];
+  }, [locked, embedProject, inScope]);
+  const ungrouped = locked && inScope.some((entry) => entry.group === null);
   const visible = useMemo(
     () =>
       pinnedFirst(
-        sortEntries(filterEntries(entries, { tab, userId, scope, statuses }), sort),
+        sortEntries(
+          locked && groupPick !== ALL_GROUPS
+            ? inScope.filter((entry) => entry.group === groupPick)
+            : inScope,
+          sort,
+        ),
         pinned,
       ),
-    [entries, tab, userId, scope, statuses, sort, pinned],
+    [inScope, locked, groupPick, sort, pinned],
   );
   const hits = serverHits?.query === trimmedQuery ? serverHits.hits : [];
   const results = useMemo(
@@ -259,8 +286,16 @@ export function LibraryPage() {
           writeStorage(PINS_KEY, JSON.stringify(next));
           return next;
         }),
+      ...(locked
+        ? {
+            groups,
+            onGroup: (entry: HomeEntry, group: string | null) => {
+              void api.setDocGroup(entry.id, group).then(reload, reload);
+            },
+          }
+        : {}),
     }),
-    [moveTargets, reload],
+    [moveTargets, reload, locked, groups],
   );
 
   const scopeProject =
@@ -280,7 +315,8 @@ export function LibraryPage() {
     if (createsProject && embedProject && embedKey) {
       projectId = (await api.createProject(embedProject.name, embedKey)).project.id;
     }
-    const created = await api.createDoc(projectId, title);
+    const group = locked && groupPick !== ALL_GROUPS ? groupPick : null;
+    const created = await api.createDoc(projectId, title, group);
     navigate(docPath(created.doc.id));
   };
 
@@ -302,15 +338,23 @@ export function LibraryPage() {
   if (!library) return null;
 
   const scopeLabel = scopeName(scope, projects);
-  const createIn = scopeProject || createsProject ? scopeLabel : "No project";
+  const inGroup = locked && groupPick !== ALL_GROUPS && groupPick !== null ? groupPick : null;
+  const createIn =
+    scopeProject || createsProject
+      ? inGroup
+        ? `${scopeLabel}, ${inGroup}`
+        : scopeLabel
+      : "No project";
   const startDoc = () => setCreating(true);
   const filtering = statuses.size > 0;
 
   return (
     <main className="home">
       <div className="home-title-row">
-        <h1 className="home-title">UP Docs</h1>
-        <ProjectSwitcher scope={scope} projects={projects} onChange={chooseScope} />
+        <h1 className="home-title">{locked ? (embedProject?.name ?? "UP Docs") : "UP Docs"}</h1>
+        {locked ? null : (
+          <ProjectSwitcher scope={scope} projects={projects} onChange={chooseScope} />
+        )}
         <AccountMenu />
       </div>
 
@@ -422,8 +466,10 @@ export function LibraryPage() {
                     {DOC_STATUS_LABEL[status]}
                   </MenuItem>
                 ))}
-                <MenuSeparator />
-                <MenuLabel>Project</MenuLabel>
+                {locked ? null : (
+                  <>
+                    <MenuSeparator />
+                    <MenuLabel>Project</MenuLabel>
                 <MenuItem
                   kind="radio"
                   checked={sameScope(scope, ALL_PROJECTS)}
@@ -455,7 +501,9 @@ export function LibraryPage() {
                 >
                   No project
                 </MenuItem>
-                {filtering || scope.kind !== "all" ? (
+                  </>
+                )}
+                {filtering || (!locked && scope.kind !== "all") ? (
                   <>
                     <MenuSeparator />
                     <MenuItem
@@ -481,6 +529,23 @@ export function LibraryPage() {
           </button>
         </div>
       </div>
+
+      {locked && (groups.length > 0 || ungrouped) ? (
+        <div className="home-tabs home-groups" role="tablist" aria-label="Groups">
+          {[ALL_GROUPS, ...groups, ...(ungrouped ? [null] : [])].map((group) => (
+            <button
+              key={group ?? ""}
+              type="button"
+              role="tab"
+              aria-selected={groupPick === group}
+              className="home-tab"
+              onClick={() => setGroupPick(group)}
+            >
+              {group === ALL_GROUPS ? "All" : (group ?? "No group")}
+            </button>
+          ))}
+        </div>
+      ) : null}
 
       {view === "grid" ? (
         <div className="doc-grid">
