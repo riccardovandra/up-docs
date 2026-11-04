@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 
+import { isAdmin } from "../../shared/access.ts";
 import type { ApiTokenSummary } from "../../shared/protocol.ts";
 import { api } from "../api.ts";
 import { AccountMenu } from "../home/AccountMenu.tsx";
 import { HomeLink } from "../home/HomeLink.tsx";
 import { setMe, useMe } from "../me.ts";
+import { ProjectSettings } from "./ProjectSettings.tsx";
 
 export function SettingsPage() {
   const me = useMe();
@@ -105,6 +107,17 @@ export function SettingsPage() {
           </li>
         ))}
       </ul>
+      {me && isAdmin(me.user.id) ? (
+        <>
+          <h2>Projects</h2>
+          <p className="muted">
+            Rename a project, move its docs elsewhere, or delete it. A project is deleted only once
+            it holds no docs. T3 Code renames projects it syncs to their T3 Code title, and filing
+            a doc under a deleted project&apos;s key creates it again.
+          </p>
+          <ProjectSettings />
+        </>
+      ) : null}
     </main>
   );
 }

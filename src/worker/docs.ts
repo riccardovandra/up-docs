@@ -64,6 +64,13 @@ export class NotFoundError extends Error {
   }
 }
 
+/** Deleting a project that still holds docs would cascade to them; move them first. */
+export class ProjectNotEmptyError extends Error {
+  constructor() {
+    super("project_not_empty");
+  }
+}
+
 /** A tab move that would put it under itself or one of its descendants. */
 export class InvalidMoveError extends Error {
   constructor() {
@@ -89,6 +96,7 @@ export function reviveError(cause: unknown): unknown {
   }
   if (cause.message === "invalid_move") return new InvalidMoveError();
   if (cause.message === "last_tab") return new LastTabError();
+  if (cause.message === "project_not_empty") return new ProjectNotEmptyError();
   return cause;
 }
 
@@ -211,6 +219,51 @@ export async function syncProjects(
 /** A project made by name: the one with its title key when that already exists. */
 export function createProject(db: D1Database, name: string, now: number): Promise<Project> {
   return ensureProject(db, { key: titleProjectKey(name), name, now });
+}
+
+/** Changes a project's display name; its key stays, so T3 Code still finds it. */
+export async function renameProject(
+  db: D1Database,
+  input: { readonly projectId: string; readonly name: string },
+): Promise<Project> {
+  const row = await db
+    .prepare("UPDATE projects SET name = ? WHERE id = ? RETURNING *")
+    .bind(input.name, input.projectId)
+    .first<ProjectRow>();
+  if (!row) throw new NotFoundError("project");
+  return toProject(row);
+}
+
+/** Every doc filed in the project, for moving them out one by one through their DocRooms. */
+export async function projectDocIds(
+  db: D1Database,
+  projectId: string,
+): Promise<ReadonlyArray<string>> {
+  await getProject(db, projectId);
+  const { results } = await db
+    .prepare("SELECT id FROM docs WHERE project_id = ?")
+    .bind(projectId)
+    .all<{ id: string }>();
+  return results.map((row) => row.id);
+}
+
+/**
+ * Deletes a project only while it holds no docs. docs.project_id cascades on
+ * delete, so the emptiness check runs in the same statement: a doc filed in
+ * between makes the delete refuse instead of taking the doc with it.
+ */
+export async function deleteEmptyProject(db: D1Database, projectId: string): Promise<void> {
+  const row = await db
+    .prepare(
+      `DELETE FROM projects WHERE id = ?1
+       AND NOT EXISTS (SELECT 1 FROM docs WHERE project_id = ?1)
+       RETURNING id`,
+    )
+    .bind(projectId)
+    .first();
+  if (row) return;
+  await getProject(db, projectId);
+  throw new ProjectNotEmptyError();
 }
 
 /** Creates a doc with one empty top-level tab, owned by `ownerId`. */
