@@ -51,6 +51,9 @@ const PAGE_HOSTS: Readonly<Record<EmbedProviderId, (host: string) => boolean>> =
 /** The fields a provider page or feed yields, before the image is copied. */
 export interface FetchedPost {
   readonly author: string | null;
+  /** The author's profile line, as LinkedIn shows it under their name. */
+  readonly headline: string | null;
+  readonly authorImageSource: string | null;
   readonly handle: string | null;
   readonly title: string | null;
   readonly text: string | null;
@@ -148,7 +151,14 @@ export async function fetchPost(
         Accept: "text/html",
         "Accept-Language": "en",
       });
-      return page ? linkedinPost(text(page.bytes)) : null;
+      const post = page ? linkedinPost(text(page.bytes)) : null;
+      if (!post || !target.frameUrl) return post;
+      // The headline is on LinkedIn's embed page only. Without it the copy still stands.
+      const embed = await fetchLimited(fetchRemote, target.frameUrl, allowed, MAX_PAGE_BYTES, {
+        Accept: "text/html",
+        "Accept-Language": "en",
+      }).catch(() => null);
+      return embed ? { ...post, headline: linkedinHeadline(text(embed.bytes)) } : post;
     }
     if (target.kind === "post") {
       const url = `https://${X_DATA_HOST}/tweet-result?id=${target.id}&lang=en&token=${xToken(target.id)}`;
@@ -324,6 +334,8 @@ export function linkedinPost(html: string): FetchedPost | null {
     : undefined;
   const post: FetchedPost = {
     author: line(isRecord(author) ? author.name : null),
+    headline: null,
+    authorImageSource: isRecord(author) ? imageOf(author.image) : null,
     handle: null,
     title: line(posting?.headline ?? meta.get("og:title")),
     text: clean(posting?.articleBody ?? posting?.text ?? meta.get("og:description"), MAX_TEXT),
@@ -363,8 +375,13 @@ export function xPost(data: unknown): FetchedPost | null {
   }
   const media = Array.isArray(data.mediaDetails) ? data.mediaDetails[0] : undefined;
   const photo = Array.isArray(data.photos) ? data.photos[0] : undefined;
+  const avatar =
+    typeof user.profile_image_url_https === "string" ? user.profile_image_url_https : null;
   const post: FetchedPost = {
     author: line(user.name),
+    headline: null,
+    // "_normal" is 48 px; "_bigger" is 73 px, sharp at the size the card shows.
+    authorImageSource: avatar?.replace(/_normal(\.[a-z]+)$/i, "_bigger$1") ?? null,
     handle: line(user.screen_name),
     title: null,
     text: clean(decodeEntities(body), MAX_TEXT),
@@ -404,11 +421,27 @@ export const isGenericXPage = (post: FetchedPost) =>
     /^X\b|Everything App/.test(post.title) ||
     (post.imageSource ?? "").includes("/default-og"));
 
+/**
+ * The author's headline from LinkedIn's embed page: the first paragraph after
+ * the link to their profile. Null when the page is laid out some other way.
+ */
+export function linkedinHeadline(html: string): string | null {
+  const at = html.search(/data-tracking-control-name="public_post_embed_feed-actor-name"/);
+  if (at === -1) return null;
+  const after = html.slice(at, at + 4000);
+  const paragraph = /<\/a>[\s\S]*?<p\b[^>]*>([\s\S]*?)<\/p>/.exec(after)?.[1];
+  if (paragraph === undefined) return null;
+  const words = decodeEntities(paragraph.replace(/<!--[\s\S]*?-->/g, "").replace(/<[^>]*>/g, ""));
+  return line(words);
+}
+
 /** Any page's Open Graph tags. */
 export function openGraphPost(html: string): FetchedPost | null {
   const meta = metaTags(html);
   const post: FetchedPost = {
     author: line(meta.get("article:author") ?? null),
+    headline: null,
+    authorImageSource: null,
     handle: null,
     title: line(meta.get("og:title") ?? meta.get("twitter:title")),
     text: clean(
@@ -459,15 +492,18 @@ export async function loadEmbed(
   }
   const post = await fetchPost(target, deps.fetchRemote);
   if (!post) return { ok: false, status: 502, error: "embed_unavailable" };
-  const image = post.imageSource
-    ? await copyImage(deps, docId, target.provider, post.imageSource)
-    : null;
+  const [image, authorImage] = await Promise.all([
+    post.imageSource ? copyImage(deps, docId, target.provider, post.imageSource) : null,
+    post.authorImageSource ? copyImage(deps, docId, target.provider, post.authorImageSource) : null,
+  ]);
   const now = deps.now();
   const snapshot: EmbedSnapshot = {
     provider: target.provider,
     kind: target.kind,
     url: target.canonicalUrl,
     author: post.author,
+    headline: post.headline,
+    authorImage: authorImage ?? (input.refresh ? (existing?.authorImage ?? null) : null),
     handle: post.handle,
     title: post.title,
     text: post.text,

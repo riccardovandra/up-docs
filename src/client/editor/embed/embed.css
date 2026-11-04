@@ -45,8 +45,38 @@
 .embed-head {
   display: flex;
   gap: 0.75rem;
-  align-items: baseline;
+  align-items: flex-start;
   justify-content: space-between;
+}
+
+.embed-person {
+  display: flex;
+  gap: 0.625rem;
+  align-items: center;
+  min-width: 0;
+}
+
+.embed-avatar {
+  flex: none;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  object-fit: cover;
+  background: color-mix(in srgb, var(--text) 8%, var(--bg));
+}
+
+.embed-lines {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.embed-headline {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 0.8125rem;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .embed-who {

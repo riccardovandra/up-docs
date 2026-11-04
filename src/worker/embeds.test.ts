@@ -6,6 +6,7 @@ import type { DocWithTabs } from "../shared/protocol.ts";
 import {
   decodeEntities,
   jsonLd,
+  linkedinHeadline,
   linkedinPost,
   MAX_EMBEDS_PER_DOC,
   metaTags,
@@ -18,6 +19,16 @@ import { makeApiHarness } from "./testing/apiHarness.ts";
 const ACTIVITY = "7209442266791186432";
 const POST_URL = `https://www.linkedin.com/posts/pierre_hooks-activity-${ACTIVITY}-uyzh`;
 const PAGE_URL = `https://www.linkedin.com/feed/update/urn:li:activity:${ACTIVITY}`;
+const EMBED_URL = `https://www.linkedin.com/embed/feed/update/urn:li:activity:${ACTIVITY}?collapsed=1`;
+const AVATAR_URL = "https://media.licdn.com/dms/image/v2/p/profile-displayphoto-shrink_200_200/0/1";
+/** The part of LinkedIn's embed page around the author, as it is laid out today. */
+const EMBED_PAGE = `<a class="text-sm link-styled" href="https://www.linkedin.com/in/p?trk=x" data-tracking-control-name="public_post_embed_feed-actor-name" aria-label="View profile for Pierre Herubel">
+  Pierre Herubel
+</a>
+<!----><!---->        </div>
+<p class="!text-xs text-color-text-low-emphasis m-0 truncate">
+<!---->                I help B2B businesses build in-house content systems &amp; more
+</p>`;
 const IMAGE_URL = "https://media.licdn.com/dms/image/v2/abc/feedshare-shrink_800/0/1?e=1&t=x";
 const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 1, 2]);
 
@@ -32,7 +43,12 @@ const linkedinPage = (posting: Record<string, unknown> = {}) => `<!doctype html>
   datePublished: "2024-06-20T06:29:41.332Z",
   commentCount: 412,
   image: { "@type": "ImageObject", url: IMAGE_URL },
-  author: { "@type": "Person", name: "Pierre Herubel", url: "https://www.linkedin.com/in/p" },
+  author: {
+    "@type": "Person",
+    name: "Pierre Herubel",
+    url: "https://www.linkedin.com/in/p",
+    image: { "@type": "ImageObject", url: AVATAR_URL },
+  },
   interactionStatistic: [
     {
       "@type": "InteractionCounter",
@@ -66,6 +82,8 @@ describe("page readers", () => {
   it("reads a LinkedIn post as plain strings", () => {
     expect(linkedinPost(linkedinPage())).toEqual({
       author: "Pierre Herubel",
+      headline: null,
+      authorImageSource: AVATAR_URL,
       handle: null,
       title: "Hooks that work.",
       text: "Hooks that work.\n\n1. Start with a number.\n<script>alert(1)</script>",
@@ -74,6 +92,13 @@ describe("page readers", () => {
       likes: 1611,
       comments: 412,
     });
+  });
+
+  it("reads the author's headline from LinkedIn's embed page", () => {
+    expect(linkedinHeadline(EMBED_PAGE)).toBe(
+      "I help B2B businesses build in-house content systems & more",
+    );
+    expect(linkedinHeadline("<html>nothing here</html>")).toBeNull();
   });
 
   it("refuses a LinkedIn page with no post in it, such as a sign-in wall", () => {
@@ -99,11 +124,17 @@ describe("page readers", () => {
         created_at: "2006-03-21T20:50:14.000Z",
         favorite_count: 10,
         conversation_count: 2,
-        user: { name: "jack", screen_name: "jack" },
+        user: {
+          name: "jack",
+          screen_name: "jack",
+          profile_image_url_https: "https://pbs.twimg.com/profile_images/1/a_normal.jpg",
+        },
         mediaDetails: [{ type: "photo", media_url_https: "https://pbs.twimg.com/media/a.jpg" }],
       }),
     ).toEqual({
       author: "jack",
+      headline: null,
+      authorImageSource: "https://pbs.twimg.com/profile_images/1/a_bigger.jpg",
       handle: "jack",
       title: null,
       text: "Read this https://example.com/a & more",
@@ -200,7 +231,9 @@ describe("POST /api/docs/:id/embeds", () => {
   it("takes a copy once, stores its image in the doc, and serves the copy to viewers", async () => {
     const { api, owner, docId, person, embed, page, image } = await setup();
     api.remote.set(PAGE_URL, page());
+    api.remote.set(EMBED_URL, () => new Response(EMBED_PAGE));
     api.remote.set(IMAGE_URL, image);
+    api.remote.set(AVATAR_URL, image);
 
     const viewer = await person("v@example.com", "viewer");
     const first = await embed(viewer, { url: POST_URL });
@@ -210,11 +243,19 @@ describe("POST /api/docs/:id/embeds", () => {
       provider: "linkedin",
       url: PAGE_URL,
       author: "Pierre Herubel",
+      headline: "I help B2B businesses build in-house content systems & more",
       likes: 1611,
       fetchedAt: api.clock.now,
     });
     expect(snapshot.image).toMatch(new RegExp(`^/api/images/${docId}/[0-9a-f-]{36}\\.png$`));
-    expect(api.fetched.map((request) => request.url)).toEqual([PAGE_URL, IMAGE_URL]);
+    expect(snapshot.authorImage).toMatch(new RegExp(`^/api/images/${docId}/[0-9a-f-]{36}\\.png$`));
+    expect(snapshot.authorImage).not.toBe(snapshot.image);
+    expect(api.fetched.map((request) => request.url)).toEqual([
+      PAGE_URL,
+      EMBED_URL,
+      IMAGE_URL,
+      AVATAR_URL,
+    ]);
     expect(api.fetched[0]!.headers.get("User-Agent")).toContain("UPDocs");
 
     // The image is a doc image: served to readers, never from LinkedIn.
@@ -225,7 +266,19 @@ describe("POST /api/docs/:id/embeds", () => {
     // Any link form for the same post reads the same copy, with no new fetch.
     const again = await embed(owner, { url: PAGE_URL });
     expect(((await again.json()) as { embed: EmbedSnapshot }).embed).toEqual(snapshot);
-    expect(api.fetched).toHaveLength(2);
+    expect(api.fetched).toHaveLength(4);
+  });
+
+  it("keeps the copy when LinkedIn's embed page fails, without a headline", async () => {
+    const { api, owner, embed, page } = await setup();
+    api.remote.set(PAGE_URL, page());
+    const response = await embed(owner, { url: POST_URL });
+    expect(response.status).toBe(200);
+    expect(((await response.json()) as { embed: EmbedSnapshot }).embed).toMatchObject({
+      author: "Pierre Herubel",
+      headline: null,
+      authorImage: null,
+    });
   });
 
   it("lets only an editor retake a copy, and keeps the old one when that fails", async () => {

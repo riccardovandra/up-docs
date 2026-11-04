@@ -367,7 +367,20 @@ export class EmbedView implements NodeView {
         if (text) card.append(el("p", "embed-text embed-text-clamp", text));
         const actions: Array<HTMLElement> = [button("Show post", "embed-action", expand)];
         actions.push(link(snapshot.url, `Open on ${PROVIDER_NAMES[target.provider]}`));
-        if (this.editor.isEditable) actions.push(this.compactToggle());
+        if (this.editor.isEditable) {
+          actions.push(
+            button("Refresh copy", "embed-action", () => {
+              const generation = this.generation;
+              const repaint = () => {
+                if (!this.destroyed && generation === this.generation)
+                  this.showCompact(block, target);
+              };
+              // A failed refresh leaves the old copy in the cache, so the repaint shows it.
+              this.copy(block, target, true).then(repaint, repaint);
+            }),
+            this.compactToggle(),
+          );
+        }
         card.append(this.actions(actions));
         this.stage.replaceChildren(card);
       },
@@ -437,12 +450,25 @@ export class EmbedView implements NodeView {
     return card;
   }
 
+  /** Photo, name (and X handle), and the LinkedIn headline under the name. */
   private head(target: EmbedTarget, snapshot: EmbedSnapshot) {
     const head = el("header", "embed-head");
+    const person = el("div", "embed-person");
+    if (snapshot.authorImage && isDocImageSrc(snapshot.authorImage)) {
+      const photo = el("img", "embed-avatar");
+      photo.src = snapshot.authorImage;
+      photo.alt = "";
+      photo.decoding = "async";
+      person.append(photo);
+    }
+    const lines = el("div", "embed-lines");
     const who = el("div", "embed-who");
     if (snapshot.author) who.append(el("span", "embed-author", snapshot.author));
     if (snapshot.handle) who.append(el("span", "embed-handle", `@${snapshot.handle}`));
-    head.append(who, el("span", "embed-provider", PROVIDER_NAMES[target.provider]));
+    lines.append(who);
+    if (snapshot.headline) lines.append(el("span", "embed-headline", snapshot.headline));
+    person.append(lines);
+    head.append(person, el("span", "embed-provider", PROVIDER_NAMES[target.provider]));
     return head;
   }
 

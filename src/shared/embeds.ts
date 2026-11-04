@@ -39,6 +39,10 @@ export interface EmbedSnapshot {
   readonly kind: "post" | "article";
   readonly url: string;
   readonly author: string | null;
+  /** The author's profile line (LinkedIn). Absent from copies taken before it was added. */
+  readonly headline?: string | null;
+  /** A doc image URL holding the author's profile photo. Absent from older copies. */
+  readonly authorImage?: string | null;
   readonly handle: string | null;
   readonly title: string | null;
   readonly text: string | null;
