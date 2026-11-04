@@ -485,6 +485,135 @@ describe("projects", () => {
   });
 });
 
+describe("project housekeeping", () => {
+  const library = async (api: ReturnType<typeof makeApiHarness>, cookie: string) =>
+    (await (
+      await api.call("GET", "/api/library", { headers: { Cookie: cookie } })
+    ).json()) as Library;
+  const project = async (api: ReturnType<typeof makeApiHarness>, cookie: string, name: string) =>
+    (
+      (await (
+        await api.call("POST", "/api/projects", { body: { name }, headers: { Cookie: cookie } })
+      ).json()) as { project: { id: string; key: string } }
+    ).project;
+
+  it("renames a project and keeps its key", async () => {
+    const api = makeApiHarness();
+    const cookie = await api.signIn();
+    const { id, key } = await project(api, cookie, "Newsletter");
+    const renamed = await api.call("PATCH", `/api/projects/${id}`, {
+      body: { name: "Letters" },
+      headers: { Cookie: cookie },
+    });
+    expect(renamed.status).toBe(200);
+    expect(await renamed.json()).toMatchObject({ project: { id, key, name: "Letters" } });
+    const blank = await api.call("PATCH", `/api/projects/${id}`, {
+      body: { name: " " },
+      headers: { Cookie: cookie },
+    });
+    expect(blank.status).toBe(400);
+    const missing = await api.call("PATCH", "/api/projects/missing", {
+      body: { name: "x" },
+      headers: { Cookie: cookie },
+    });
+    expect(missing.status).toBe(404);
+  });
+
+  it("refuses to delete a project that holds docs, and deletes it once they are moved", async () => {
+    const api = makeApiHarness();
+    const cookie = await api.signIn();
+    const headers = { Cookie: cookie };
+    const { doc } = await seedDoc(api, cookie);
+    const source = doc.projectId!;
+    const second = await api.call("POST", "/api/docs", {
+      body: { projectId: source, title: "Second" },
+      headers,
+    });
+    const target = await project(api, cookie, "Content Creation");
+
+    const refused = await api.call("DELETE", `/api/projects/${source}`, { headers });
+    expect(refused.status).toBe(409);
+    expect(await refused.json()).toEqual({ error: "project_not_empty" });
+    // The docs are untouched by the refused delete.
+    expect((await api.call("GET", `/api/docs/${doc.id}`, { headers })).status).toBe(200);
+
+    expect(
+      (
+        await api.call("POST", `/api/projects/${source}/move-docs`, {
+          body: { projectId: source },
+          headers,
+        })
+      ).status,
+    ).toBe(400);
+    expect(
+      (
+        await api.call("POST", `/api/projects/${source}/move-docs`, {
+          body: { projectId: "missing" },
+          headers,
+        })
+      ).status,
+    ).toBe(404);
+    expect(
+      (await api.call("POST", `/api/projects/${source}/move-docs`, { body: {}, headers })).status,
+    ).toBe(400);
+
+    const moved = await api.call("POST", `/api/projects/${source}/move-docs`, {
+      body: { projectId: target.id, clientId: "settings" },
+      headers,
+    });
+    expect(await moved.json()).toEqual({ moved: 2 });
+    expect(api.broadcasts.at(-1)).toMatchObject({ type: "doc.updated", origin: "settings" });
+
+    const deleted = await api.call("DELETE", `/api/projects/${source}`, { headers });
+    expect(deleted.status).toBe(200);
+    const after = await library(api, cookie);
+    expect(after.projects.map((entry) => entry.id)).toEqual([target.id]);
+    const secondId = ((await second.json()) as DocWithTabs).doc.id;
+    expect(after.projects[0]!.docs.map((entry) => entry.id).toSorted()).toEqual(
+      [doc.id, secondId].toSorted(),
+    );
+    expect((await api.call("DELETE", `/api/projects/${source}`, { headers })).status).toBe(404);
+  });
+
+  it("moves a project's docs to no project", async () => {
+    const api = makeApiHarness();
+    const cookie = await api.signIn();
+    const { doc } = await seedDoc(api, cookie);
+    await api.call("POST", `/api/projects/${doc.projectId}/move-docs`, {
+      body: { projectId: null },
+      headers: { Cookie: cookie },
+    });
+    expect((await library(api, cookie)).noProjectDocs.map((entry) => entry.id)).toEqual([doc.id]);
+  });
+
+  it("is admin only", async () => {
+    const api = makeApiHarness();
+    const cookie = await api.signIn();
+    const { doc } = await seedDoc(api, cookie);
+    await api.call("POST", `/api/docs/${doc.id}/members`, {
+      body: { email: "guest@example.com", role: "owner" },
+      headers: { Cookie: cookie },
+    });
+    const guest = { Cookie: await api.signIn("guest@example.com") };
+    const projectId = doc.projectId!;
+    expect(
+      (await api.call("PATCH", `/api/projects/${projectId}`, { body: { name: "x" }, headers: guest }))
+        .status,
+    ).toBe(403);
+    expect(
+      (
+        await api.call("POST", `/api/projects/${projectId}/move-docs`, {
+          body: { projectId: null },
+          headers: guest,
+        })
+      ).status,
+    ).toBe(403);
+    expect((await api.call("DELETE", `/api/projects/${projectId}`, { headers: guest })).status).toBe(
+      403,
+    );
+  });
+});
+
 describe("doc threads", () => {
   const link = { environmentId: "env-1", threadId: "thread-1", title: "Build the importer" };
 

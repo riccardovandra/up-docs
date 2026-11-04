@@ -189,6 +189,46 @@ function isSameOriginWrite(request: Request, deps: ApiDeps): boolean {
 
 const SAFE_METHODS = new Set(["GET", "HEAD"]);
 
+/**
+ * `PATCH /api/projects/:id` renames, `POST /api/projects/:id/move-docs` moves
+ * every doc to `projectId` (null for no project), and `DELETE` removes an
+ * empty project. A project with docs is never deleted with them.
+ */
+async function handleProject(
+  request: Request,
+  route: {
+    readonly id: string;
+    readonly sub: string | undefined;
+    readonly method: string;
+    readonly segments: ReadonlyArray<string>;
+  },
+  deps: ApiDeps,
+): Promise<Response | null> {
+  const { id, sub, method } = route;
+  if (!sub && method === "PATCH") {
+    const name = str((await readJson(request)).name);
+    if (!name) return error(400, "invalid_name");
+    return json({ project: await Docs.renameProject(deps.db, { projectId: id, name }) });
+  }
+  if (sub === "move-docs" && route.segments.length === 3 && method === "POST") {
+    const body = await readJson(request);
+    const projectId = projectIdArg(body.projectId);
+    if (projectId === false || projectId === undefined) return error(400, "invalid_project");
+    if (projectId === id) return error(400, "same_project");
+    if (projectId !== null) await Docs.getProject(deps.db, projectId);
+    const origin = str(body.clientId);
+    const docIds = await Docs.projectDocIds(deps.db, id);
+    // Through each DocRoom, so pages open on a moved doc hear about it.
+    for (const docId of docIds) await deps.rooms.setDocProject(docId, { projectId, origin });
+    return json({ moved: docIds.length });
+  }
+  if (!sub && method === "DELETE") {
+    await Docs.deleteEmptyProject(deps.db, id);
+    return json({ ok: true });
+  }
+  return null;
+}
+
 export async function handleApi(request: Request, deps: ApiDeps): Promise<Response> {
   const url = new URL(request.url);
   const path = url.pathname.replace(/\/+$/, "");
@@ -305,6 +345,13 @@ export async function handleApi(request: Request, deps: ApiDeps): Promise<Respon
       if (!projects) return error(400, "invalid_projects");
       const synced = await Docs.syncProjects(deps.db, projects, now);
       return json({ projects: synced.map(({ id, key, name }) => ({ id, key, name })) });
+    }
+
+    // Project housekeeping from Settings. Admin only, like creating projects.
+    if (resource === "projects" && id && id !== "sync") {
+      if (!Access.isAdmin(principal.userId)) return error(403, "forbidden");
+      const response = await handleProject(request, { id, sub, method, segments }, deps);
+      if (response) return response;
     }
 
     if (path === "/api/docs" && method === "POST") {
@@ -573,6 +620,7 @@ export async function handleApi(request: Request, deps: ApiDeps): Promise<Respon
     if (cause instanceof Access.ReservedEmailError) return error(400, "invalid_email");
     if (cause instanceof Docs.InvalidMoveError) return error(400, "invalid_move");
     if (cause instanceof Docs.LastTabError) return error(409, "last_tab");
+    if (cause instanceof Docs.ProjectNotEmptyError) return error(409, "project_not_empty");
     throw cause;
   }
 }

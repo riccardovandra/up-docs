@@ -1531,3 +1531,43 @@ span.tab-row-toggle {
 .open-tab-close:hover {
   background: var(--hover);
 }
+
+.button.danger {
+  background: transparent;
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.project-list {
+  list-style: none;
+  padding: 0;
+}
+
+.project-list li {
+  padding: 0.6rem 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.project-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
+  align-items: baseline;
+}
+
+.project-row > .muted {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.85rem;
+  overflow-wrap: anywhere;
+}
+
+.project-action {
+  flex-wrap: wrap;
+  align-items: center;
+  margin: 0.75rem 0 0.25rem;
+}
+
+.project-list .error {
+  margin: 0.25rem 0 0;
+}

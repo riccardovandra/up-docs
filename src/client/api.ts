@@ -115,6 +115,18 @@ export const api = {
   /** Admin only. Returns the existing project when one already has the key (or, without one, the name). */
   createProject: (name: string, key?: string) =>
     request<{ project: Project }>("POST", "/api/projects", key ? { name, key } : { name }),
+  /** Admin only. The key stays, so T3 Code still finds the project. */
+  renameProject: (projectId: string, name: string) =>
+    request<{ project: Project }>("PATCH", `/api/projects/${projectId}`, { name }),
+  /** Admin only. Moves every doc in the project to `target`, or to no project when null. */
+  moveProjectDocs: (projectId: string, target: string | null) =>
+    request<{ moved: number }>("POST", `/api/projects/${projectId}/move-docs`, {
+      projectId: target,
+      clientId,
+    }),
+  /** Admin only. Refused with 409 project_not_empty while the project holds docs. */
+  deleteProject: (projectId: string) =>
+    request<{ ok: true }>("DELETE", `/api/projects/${projectId}`),
   createDoc: (projectId: string | null, title: string, group: string | null = null) =>
     request<DocWithTabs>("POST", "/api/docs", { projectId, title, ...(group ? { group } : {}) }),
   doc: (docId: string) => request<DocView>("GET", `/api/docs/${docId}`),
