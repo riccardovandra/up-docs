@@ -70,6 +70,17 @@ export function SettingsPage() {
         </button>
         {nameSaved ? <span className="muted">Saved</span> : null}
       </form>
+      {me && isAdmin(me.user.id) ? (
+        <>
+          <h2>Projects</h2>
+          <p className="muted">
+            Rename a project, move its docs elsewhere, or delete it. A project is deleted only once
+            it holds no docs. T3 Code renames projects it syncs to their T3 Code title, and filing
+            a doc under a deleted project&apos;s key creates it again.
+          </p>
+          <ProjectSettings />
+        </>
+      ) : null}
       <h2>API tokens</h2>
       <p className="muted">
         Agents and T3 Code use these as <code>Authorization: Bearer …</code> on <code>/api</code>{" "}
@@ -107,17 +118,6 @@ export function SettingsPage() {
           </li>
         ))}
       </ul>
-      {me && isAdmin(me.user.id) ? (
-        <>
-          <h2>Projects</h2>
-          <p className="muted">
-            Rename a project, move its docs elsewhere, or delete it. A project is deleted only once
-            it holds no docs. T3 Code renames projects it syncs to their T3 Code title, and filing
-            a doc under a deleted project&apos;s key creates it again.
-          </p>
-          <ProjectSettings />
-        </>
-      ) : null}
     </main>
   );
 }
