@@ -66,6 +66,9 @@ export function makeApiHarness(overrides: Partial<ApiDeps> = {}) {
       for (const key of [...videos.keys()]) if (key.startsWith(prefix)) videos.delete(key);
     },
   };
+  /** Provider responses by URL; anything else answers 404. `fetched` logs every request. */
+  const remote = new Map<string, () => Response>();
+  const fetched: Array<Request> = [];
   const mail: { delivery: EmailDelivery } = { delivery: "sent" };
   const deps: ApiDeps = {
     db,
@@ -147,6 +150,10 @@ export function makeApiHarness(overrides: Partial<ApiDeps> = {}) {
       },
     },
     videos: videoStore,
+    fetchRemote: async (request) => {
+      fetched.push(request);
+      return remote.get(request.url)?.() ?? new Response("not found", { status: 404 });
+    },
     emailEnabled: true,
     adminPassword: undefined,
     sendLoginCode: async (email, code) => {
@@ -202,6 +209,8 @@ export function makeApiHarness(overrides: Partial<ApiDeps> = {}) {
     images,
     videos,
     uploads,
+    remote,
+    fetched,
     call,
     signIn,
   };

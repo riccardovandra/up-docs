@@ -546,6 +546,9 @@ export function DocPage(props: { readonly docId: string; readonly tabId: string 
             : "Could not upload the video. Try again.",
     );
   });
+  const loadEmbed = useStableCallback((url: string, refresh: boolean) =>
+    api.embed(props.docId, url, refresh),
+  );
   const insertVideo = useStableCallback((file: File, at: number | null = null) => {
     const target = editor;
     setNotice(`Uploading ${file.name}...`);
@@ -728,6 +731,7 @@ export function DocPage(props: { readonly docId: string; readonly tabId: string 
                   uploadImage={uploadImage}
                   onUploadError={imageFailed}
                   onVideoFile={insertVideo}
+                  loadEmbed={loadEmbed}
                   onChange={(markdown) => saver.current?.schedule(markdown)}
                   onEditor={setEditor}
                 />

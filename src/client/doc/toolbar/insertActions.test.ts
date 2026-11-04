@@ -26,6 +26,7 @@ describe("insert actions", () => {
       "image",
       "video-link",
       "video-upload",
+      "embed-link",
     ]);
   });
 
@@ -49,7 +50,14 @@ describe("insert actions", () => {
       order: 75,
       run: () => {},
     });
-    expect(ids().slice(-5)).toEqual(["table", "rich-table", "image", "video-link", "video-upload"]);
+    expect(ids().slice(-6)).toEqual([
+      "table",
+      "rich-table",
+      "image",
+      "video-link",
+      "video-upload",
+      "embed-link",
+    ]);
     unregister();
     expect(getInsertAction("rich-table")).toBeUndefined();
   });

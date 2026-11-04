@@ -33,6 +33,11 @@ Videos play inside the doc from a \`\`\`t3-video block. Its first line is the so
 https://www.youtube.com/watch?v=dQw4w9WgXcQ
 Release walkthrough
 \`\`\`
+Posts embed from a \`\`\`t3-embed block: the first line is one https link and the optional second line is a caption, nothing else. LinkedIn and X posts show the provider's own embed, and the doc also keeps a saved copy (author, text, image) taken the first time it is opened; X articles show that copy; any other link shows as a link card. \`\`\`t3-embed compact shows only the author and the first two lines, no image, until the reader expands it: use it when a doc holds many posts. Use an embed when the post itself should be visible in the doc. Example:
+\`\`\`t3-embed
+https://www.linkedin.com/posts/name_slug-activity-7209442266791186432-uyzh
+Hook: a number in the first line
+\`\`\`
 Comments: when asked to review or address comments, list_comments, make the requested edits in the doc, reply_comment in each thread saying what changed (or answering the question), and resolve_comment once a thread is fully handled. To raise a point on a passage, create_comment with a short exact quote from the tab; on a table cell, pass anchor {"kind":"cell","blockId":<table id>,"rowId","colId"} instead, and on a diagram label {"kind":"label","blockId":<diagram id>,"textId"}.
 Sharing: docs are private to the people on them. share_doc gives someone access by email (owner, editor, commenter or viewer); list_members and unshare_doc manage it. You act with the role of the person whose token you use.
 Diagrams use Claude's widget format: a fenced block \`\`\`t3-widget id=<slug>\` whose body is ONE JS/JSX module, \`export default () => <svg viewBox='0 0 760 H' role='img' aria-label='<title words>'>…</svg>;\` (a block body with consts and lowercase helpers is fine). The id names the diagram in its tab and never changes. Writes with an invalid diagram are refused with rule names and line:col.

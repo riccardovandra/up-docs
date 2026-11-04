@@ -32,6 +32,8 @@ import { widgetProblems } from "./widgets.ts";
 import { checkTablesIn } from "../shared/table.ts";
 import { MAX_VIDEO_PARTS, VIDEO_PART_BYTES, videoFileType } from "../shared/video.ts";
 import * as Videos from "./videos.ts";
+import * as Embeds from "./embeds.ts";
+import { matchEmbed } from "../shared/embeds.ts";
 
 /** The ordered write path for a doc; production routes it to the doc's DocRoom. */
 export interface DocRooms {
@@ -111,6 +113,8 @@ export interface ApiDeps {
   readonly images: Images.ImageStore;
   /** Null without an R2 bucket: uploads are refused, and video links still work. */
   readonly videos: Videos.VideoStore | null;
+  /** Fetches provider pages for embedded posts: the Worker's own `fetch`. */
+  readonly fetchRemote: Embeds.RemoteFetch;
   /** Whether sign-in codes and invites can reach anyone. */
   readonly emailEnabled: boolean;
   readonly adminPassword: string | undefined;
@@ -452,6 +456,21 @@ export async function handleApi(request: Request, deps: ApiDeps): Promise<Respon
         (await Images.imageResponse(deps.images, { docId: id, file: sub })) ??
         error(404, "not_found")
       );
+    }
+
+    // The doc's saved copy of an embedded post, taken on first request.
+    // Any reader may ask for a missing copy; only an editor may retake one.
+    if (resource === "docs" && id && sub === "embeds" && !subId && method === "POST") {
+      const body = await readJson(request);
+      const target = typeof body.url === "string" ? matchEmbed(body.url) : null;
+      if (!target) return error(400, "embed_unsupported");
+      const refresh = body.refresh === true;
+      await need(id, refresh ? "editor" : "viewer");
+      const result = await Embeds.loadEmbed(
+        { db: deps.db, images: deps.images, fetchRemote: deps.fetchRemote, now: deps.now },
+        { docId: id, target, refresh },
+      );
+      return result.ok ? json({ embed: result.snapshot }) : error(result.status, result.error);
     }
 
     if (resource === "docs" && id && sub === "videos" && segments.length <= 4) {

@@ -51,6 +51,7 @@ function apiDeps(request: Request, env: Env, ctx: ExecutionContext): ApiDeps {
     },
     images: env.IMAGES ? r2ImageStore(env.IMAGES) : d1ImageStore(env.DB),
     videos: env.IMAGES ? r2VideoStore(env.IMAGES) : null,
+    fetchRemote: (request) => fetch(request),
     emailEnabled: emailEnabled(env, local),
     adminPassword: env.ADMIN_PASSWORD,
     sendLoginCode: (email, code) => sendLoginCode(env, local, email, code),

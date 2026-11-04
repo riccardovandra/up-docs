@@ -8,6 +8,7 @@
 // its cell or label through edits and is orphaned only when that part goes.
 
 import { cellText, findTables, TABLE_LANGUAGE } from "./table.ts";
+import { EMBED_LANGUAGE } from "./embeds.ts";
 import { VIDEO_LANGUAGE } from "./video.ts";
 import { findWidgetFences } from "./widget/fence.ts";
 import { analyzeWidget } from "./widget/validate.ts";
@@ -194,7 +195,7 @@ export function markdownToText(markdown: string): string {
   const lines: Array<string> = [];
   let fence: string | null = null;
   // Rich table bodies are JSON, with cells commented through cell anchors; video
-  // bodies are a source, and the editor shows neither as text.
+  // and embed bodies are a source, and the editor shows neither as text.
   let hidden = false;
   for (const raw of markdown.replace(/\r\n?/g, "\n").split("\n")) {
     if (fence !== null) {
@@ -205,7 +206,10 @@ export function markdownToText(markdown: string): string {
     const opening = /^\s*(`{3,}|~{3,})\s*(\S*)/.exec(raw);
     if (opening) {
       fence = opening[1]!;
-      hidden = opening[2] === TABLE_LANGUAGE || opening[2] === VIDEO_LANGUAGE;
+      hidden =
+        opening[2] === TABLE_LANGUAGE ||
+        opening[2] === VIDEO_LANGUAGE ||
+        opening[2] === EMBED_LANGUAGE;
       continue;
     }
     const line = raw.trim();

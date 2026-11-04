@@ -1,0 +1,266 @@
+.embed-block {
+  position: relative;
+  margin: 1em 0;
+}
+
+.tab-editor .ProseMirror .embed-block pre.embed-source {
+  display: none;
+  margin: 0 0 0.5rem;
+}
+
+/* The source shows while editing, and until it is a link. */
+.tab-editor .ProseMirror .embed-block:is([data-editing], [data-state="invalid"]) pre.embed-source {
+  display: block;
+}
+
+.embed-chrome {
+  position: relative;
+}
+
+.embed-stage {
+  max-width: 36rem;
+}
+
+.embed-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.625rem;
+  padding: 0.875rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: 0.9375rem;
+  line-height: 1.45;
+}
+
+.embed-card-loading {
+  min-height: 6rem;
+  justify-content: center;
+  align-items: center;
+  background: color-mix(in srgb, var(--text) 4%, var(--bg));
+}
+
+.embed-head {
+  display: flex;
+  gap: 0.75rem;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.embed-person {
+  display: flex;
+  gap: 0.625rem;
+  align-items: center;
+  min-width: 0;
+}
+
+.embed-avatar {
+  flex: none;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  object-fit: cover;
+  background: color-mix(in srgb, var(--text) 8%, var(--bg));
+}
+
+.embed-lines {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.embed-headline {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 0.8125rem;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.embed-who {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 0.5rem;
+  align-items: baseline;
+  min-width: 0;
+}
+
+.embed-author {
+  font-weight: 600;
+}
+
+.embed-handle,
+.embed-provider,
+.embed-saved,
+.embed-facts,
+.embed-note {
+  color: var(--muted);
+  font-size: 0.8125rem;
+}
+
+.embed-provider {
+  flex: none;
+}
+
+.embed-title {
+  margin: 0;
+  font-weight: 600;
+}
+
+.embed-text {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.embed-text-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  align-items: flex-start;
+}
+
+.embed-image {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+}
+
+.embed-foot {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 1rem;
+  align-items: baseline;
+}
+
+.embed-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.875rem;
+  margin-left: auto;
+  font-size: 0.8125rem;
+}
+
+.embed-link,
+.embed-action {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.embed-link:hover,
+.embed-action:hover {
+  text-decoration: underline;
+}
+
+.embed-card-link {
+  gap: 0.25rem;
+}
+
+.embed-link-main {
+  font-size: 0.9375rem;
+  overflow-wrap: anywhere;
+}
+
+.embed-note {
+  margin: 0;
+}
+
+.embed-caption {
+  max-width: 36rem;
+  color: var(--muted);
+  font-size: 0.875rem;
+}
+
+.embed-caption:not(:empty) {
+  margin-top: 0.375rem;
+}
+
+.embed-live {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+}
+
+/* Height comes from the provider's snippet, or from X's own resize message. */
+.embed-frame {
+  display: block;
+  width: 100%;
+  border: 0;
+  border-radius: 10px;
+  color-scheme: normal;
+}
+
+.embed-bar {
+  display: flex;
+}
+
+.embed-card-compact {
+  gap: 0.375rem;
+}
+
+.embed-text-clamp {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+}
+
+.embed-message {
+  margin: 0;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--muted);
+}
+
+.embed-print {
+  display: none;
+}
+
+.embed-edit {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.75rem;
+  cursor: pointer;
+  opacity: 0;
+}
+
+.embed-block:hover .embed-edit,
+.embed-edit:focus-visible {
+  opacity: 1;
+}
+
+.embed-block[data-editing] .embed-edit,
+.tab-editor:not(:has(.ProseMirror[contenteditable="true"])) .embed-edit {
+  display: none;
+}
+
+@media print {
+  .embed-actions,
+  .embed-edit,
+  .embed-frame {
+    display: none !important;
+  }
+
+  .embed-print {
+    display: block;
+    font-size: 0.8125rem;
+  }
+}

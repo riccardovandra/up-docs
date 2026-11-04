@@ -2,6 +2,7 @@ import type { Editor } from "@tiptap/core";
 import { EditorContent, useEditor } from "@tiptap/react";
 import { Component, type ReactNode, useEffect, useLayoutEffect, useRef } from "react";
 
+import type { EmbedLoader } from "./embed/embedSupport.ts";
 import { createEditorExtensions } from "./extensions.ts";
 
 export const EXTERNAL_CONTENT_META = "docsCloudExternalContent";
@@ -18,6 +19,8 @@ interface TabEditorProps {
   readonly onUploadError: (error: unknown) => void;
   /** Takes a pasted or dropped video; `at` is the drop position. */
   readonly onVideoFile: (file: File, at: number | null) => void;
+  /** The doc's saved copies of embedded posts; absent where there are none (project files). */
+  readonly loadEmbed?: EmbedLoader;
 }
 
 /** Shown when a tab's markdown cannot be opened. It never writes, so the stored text stays safe. */
@@ -82,10 +85,14 @@ function MarkdownEditor(props: TabEditorProps) {
   const knownMarkdown = useRef(props.markdown);
   const images = useRef({ upload: props.uploadImage, onUploadError: props.onUploadError });
   const onVideoFile = useRef(props.onVideoFile);
+  const loadEmbed = useRef(props.loadEmbed);
   useLayoutEffect(() => {
     images.current = { upload: props.uploadImage, onUploadError: props.onUploadError };
     onVideoFile.current = props.onVideoFile;
+    loadEmbed.current = props.loadEmbed;
   });
+  // Fixed for the editor's life: whether this doc has saved copies does not change.
+  const hasEmbeds = useRef(props.loadEmbed !== undefined).current;
 
   const editor = useEditor({
     extensions: createEditorExtensions(
@@ -94,6 +101,12 @@ function MarkdownEditor(props: TabEditorProps) {
         onUploadError: (error) => images.current.onUploadError(error),
       },
       { onFiles: (files, at) => files.forEach((file) => onVideoFile.current(file, at)) },
+      {
+        load: hasEmbeds
+          ? (url, refresh) =>
+              loadEmbed.current?.(url, refresh) ?? Promise.reject(new Error("no embeds"))
+          : null,
+      },
     ),
     editable: props.editable,
     content: props.markdown,

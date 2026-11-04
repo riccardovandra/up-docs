@@ -1,9 +1,10 @@
 // The words a reader sees in a tab, for search and card previews: rich tables
 // read as their headers and cells, diagrams as their labels and videos as
-// their titles, never as the JSON, code or URL they are stored as. Worker only: diagrams load Babel's parser,
+// their titles and embeds as their captions, never as the JSON, code or URL they are stored as. Worker only: diagrams load Babel's parser,
 // which the client keeps out of its main bundle.
 
 import { markdownToText } from "./anchors.ts";
+import { EMBED_LANGUAGE, parseEmbedBlock } from "./embeds.ts";
 import { cellText, findFences, parseTable, TABLE_LANGUAGE } from "./table.ts";
 import { parseVideoBlock, VIDEO_LANGUAGE } from "./video.ts";
 import { WIDGET_LANGUAGE } from "./widget/fence.ts";
@@ -23,6 +24,10 @@ export function richBlockText(language: string, body: string): ReadonlyArray<str
   if (language === VIDEO_LANGUAGE) {
     const title = parseVideoBlock(body)?.title;
     return title ? [title] : [];
+  }
+  if (language === EMBED_LANGUAGE) {
+    const caption = parseEmbedBlock(body)?.caption;
+    return caption ? [caption] : [];
   }
   if (language === WIDGET_LANGUAGE) return analyzeWidget(body).labels.map((label) => label.text);
   return null;

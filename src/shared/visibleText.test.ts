@@ -43,6 +43,13 @@ describe("visibleText", () => {
     expect(searchSnippet(visibleText(markdown), "strokeWidth")).toBeNull();
   });
 
+  it("reads an embed as its caption, never its URL", () => {
+    expect(
+      visibleText("Intro\n\n```t3-embed\nhttps://x.com/jack/status/20\nThe first post\n```\n\nEnd"),
+    ).toBe("Intro\nThe first post\nEnd");
+    expect(richBlockText("t3-embed", "https://x.com/jack/status/20")).toEqual([]);
+  });
+
   it("reads a video as its title, never its URL", () => {
     const text = visibleText(
       "Intro\n\n```t3-video\nhttps://youtu.be/dQw4w9WgXcQ\nThe walkthrough\n```\n\nEnd",

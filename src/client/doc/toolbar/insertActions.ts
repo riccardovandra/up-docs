@@ -3,6 +3,7 @@ import { useSyncExternalStore } from "react";
 
 import { findWidgetFences, widgetInfoString } from "../../../shared/widget/fence.ts";
 import { insertRichTable } from "../../editor/table/tableBlock.ts";
+import { insertEmbedLink } from "../../editor/embed/insertEmbed.ts";
 import { insertVideoLink } from "../../editor/video/insertVideo.ts";
 
 /** What an insert action can reach besides the editor. */
@@ -123,6 +124,12 @@ const DEFAULT_ACTIONS: ReadonlyArray<InsertAction> = [
     run: ({ editor }) => insertVideoLink(editor),
   },
   { id: "video-upload", label: "Upload video", order: 91, run: ({ pickVideo }) => pickVideo() },
+  {
+    id: "embed-link",
+    label: "Embed post",
+    order: 95,
+    run: ({ editor }) => insertEmbedLink(editor),
+  },
 ];
 
 let actions: ReadonlyMap<string, InsertAction> = new Map(
