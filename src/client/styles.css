@@ -908,17 +908,50 @@ span.tab-row-toggle {
   font-weight: 600;
 }
 
+.tab-editor .ProseMirror .doc-image-frame {
+  position: relative;
+  display: block;
+  width: fit-content;
+  max-width: 100%;
+  margin: 0.5em 0;
+}
+
 .tab-editor .ProseMirror img.doc-image {
   display: block;
   max-width: 100%;
   height: auto;
-  margin: 0.5em 0;
   border-radius: 8px;
 }
 
-.tab-editor .ProseMirror img.doc-image.ProseMirror-selectednode {
+.tab-editor .ProseMirror .doc-image-frame.ProseMirror-selectednode img.doc-image {
   outline: 2px solid var(--ring);
   outline-offset: 2px;
+}
+
+/* Resize handle: editors only, shown on hover or when the image is selected. */
+.tab-editor .ProseMirror .doc-image-handle {
+  position: absolute;
+  right: -5px;
+  bottom: -5px;
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--bg);
+  border-radius: 3px;
+  background: var(--ring);
+  cursor: nwse-resize;
+  opacity: 0;
+  touch-action: none;
+  transition: opacity 120ms ease;
+}
+
+.tab-editor .ProseMirror[contenteditable="true"] .doc-image-frame:hover .doc-image-handle,
+.tab-editor .ProseMirror[contenteditable="true"] .ProseMirror-selectednode .doc-image-handle,
+.tab-editor .ProseMirror .doc-image-frame.is-resizing .doc-image-handle {
+  opacity: 1;
+}
+
+.tab-editor .ProseMirror[contenteditable="false"] .doc-image-handle {
+  display: none;
 }
 
 .tab-editor-fallback pre {
@@ -1321,6 +1354,10 @@ span.tab-row-toggle {
   .tab-editor .ProseMirror :is(svg, img) {
     max-width: 100%;
     height: auto;
+  }
+
+  .tab-editor .ProseMirror .doc-image-handle {
+    display: none;
   }
 }
 

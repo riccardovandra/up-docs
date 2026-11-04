@@ -3,7 +3,15 @@ import { Plugin } from "@tiptap/pm/state";
 import type { EditorView } from "@tiptap/pm/view";
 import StarterKit from "@tiptap/starter-kit";
 
-import { IMAGE_TYPES, isDocImageSrc } from "../../shared/images.ts";
+import {
+  IMAGE_TYPES,
+  isDocImageSrc,
+  joinImageAlt,
+  MAX_IMAGE_WIDTH,
+  MIN_IMAGE_WIDTH,
+  splitImageAlt,
+} from "../../shared/images.ts";
+import { ImageView } from "./imageView.ts";
 
 export interface DocImageOptions {
   /** Uploads one file and resolves to its URL; null when the reader cannot edit. */
@@ -19,6 +27,13 @@ export const imageAttributes = (src: string, file: File) => ({
   src,
   alt: file.name.replace(/\.[^.]+$/, "") || null,
 });
+
+/** A stored width as a whole number of pixels in range, or null for the natural size. */
+export function imageWidth(value: unknown): number | null {
+  const width = Math.round(Number(value));
+  if (value === null || value === "" || !Number.isFinite(width)) return null;
+  return Math.min(MAX_IMAGE_WIDTH, Math.max(MIN_IMAGE_WIDTH, width));
+}
 
 const escapeAlt = (alt: string) => alt.replace(/([\\[\]])/g, "\\$1");
 const markdownDestination = (src: string) => (/[\s()<>]/.test(src) ? `<${src}>` : src);
@@ -64,9 +79,20 @@ export const DocImage = Node.create<DocImageOptions>({
     src: { default: null },
     alt: { default: null },
     title: { default: null },
+    width: { default: null },
   }),
 
-  parseHTML: () => [{ tag: "img[src]" }],
+  parseHTML: () => [
+    {
+      tag: "img[src]",
+      getAttrs: (element) => ({
+        src: element.getAttribute("src"),
+        alt: element.getAttribute("alt"),
+        title: element.getAttribute("title"),
+        width: imageWidth(element.getAttribute("width")),
+      }),
+    },
+  ],
 
   renderHTML({ node, HTMLAttributes }) {
     const src = String(node.attrs.src ?? "");
@@ -80,18 +106,24 @@ export const DocImage = Node.create<DocImageOptions>({
     ];
   },
 
-  parseMarkdown: (token, helpers) =>
-    helpers.createNode("image", {
+  parseMarkdown: (token, helpers) => {
+    const { alt, width } = splitImageAlt(token.text ?? "");
+    return helpers.createNode("image", {
       src: token.href ?? null,
-      alt: token.text || null,
+      alt: alt || null,
       title: token.title || null,
-    }),
+      width,
+    });
+  },
 
   renderMarkdown: (node) => {
     const title = node.attrs?.title ? ` "${String(node.attrs.title).replace(/"/g, '\\"')}"` : "";
-    const alt = escapeAlt(String(node.attrs?.alt ?? ""));
+    const width = imageWidth(node.attrs?.width);
+    const alt = escapeAlt(joinImageAlt(String(node.attrs?.alt ?? ""), width));
     return `![${alt}](${markdownDestination(String(node.attrs?.src ?? ""))}${title})`;
   },
+
+  addNodeView: () => (props) => new ImageView(props),
 
   addProseMirrorPlugins() {
     const { upload, onUploadError } = this.options;

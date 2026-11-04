@@ -18,6 +18,9 @@ describe("image markdown", () => {
     ["a remote image, kept as written", "![logo](https://example.com/logo.png)"],
     ["a title", '![a](/api/images/d/x.png "The title")'],
     ["no alt text", "![](/api/images/d/x.png)"],
+    ["a resized image", "![Chart|480](/api/images/d/x.png)"],
+    ["a resized image with no alt text", "![|320](/api/images/d/x.png)"],
+    ["a pipe that is not a width", "![a|b](/api/images/d/x.png)"],
   ])("round-trips %s", (_name, source) => {
     expect(roundTrip(source)).toBe(source);
   });
@@ -79,5 +82,23 @@ describe("image markdown", () => {
 
     expect(saved).toBe(IMAGE);
     expect(() => schema.nodeFromJSON(markdown.parse(saved)).check()).not.toThrow();
+  });
+
+  it("reads a stored width into the node and writes a new one back", () => {
+    const doc = markdown.parse("![Chart|480](/api/images/d/x.png)");
+    const paragraph = (doc.content ?? [])[0] as {
+      content: Array<{ attrs: Record<string, unknown> }>;
+    };
+    expect(paragraph.content[0]!.attrs).toEqual(
+      expect.objectContaining({ alt: "Chart", width: 480 }),
+    );
+
+    const image = schema.nodes.image!.create({
+      src: "/api/images/d/x.png",
+      alt: "Chart",
+      width: 300,
+    });
+    const resized = schema.nodes.doc!.create(null, schema.nodes.paragraph!.create(null, image));
+    expect(markdown.serialize(resized.toJSON())).toBe("![Chart|300](/api/images/d/x.png)");
   });
 });
