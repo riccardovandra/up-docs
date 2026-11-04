@@ -7,7 +7,8 @@
  * thread started from a doc), `threads` (which linked threads it can open, with
  * their current titles), `context`
  * (the T3 Code project the panel belongs to, by key and name, after hello and
- * on change), `theme` (T3 Code's appearance and resolved palette, after hello
+ * on change; another app can add `lock` and `groups` to keep the frame inside
+ * that project), `theme` (T3 Code's appearance and resolved palette, after hello
  * and on change; the mobile app sends the same message to the top-level page)
  * and `sent-to` (how a `send-to` went, with the new page's URL).
  * Frame -> parent: `location` after hello and on every route change,
@@ -31,6 +32,7 @@
  */
 import { normalizeProjectKey } from "../host/docsCloudProjects.ts";
 import type { StructuredAnchor } from "./anchors.ts";
+import { docGroupArg } from "./protocol.ts";
 import {
   LOCAL_COMMENTS_CHANGED_TYPE,
   LOCAL_FILES_CHANGED_TYPE,
@@ -45,6 +47,9 @@ import { THEME_COLOR_ROLES, type ThemeColorRole } from "../host/themePalettes.ts
 
 /** The protocol this app speaks; `location` carries it, and T3 Code ignores the extra field. */
 export const EMBED_PROTOCOL_VERSION = 1;
+
+/** The most groups a locked `context` can name. */
+export const MAX_EMBED_GROUPS = 12;
 
 export type EmbedFeature =
   | "start-work"
@@ -99,6 +104,14 @@ export type EmbedParentMessage =
       readonly projectName: string | null;
       /** Its UP Docs project key (see `normalizeProjectKey`); absent from older peers. */
       readonly projectKey: string | null;
+      /**
+       * Optional, from apps other than T3 Code: true keeps the frame inside this
+       * project. Home shows only its docs, with no project switcher, and docs
+       * from other projects do not open.
+       */
+      readonly lock?: boolean;
+      /** Optional with `lock`: the groups home splits the project into, in order. */
+      readonly groups?: ReadonlyArray<string>;
     }
   | {
       readonly type: "t3-docs:sent-to";
@@ -281,10 +294,22 @@ export function parseParentMessage(data: unknown): EmbedParentMessage | null {
       if (data.projectName !== null && !isText(data.projectName, 1_000)) return null;
       const projectKey =
         typeof data.projectKey === "string" ? normalizeProjectKey(data.projectKey) : null;
+      const groups = Array.isArray(data.groups)
+        ? [
+            ...new Set(
+              data.groups
+                .slice(0, MAX_EMBED_GROUPS)
+                .map(docGroupArg)
+                .filter((group): group is string => typeof group === "string"),
+            ),
+          ]
+        : [];
       return {
         type: data.type,
         projectName: data.projectName === null ? null : data.projectName.trim() || null,
         projectKey,
+        ...(data.lock === true ? { lock: true } : {}),
+        ...(groups.length > 0 ? { groups } : {}),
       };
     }
     case "t3-docs:sent-to":

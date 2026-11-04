@@ -49,7 +49,9 @@ describe("0005_project_keys", () => {
         .prepare("SELECT 1 AS present FROM pragma_table_info('comments') WHERE name = 'anchor'")
         .get(),
     ).toEqual({ present: 1 });
-    sqlite.exec("INSERT INTO docs VALUES ('d2', NULL, 'Loose', 'thinking', 1, 1)");
+    sqlite.exec(
+      "INSERT INTO docs (id, project_id, title, status, created_at, updated_at) VALUES ('d2', NULL, 'Loose', 'thinking', 1, 1)",
+    );
     expect(sqlite.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
     // The children still cascade from the rebuilt table.
     sqlite.exec("DELETE FROM docs WHERE id = 'd1'");

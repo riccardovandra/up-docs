@@ -107,6 +107,11 @@ export function makeApiHarness(overrides: Partial<ApiDeps> = {}) {
         broadcasts.push({ type: "doc.deleted", docId, origin });
         for (const socket of sockets) if (socket.docId === docId) socket.open = false;
       },
+      setDocGroup: async (docId, { origin, group }) => {
+        const doc = await Docs.setDocGroup(db, { docId, group });
+        broadcasts.push({ type: "doc.updated", doc, origin });
+        return doc;
+      },
       setDocProject: async (docId, { origin, projectId }) => {
         const doc = await Docs.setDocProject(db, { docId, projectId });
         broadcasts.push({ type: "doc.updated", doc, origin });

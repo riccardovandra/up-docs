@@ -31,6 +31,13 @@ export const DocHeader = memo(function DocHeader(props: {
   readonly onCopyLink: () => void;
   readonly onDelete: () => void;
   readonly onMoveToProject: (projectId: string | null) => void;
+  /**
+   * Inside a locked embed: the project's groups. Move then picks a group, and
+   * the doc stays in its project.
+   */
+  readonly groups: ReadonlyArray<string> | null;
+  readonly group: string | null;
+  readonly onSetGroup: (group: string | null) => void;
   readonly onStartChat: () => void;
   readonly onExportResult: (message: string | null) => void;
   /** The Share panel closed; the caller's own role may have changed. */
@@ -80,8 +87,26 @@ export const DocHeader = memo(function DocHeader(props: {
                 <>
                   <MenuItem label="Back" keepOpen onSelect={() => setChoosingProject(false)} />
                   <MenuSeparator />
-                  <MenuLabel>Move to project</MenuLabel>
-                  <MoveToProject projectId={props.projectId} onMove={props.onMoveToProject} />
+                  {props.groups ? (
+                    <>
+                      <MenuLabel>Move to group</MenuLabel>
+                      {[...props.groups, null].map((group) => (
+                        <MenuItem
+                          key={group ?? ""}
+                          label={group ?? "No group"}
+                          checked={group === props.group}
+                          onSelect={() => {
+                            if (group !== props.group) props.onSetGroup(group);
+                          }}
+                        />
+                      ))}
+                    </>
+                  ) : (
+                    <>
+                      <MenuLabel>Move to project</MenuLabel>
+                      <MoveToProject projectId={props.projectId} onMove={props.onMoveToProject} />
+                    </>
+                  )}
                 </>
               ) : (
                 <>
@@ -90,7 +115,7 @@ export const DocHeader = memo(function DocHeader(props: {
                   ) : null}
                   {abilities.manageDoc ? (
                     <MenuItem
-                      label="Move to project…"
+                      label={props.groups ? "Move to group…" : "Move to project…"}
                       keepOpen
                       onSelect={() => setChoosingProject(true)}
                     />

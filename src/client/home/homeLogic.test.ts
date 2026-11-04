@@ -27,6 +27,7 @@ function doc(id: string, fields: Partial<HomeDoc> = {}): HomeDoc {
     projectId: null,
     title: id,
     status: "thinking",
+    group: null,
     createdAt: 0,
     updatedAt: 0,
     role: "owner",

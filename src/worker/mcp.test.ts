@@ -273,6 +273,38 @@ describe("MCP tools", () => {
     expect(missing.body.error).toBe("not_found");
   });
 
+  it("files docs into groups with create_doc and set_doc_group, and over REST", async () => {
+    const mcp = await makeMcpHarness();
+    const created = await mcp.tool("create_doc", { title: "Brand", group: " Strategy " });
+    expect(created.body.doc.group).toBe("Strategy");
+    const docId = created.body.doc.docId;
+
+    const moved = await mcp.tool("set_doc_group", { docId, group: "Posts" });
+    expect(moved.body.doc.group).toBe("Posts");
+    expect(mcp.api.broadcasts.at(-1)).toMatchObject({
+      type: "doc.updated",
+      doc: { group: "Posts" },
+    });
+    const listed = await mcp.tool("list_docs", {});
+    expect(listed.body.docs.find((d: { docId: string }) => d.docId === docId).group).toBe("Posts");
+
+    expect((await mcp.tool("set_doc_group", { docId, group: null })).body.doc.group).toBeNull();
+    expect((await mcp.tool("set_doc_group", { docId })).isError).toBe(true);
+    expect((await mcp.tool("set_doc_group", { docId, group: "x".repeat(61) })).isError).toBe(true);
+
+    const rest = await mcp.api.call("PATCH", `/api/docs/${docId}`, {
+      body: { group: "Newsletters" },
+      headers: { Cookie: mcp.cookie },
+    });
+    expect(rest.status).toBe(200);
+    expect(((await rest.json()) as { doc: { group: string } }).doc.group).toBe("Newsletters");
+    const both = await mcp.api.call("PATCH", `/api/docs/${docId}`, {
+      body: { group: "Posts", status: "done" },
+      headers: { Cookie: mcp.cookie },
+    });
+    expect(both.status).toBe(400);
+  });
+
   it("builds URLs from the public origin, not the request URL", async () => {
     const mcp = await makeMcpHarness("https://docs.example.com");
     const { doc, tab } = await mcp.seedDoc();

@@ -790,3 +790,8 @@
     display: none;
   }
 }
+
+/* A locked embed splits its one project into groups. */
+.home-groups {
+  margin: 0 0 16px;
+}

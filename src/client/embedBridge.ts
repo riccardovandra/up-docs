@@ -135,7 +135,12 @@ export function startEmbedBridge(): void {
       setEmbedProject(
         message.projectName === null
           ? null
-          : { name: message.projectName, key: message.projectKey },
+          : {
+              name: message.projectName,
+              key: message.projectKey,
+              locked: message.lock === true,
+              groups: message.groups ?? [],
+            },
       );
       setTabsProject(
         message.projectName === null

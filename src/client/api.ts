@@ -115,8 +115,8 @@ export const api = {
   /** Admin only. Returns the existing project when one already has the key (or, without one, the name). */
   createProject: (name: string, key?: string) =>
     request<{ project: Project }>("POST", "/api/projects", key ? { name, key } : { name }),
-  createDoc: (projectId: string | null, title: string) =>
-    request<DocWithTabs>("POST", "/api/docs", { projectId, title }),
+  createDoc: (projectId: string | null, title: string, group: string | null = null) =>
+    request<DocWithTabs>("POST", "/api/docs", { projectId, title, ...(group ? { group } : {}) }),
   doc: (docId: string) => request<DocView>("GET", `/api/docs/${docId}`),
   members: (docId: string) =>
     request<{ members: Array<DocMember> }>("GET", `/api/docs/${docId}/members`),
@@ -145,6 +145,9 @@ export const api = {
   /** `null` moves the doc out of every project. */
   moveDoc: (docId: string, projectId: string | null) =>
     request<{ doc: DocSummary }>("PATCH", `/api/docs/${docId}`, { projectId, clientId }),
+  /** `null` takes the doc out of its group. */
+  setDocGroup: (docId: string, group: string | null) =>
+    request<{ doc: DocSummary }>("PATCH", `/api/docs/${docId}`, { group, clientId }),
   renameDoc: (docId: string, title: string) =>
     request<{ doc: DocSummary }>("PATCH", `/api/docs/${docId}`, { title, clientId }),
   /** Owner only; removes the doc, its tabs, comments, people, images and videos. */

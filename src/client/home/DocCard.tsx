@@ -20,6 +20,12 @@ export interface DocActions {
   readonly onRename: (entry: HomeEntry) => void;
   readonly onDelete: (entry: HomeEntry) => void;
   readonly onTogglePin: (entry: HomeEntry) => void;
+  /**
+   * Set inside a locked embed: Move… then picks one of these groups instead of
+   * a project, since the frame stays in its one project.
+   */
+  readonly groups?: ReadonlyArray<string>;
+  readonly onGroup?: (entry: HomeEntry, group: string | null) => void;
 }
 
 const open = (docId: string) => (event: { preventDefault: () => void }) => {
@@ -103,7 +109,26 @@ function DocMenuBody(props: {
   return (
     // Keyed per view: switching views unmounts the focused item, so focus the new view.
     <div key={moving ? "move" : "main"} ref={focusMenuView}>
-      {moving ? (
+      {moving && actions.groups && actions.onGroup ? (
+        <>
+          <MenuItem onSelect={() => setMoving(false)}>Back</MenuItem>
+          <MenuSeparator />
+          <MenuLabel>Move to group</MenuLabel>
+          {[...actions.groups, null].map((group) => (
+            <MenuItem
+              key={group ?? ""}
+              kind="radio"
+              checked={entry.group === group}
+              onSelect={() => {
+                close();
+                if (entry.group !== group) actions.onGroup?.(entry, group);
+              }}
+            >
+              {group ?? "No group"}
+            </MenuItem>
+          ))}
+        </>
+      ) : moving ? (
         <>
           <MenuItem onSelect={() => setMoving(false)}>Back</MenuItem>
           <MenuSeparator />

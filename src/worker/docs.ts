@@ -21,6 +21,7 @@ interface DocRow {
   project_id: string | null;
   title: string;
   status: DocStatus;
+  doc_group: string | null;
   created_at: number;
   updated_at: number;
 }
@@ -41,6 +42,7 @@ const toDoc = (row: DocRow): DocSummary => ({
   projectId: row.project_id,
   title: row.title,
   status: row.status,
+  group: row.doc_group ?? null,
   createdAt: row.created_at,
   updatedAt: row.updated_at,
 });
@@ -219,6 +221,7 @@ export async function createDoc(
     readonly title: string;
     readonly ownerId: string;
     readonly now: number;
+    readonly group?: string | null;
   },
 ): Promise<DocWithTabs> {
   if (input.projectId !== null) await getProject(db, input.projectId);
@@ -227,6 +230,7 @@ export async function createDoc(
     projectId: input.projectId,
     title: input.title,
     status: "thinking",
+    group: input.group ?? null,
     createdAt: input.now,
     updatedAt: input.now,
   };
@@ -243,9 +247,9 @@ export async function createDoc(
   await db.batch([
     db
       .prepare(
-        "INSERT INTO docs (id, project_id, title, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+        "INSERT INTO docs (id, project_id, title, status, doc_group, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
       )
-      .bind(doc.id, doc.projectId, doc.title, doc.status, doc.createdAt, doc.updatedAt),
+      .bind(doc.id, doc.projectId, doc.title, doc.status, doc.group, doc.createdAt, doc.updatedAt),
     insertTabStatement(db, tab),
     ownerMembershipStatement(db, { docId: doc.id, userId: input.ownerId, now: input.now }),
   ]);
@@ -295,6 +299,19 @@ export async function setDocProject(
   const row = await db
     .prepare("UPDATE docs SET project_id = ? WHERE id = ? RETURNING *")
     .bind(input.projectId, input.docId)
+    .first<DocRow>();
+  if (!row) throw new NotFoundError("doc");
+  return toDoc(row);
+}
+
+/** Sets the doc's group inside its project; null clears it. */
+export async function setDocGroup(
+  db: D1Database,
+  input: { readonly docId: string; readonly group: string | null },
+): Promise<DocSummary> {
+  const row = await db
+    .prepare("UPDATE docs SET doc_group = ? WHERE id = ? RETURNING *")
+    .bind(input.group, input.docId)
     .first<DocRow>();
   if (!row) throw new NotFoundError("doc");
   return toDoc(row);
