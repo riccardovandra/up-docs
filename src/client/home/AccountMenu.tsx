@@ -1,8 +1,18 @@
+import { useState } from "react";
+
 import { displayName } from "../../shared/access.ts";
 import { api } from "../api.ts";
+import { isEmbedded } from "../embedBridge.ts";
 import { setMe, useMe } from "../me.ts";
 import { navigate } from "../router.ts";
+import { setAppearance, storedAppearance, type Appearance } from "../theme.ts";
 import { Menu, MenuItem, MenuLabel, MenuSeparator } from "./Menu.tsx";
+
+const APPEARANCES: ReadonlyArray<readonly [Appearance, string]> = [
+  ["system", "System"],
+  ["light", "Light"],
+  ["dark", "Dark"],
+];
 
 const initials = (name: string) => {
   const words = name.match(/[\p{L}\p{N}]+/gu) ?? [];
@@ -10,9 +20,13 @@ const initials = (name: string) => {
   return letters.filter(Boolean).join("").toUpperCase() || "?";
 };
 
-/** The avatar at the top right: who is signed in, Settings, Sign out. */
+/**
+ * The avatar at the top right: who is signed in, Settings, the appearance
+ * (standalone only; T3 Code sets it when it embeds this app), Sign out.
+ */
 export function AccountMenu() {
   const me = useMe();
+  const [appearance, setChosen] = useState(storedAppearance);
   if (!me) return null;
   const name = displayName(me.user);
   const signOut = async () => {
@@ -42,6 +56,26 @@ export function AccountMenu() {
             >
               Settings
             </MenuItem>
+            {isEmbedded() ? null : (
+              <>
+                <MenuSeparator />
+                <MenuLabel>Appearance</MenuLabel>
+                {APPEARANCES.map(([value, label]) => (
+                  <MenuItem
+                    key={value}
+                    kind="radio"
+                    checked={appearance === value}
+                    onSelect={() => {
+                      setAppearance(value);
+                      setChosen(value);
+                    }}
+                  >
+                    {label}
+                  </MenuItem>
+                ))}
+                <MenuSeparator />
+              </>
+            )}
             <MenuItem onSelect={() => void signOut()}>Sign out</MenuItem>
           </>
         )}

@@ -7,7 +7,7 @@ import { startOpenTabs } from "./OpenTabsStrip.tsx";
 import "./styles.css";
 import { startTheme } from "./theme.ts";
 
-startTheme();
+startTheme({ embedded: isEmbedded() });
 startEmbedBridge();
 // Open-doc tabs are a T3 Code feature; the standalone site keeps one doc per browser tab.
 if (isEmbedded()) startOpenTabs();
