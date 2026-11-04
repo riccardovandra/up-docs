@@ -1,7 +1,7 @@
 /*
- * Theme variables. The colours are T3 Code's own: src/client/theme.ts sets
- * each one from a T3 Code colour role (light, dark, or the palette T3 Code
- * sends when it embeds this app), so only names live here.
+ * Theme variables. src/client/theme.ts sets each one from a T3 Code colour
+ * role: T3 Code's light palette, UP Content's dark palette, or the palette
+ * T3 Code sends when it embeds this app. Only names live here.
  *
  *   --bg              page background (canvas)
  *   --surface         cards, inputs, panels (surface)
@@ -15,6 +15,8 @@
  *   --ring            focus outlines (focus)
  *   --accent          primary actions and highlights (messageAction)
  *   --accent-text     text on --accent (messageActionForeground)
+ *   --tint            colour mixed into the home page's doc-card covers (--accent,
+ *                     or a neutral grey under UP Content's white-accent dark palette)
  *   --hover           hover background for rows, buttons and menu items (accentSurface)
  *   --selected        background of the selected row or item (derived from --accent)
  *   --chip-bg         chips, badges and tags (accentSurface)
@@ -28,6 +30,7 @@
 :root {
   --open-tabs-height: 0px;
   --selected: color-mix(in srgb, var(--accent) 10%, transparent);
+  --tint: var(--accent);
   --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
   --font-serif: "Iowan Old Style", "Charter", "Palatino Linotype", Georgia, serif;
   --font-mono:

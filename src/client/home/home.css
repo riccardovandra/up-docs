@@ -5,8 +5,8 @@
  */
 
 .home {
-  --home-tint: color-mix(in srgb, var(--accent) 62%, var(--bg));
-  --home-tint-soft: color-mix(in srgb, var(--accent) 16%, var(--surface));
+  --home-tint: color-mix(in srgb, var(--tint) 62%, var(--bg));
+  --home-tint-soft: color-mix(in srgb, var(--tint) 16%, var(--surface));
   max-width: 82rem;
   margin: 0 auto;
   padding: 2.25rem 2.25rem 5rem;
@@ -414,7 +414,7 @@
   position: relative;
   height: 12.5rem;
   overflow: hidden;
-  color: color-mix(in srgb, var(--accent) 30%, white);
+  color: color-mix(in srgb, var(--tint) 30%, white);
   background: var(--home-tint);
 }
 
@@ -427,7 +427,7 @@
   right: 18%;
   height: 12rem;
   border-radius: 10px;
-  background: color-mix(in srgb, var(--surface) 82%, var(--accent));
+  background: color-mix(in srgb, var(--surface) 82%, var(--tint));
   border: 1px solid color-mix(in srgb, var(--text) 12%, transparent);
   transform: rotate(2deg);
 }
@@ -604,7 +604,7 @@
 }
 
 .doc-card-new:hover .doc-card-new-paper {
-  background: color-mix(in srgb, var(--accent) 72%, var(--bg));
+  background: color-mix(in srgb, var(--tint) 72%, var(--bg));
 }
 
 /* The card's menu must not be clipped by its own overflow. */
