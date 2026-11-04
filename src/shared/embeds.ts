@@ -21,7 +21,7 @@ export interface EmbedTarget {
   readonly id: string;
   /** Rebuilt from the id; the key a saved copy is stored under. */
   readonly canonicalUrl: string;
-  /** The provider's own embed page, shown on request. Null when there is none. */
+  /** The provider's own embed page. Null when there is none (X articles). */
   readonly frameUrl: string | null;
 }
 
@@ -99,7 +99,8 @@ function linkedinTarget(url: URL): EmbedTarget | null {
     kind: "post",
     id: match[2]!,
     canonicalUrl: `https://www.linkedin.com/feed/update/${urn}`,
-    frameUrl: `https://www.linkedin.com/embed/feed/update/${urn}`,
+    // Collapsed, as LinkedIn's own "Embed this post" gives it: long text ends in "…more".
+    frameUrl: `https://www.linkedin.com/embed/feed/update/${urn}?collapsed=1`,
   };
 }
 
@@ -124,7 +125,8 @@ function xTarget(url: URL): EmbedTarget | null {
     kind: "post",
     id,
     canonicalUrl: `https://x.com/${status?.[1] ?? "i/web"}/status/${id}`,
-    frameUrl: null,
+    // X's own post embed, without its widget script. `dnt` turns off its tracking for personalisation.
+    frameUrl: `https://platform.twitter.com/embed/Tweet.html?id=${id}&dnt=true`,
   };
 }
 
@@ -161,6 +163,19 @@ export function parseEmbedBlock(body: string): EmbedBlock | null {
 /** A block's language, ignoring anything after the first word of the info string. */
 export const isEmbedLanguage = (language: string | null | undefined) =>
   language?.trim().split(/\s+/, 1)[0] === EMBED_LANGUAGE;
+
+/**
+ * Options after the language: ```t3-embed compact shows the author and the
+ * first two lines only, with no image, until a reader expands it. Unknown
+ * words are ignored, so later options never break older docs.
+ */
+export function embedOptions(info: string | null | undefined): { readonly compact: boolean } {
+  const words = info?.trim().split(/\s+/).slice(1) ?? [];
+  return { compact: words.includes("compact") };
+}
+
+export const embedInfoString = (compact: boolean) =>
+  compact ? `${EMBED_LANGUAGE} compact` : EMBED_LANGUAGE;
 
 /** A block's text for a link and caption. A caption is one line. */
 export function embedBlockBody(url: string, caption: string | null = null): string {

@@ -33,7 +33,7 @@ Videos play inside the doc from a \`\`\`t3-video block. Its first line is the so
 https://www.youtube.com/watch?v=dQw4w9WgXcQ
 Release walkthrough
 \`\`\`
-Posts embed from a \`\`\`t3-embed block: the first line is one https link and the optional second line is a caption, nothing else. LinkedIn posts, X posts and X articles show a saved copy of the post (author, text, image), taken the first time the doc is opened; any other link shows as a link card. Use it when the post itself should be visible in the doc. Example:
+Posts embed from a \`\`\`t3-embed block: the first line is one https link and the optional second line is a caption, nothing else. LinkedIn and X posts show the provider's own embed, and the doc also keeps a saved copy (author, text, image) taken the first time it is opened; X articles show that copy; any other link shows as a link card. \`\`\`t3-embed compact shows only the author and the first two lines, no image, until the reader expands it: use it when a doc holds many posts. Use an embed when the post itself should be visible in the doc. Example:
 \`\`\`t3-embed
 https://www.linkedin.com/posts/name_slug-activity-7209442266791186432-uyzh
 Hook: a number in the first line

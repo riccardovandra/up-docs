@@ -74,7 +74,7 @@ Release walkthrough
 
 ### Embedded posts
 
-A doc can show a LinkedIn post, an X post or an X article in place of its link. In the editor, paste the link on an empty line (undo turns it back into a plain link), or use "Embed post" in the "+" menu. Agents write a `t3-embed` block, whose first line is an https link and whose optional second line is a caption:
+A doc can show a LinkedIn post, an X post or an X article in place of its link. LinkedIn and X posts show the provider's own embed, as their "Embed this post" option gives it. In the editor, paste the link on an empty line (undo turns it back into a plain link), or use "Embed post" in the "+" menu. Agents write a `t3-embed` block, whose first line is an https link and whose optional second line is a caption:
 
 ````
 ```t3-embed
@@ -83,8 +83,9 @@ Hook: a number in the first line
 ```
 ````
 
-- The first time a doc with the block is opened, the Worker fetches the post once and saves a copy for that doc: author, full text, date, like and comment counts, and the post's image as a doc image. Readers see that copy, so the doc keeps working after the post is deleted. Editors can retake it with "Refresh copy".
-- No provider HTML reaches the page. The copy is plain text, and its image is served from the doc's own images, like any other. Nothing in a reader's browser contacts LinkedIn or X until they click "Show live post" (LinkedIn only), which opens LinkedIn's own embed in a sandboxed frame.
+- `t3-embed compact` shows only the author and the first two lines, with no image, until a reader clicks "Show post". Editors switch a block with "Compact" and "Full size". Use it for docs with many posts.
+- The first time a doc with the block is opened, the Worker fetches the post once and saves a copy for that doc: author, full text, date, like and comment counts, and the post's image as a doc image. "Saved copy" shows it, and it is what remains if the post is deleted. Compact blocks and X articles render from it. Editors can retake it with "Refresh copy".
+- The provider's embed runs in a sandboxed frame that cannot navigate the doc, submit forms or open dialogs, and loads when it scrolls into view, so LinkedIn and X see readers of full-size embeds. A compact block contacts neither until it is expanded. No provider HTML reaches the page itself: the copy is plain text, and its image is served from the doc's own images.
 - Any other https link shows as a link card. So do posts that are private, deleted, or that the provider refuses to serve. X articles have no public embed, so they show a copy only when X serves their preview tags, and a link card otherwise.
 - X posts are read from the feed X's own embed widget uses. It is not a documented API and may change; if it does, X posts fall back to link cards.
 - Copies live in D1 and their images in R2, or in D1 without a bucket. A doc holds at most 500 copies. They go when the doc is deleted.

@@ -4,6 +4,8 @@ import type { NodeView } from "@tiptap/pm/view";
 
 import {
   type EmbedBlock,
+  embedInfoString,
+  embedOptions,
   type EmbedSnapshot,
   type EmbedTarget,
   isEmbedLanguage,
@@ -15,14 +17,24 @@ import type { EmbedSupportStorage } from "./embedSupport.ts";
 import "./embed.css";
 
 /**
- * The provider's own embed page, on request. Its scripts run in the
- * provider's origin, never ours; it cannot navigate the doc, submit forms or
- * open dialogs. Popups (its own links) open in a new tab.
+ * The provider's own embed page. Its scripts run in the provider's origin,
+ * never ours; it cannot navigate the doc, submit forms or open dialogs.
+ * Popups (its own links) open in a new tab.
  */
 const FRAME_SANDBOX = "allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox";
 
-/** Lines of post text shown before "Show more". */
+/** The sizes the providers' own embed snippets use. */
+const FRAME_SIZE = {
+  linkedin: { width: 504, height: 670 },
+  x: { width: 550, height: 420 },
+} as const;
+const X_ORIGIN = "https://platform.twitter.com";
+const MAX_FRAME_HEIGHT = 4000;
+
+/** Characters of post text the saved copy shows before "Show more". */
 const CLAMP_CHARS = 600;
+
+type Mode = "live" | "saved";
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, className: string, text?: string) {
   const node = document.createElement(tag);
@@ -64,12 +76,36 @@ const hostOf = (url: string) => {
   }
 };
 
+const isDark = () => getComputedStyle(document.documentElement).colorScheme === "dark";
+
+/** The height X's post embed asks for, from its `twttr.private.resize` message (an object, or JSON text). */
+export function xFrameHeight(data: unknown): number | null {
+  let value = data;
+  if (typeof value === "string") {
+    try {
+      value = JSON.parse(value);
+    } catch {
+      return null;
+    }
+  }
+  if (typeof value !== "object" || value === null) return null;
+  const message = (value as { "twttr.embed"?: { method?: unknown; params?: unknown } })[
+    "twttr.embed"
+  ];
+  if (message?.method !== "twttr.private.resize" || !Array.isArray(message.params)) return null;
+  const height = (message.params[0] as { height?: unknown } | undefined)?.height;
+  return typeof height === "number" && Number.isFinite(height) && height > 0
+    ? Math.min(Math.ceil(height), MAX_FRAME_HEIGHT)
+    : null;
+}
+
 /**
- * A ```t3-embed block. A LinkedIn or X link shows the doc's saved copy of the
- * post (text set as plain text, image served from the doc's own images), with
- * the provider's live embed one click away where it has one. Any other link,
- * or a post whose copy cannot be taken, shows a link card. "Edit" (or the caret
- * entering the block) shows the source.
+ * A ```t3-embed block. A LinkedIn or X post shows the provider's own embed,
+ * with the doc's saved copy (plain text, image from the doc's own images) a
+ * click away and in its place when the post cannot be loaded. ```t3-embed
+ * compact shows the author and two lines from the saved copy, and contacts the
+ * provider only when a reader expands it. Any other link shows a link card.
+ * "Edit" (or the caret entering the block) shows the source.
  */
 export class EmbedView implements NodeView {
   readonly dom = document.createElement("div");
@@ -80,10 +116,12 @@ export class EmbedView implements NodeView {
   private readonly editor: Editor;
   private readonly getPos: NodeViewRendererProps["getPos"];
   private node: ProseMirrorNode;
-  private source: string | null = null;
+  /** Source and info string last shown; a change to either rebuilds the block. */
+  private shown: string | null = null;
   /** Bumped on every rebuild, so a late response for an old link is dropped. */
   private generation = 0;
   private destroyed = false;
+  private frame: HTMLIFrameElement | null = null;
 
   constructor(
     { node, editor, getPos }: NodeViewRendererProps,
@@ -109,7 +147,8 @@ export class EmbedView implements NodeView {
     editor.on("selectionUpdate", this.syncEditing);
     editor.on("focus", this.syncEditing);
     editor.on("blur", this.syncEditing);
-    this.show(node.textContent);
+    window.addEventListener("message", this.onMessage);
+    this.show();
     this.syncEditing();
   }
 
@@ -118,12 +157,12 @@ export class EmbedView implements NodeView {
       return false;
     }
     this.node = node;
-    this.show(node.textContent);
+    this.show();
     this.syncEditing();
     return true;
   }
 
-  // The card, its buttons and the live frame are ours, not ProseMirror's.
+  // The card, its buttons and the frame are ours, not ProseMirror's.
   stopEvent(event: Event) {
     return event.target instanceof Node && !this.contentDOM.contains(event.target);
   }
@@ -137,20 +176,29 @@ export class EmbedView implements NodeView {
     this.editor.off("selectionUpdate", this.syncEditing);
     this.editor.off("focus", this.syncEditing);
     this.editor.off("blur", this.syncEditing);
+    window.removeEventListener("message", this.onMessage);
   }
 
   private get support(): EmbedSupportStorage | undefined {
     return (this.editor.storage as { embedSupport?: EmbedSupportStorage }).embedSupport;
   }
 
-  /** Rebuilds only when the text changes, so an open live post survives other edits. */
-  private show(source: string) {
-    if (source === this.source) return;
-    this.source = source;
+  private get compact(): boolean {
+    return embedOptions(this.node.attrs.language as string | null).compact;
+  }
+
+  /** Rebuilds only when the text or options change, so a loaded embed survives other edits. */
+  private show() {
+    const source = this.node.textContent;
+    const key = `${String(this.node.attrs.language)}\n${source}`;
+    if (key === this.shown) return;
+    this.shown = key;
     this.generation += 1;
+    this.frame = null;
     const block = parseEmbedBlock(source);
     this.caption.replaceChildren();
     this.print.replaceChildren();
+    this.dom.toggleAttribute("data-compact", this.compact);
     if (!block) {
       this.dom.dataset.state = "invalid";
       const message = el(
@@ -167,59 +215,219 @@ export class EmbedView implements NodeView {
       document.createTextNode(`${block.caption ?? hostOf(href)}: `),
       link(href, href),
     );
-    if (!block.target || !this.support?.load) {
+    const { target } = block;
+    if (!target) {
       this.dom.dataset.state = "link";
       this.stage.replaceChildren(this.linkCard(block, null));
       return;
     }
-    this.load(block, block.target, false);
+    if (this.compact) {
+      this.showCompact(block, target);
+      return;
+    }
+    if (target.frameUrl) {
+      this.showLive(block, target, target.frameUrl);
+      // Taken in the background, so the doc keeps the post if it is deleted later.
+      void this.copy(block, target, false).catch(() => undefined);
+      return;
+    }
+    this.showSaved(block, target, false);
   }
 
-  private load(block: EmbedBlock, target: EmbedTarget, refresh: boolean) {
+  /** The doc's saved copy, shared by every view of the same post in this editor. */
+  private copy(block: EmbedBlock, target: EmbedTarget, refresh: boolean): Promise<EmbedSnapshot> {
     const support = this.support;
-    if (!support?.load) return;
-    const generation = this.generation;
-    this.dom.dataset.state = "loading";
-    if (!refresh) this.stage.replaceChildren(this.skeleton(target));
+    if (!support?.load) return Promise.reject(new Error("no saved copies here"));
     const key = target.canonicalUrl;
     const previous = support.cache.get(key);
-    let pending = refresh ? undefined : previous;
-    if (!pending) {
-      pending = support.load(block.url, refresh);
-      support.cache.set(key, pending);
-      // A failure is not kept, so the next open tries again.
-      pending.catch(() => {
-        if (support.cache.get(key) === pending) support.cache.delete(key);
-      });
-    }
-    pending.then(
+    if (previous && !refresh) return previous;
+    const pending = support.load(block.url, refresh);
+    support.cache.set(key, pending);
+    pending.catch(() => {
+      if (support.cache.get(key) !== pending) return;
+      // A failed refresh keeps the copy the doc already has; any other failure is retried next time.
+      if (refresh && previous) support.cache.set(key, previous);
+      else support.cache.delete(key);
+    });
+    return pending;
+  }
+
+  /** Runs `paint` with the saved copy unless the block has been rebuilt since. */
+  private withCopy(
+    block: EmbedBlock,
+    target: EmbedTarget,
+    refresh: boolean,
+    paint: (snapshot: EmbedSnapshot) => void,
+    failed: () => void,
+  ) {
+    const generation = this.generation;
+    this.copy(block, target, refresh).then(
       (snapshot) => {
-        if (this.destroyed || generation !== this.generation) return;
-        this.dom.dataset.state = "ready";
+        if (!this.destroyed && generation === this.generation) paint(snapshot);
+      },
+      () => {
+        if (!this.destroyed && generation === this.generation) failed();
+      },
+    );
+  }
+
+  private showLive(block: EmbedBlock, target: EmbedTarget, frameUrl: string) {
+    this.dom.dataset.state = "live";
+    const provider = PROVIDER_NAMES[target.provider];
+    const size = FRAME_SIZE[target.provider];
+    const wrap = el("div", "embed-live");
+    wrap.style.maxWidth = `${size.width}px`;
+    const frame = el("iframe", "embed-frame");
+    frame.setAttribute("sandbox", FRAME_SANDBOX);
+    frame.setAttribute("referrerpolicy", "strict-origin-when-cross-origin");
+    frame.loading = "lazy";
+    frame.title = `${provider} post`;
+    frame.style.height = `${size.height}px`;
+    frame.src = target.provider === "x" && isDark() ? `${frameUrl}&theme=dark` : frameUrl;
+    this.frame = frame;
+    wrap.append(frame, this.bar(block, target, "live"));
+    this.stage.replaceChildren(wrap);
+  }
+
+  private showSaved(block: EmbedBlock, target: EmbedTarget, refresh: boolean) {
+    if (!this.support?.load) {
+      this.dom.dataset.state = "link";
+      this.stage.replaceChildren(this.linkCard(block, null));
+      return;
+    }
+    const current = this.stage.firstElementChild;
+    this.dom.dataset.state = "loading";
+    if (!refresh || !current) this.stage.replaceChildren(this.skeleton(target));
+    this.withCopy(
+      block,
+      target,
+      refresh,
+      (snapshot) => {
+        this.dom.dataset.state = "saved";
         this.stage.replaceChildren(this.card(block, target, snapshot));
       },
       () => {
-        if (this.destroyed || generation !== this.generation) return;
-        // A failed refresh keeps the copy the doc already has.
-        if (refresh && previous) {
-          support.cache.set(key, previous);
-          void previous.then((snapshot) => {
-            if (this.destroyed || generation !== this.generation) return;
-            this.dom.dataset.state = "ready";
-            const card = this.card(block, target, snapshot);
-            card.append(
-              el("p", "embed-note", "Could not refresh the copy. The saved one is shown."),
-            );
-            this.stage.replaceChildren(card);
-          });
+        if (refresh) {
+          // The old copy is back in the cache; show it with a note.
+          this.withCopy(
+            block,
+            target,
+            false,
+            (snapshot) => {
+              this.dom.dataset.state = "saved";
+              const card = this.card(block, target, snapshot);
+              card.append(
+                el("p", "embed-note", "Could not refresh the copy. The saved one is shown."),
+              );
+              this.stage.replaceChildren(card);
+            },
+            () => this.showUnavailable(block),
+          );
           return;
         }
-        this.dom.dataset.state = "link";
-        this.stage.replaceChildren(
-          this.linkCard(block, "The post could not be loaded. It may be private or deleted."),
-        );
+        this.showUnavailable(block);
       },
     );
+  }
+
+  private showUnavailable(block: EmbedBlock) {
+    this.dom.dataset.state = "link";
+    this.stage.replaceChildren(
+      this.linkCard(block, "The post could not be loaded. It may be private or deleted."),
+    );
+  }
+
+  /** Author and two lines, no image. Nothing reaches the provider until "Show post". */
+  private showCompact(block: EmbedBlock, target: EmbedTarget) {
+    const expand = () =>
+      target.frameUrl
+        ? this.showLive(block, target, target.frameUrl)
+        : this.showSaved(block, target, false);
+    if (!this.support?.load) {
+      // No saved copies here (project files): a link card that can still open the post.
+      this.dom.dataset.state = "compact";
+      const card = this.linkCard(block, null);
+      if (target.frameUrl) card.append(this.actions([button("Show post", "embed-action", expand)]));
+      this.stage.replaceChildren(card);
+      return;
+    }
+    this.dom.dataset.state = "loading";
+    this.stage.replaceChildren(this.skeleton(target));
+    this.withCopy(
+      block,
+      target,
+      false,
+      (snapshot) => {
+        this.dom.dataset.state = "compact";
+        const card = el("article", "embed-card embed-card-compact");
+        card.dataset.provider = target.provider;
+        card.append(this.head(target, snapshot));
+        // Blank lines would spend the two lines on nothing.
+        const text = (snapshot.text ?? snapshot.title)?.replace(/\n\s*\n+/g, "\n");
+        if (text) card.append(el("p", "embed-text embed-text-clamp", text));
+        const actions: Array<HTMLElement> = [button("Show post", "embed-action", expand)];
+        actions.push(link(snapshot.url, `Open on ${PROVIDER_NAMES[target.provider]}`));
+        if (this.editor.isEditable) actions.push(this.compactToggle());
+        card.append(this.actions(actions));
+        this.stage.replaceChildren(card);
+      },
+      () => {
+        this.dom.dataset.state = "compact";
+        const card = this.linkCard(block, null);
+        if (target.frameUrl)
+          card.append(this.actions([button("Show post", "embed-action", expand)]));
+        this.stage.replaceChildren(card);
+      },
+    );
+  }
+
+  /** Links and switches under a live embed or a saved copy. */
+  private bar(block: EmbedBlock, target: EmbedTarget, mode: Mode) {
+    const provider = PROVIDER_NAMES[target.provider];
+    const items: Array<HTMLElement> = [link(target.canonicalUrl, `Open on ${provider}`)];
+    if (target.frameUrl && this.support?.load) {
+      items.push(
+        mode === "live"
+          ? button("Saved copy", "embed-action", () => this.showSaved(block, target, false))
+          : button("Live post", "embed-action", () =>
+              this.showLive(block, target, target.frameUrl!),
+            ),
+      );
+    }
+    if (this.editor.isEditable) {
+      if (mode === "saved") {
+        items.push(
+          button("Refresh copy", "embed-action", () => this.showSaved(block, target, true)),
+        );
+      }
+      items.push(this.compactToggle());
+    }
+    const bar = el("div", "embed-bar");
+    bar.append(this.actions(items));
+    return bar;
+  }
+
+  private actions(items: ReadonlyArray<HTMLElement>) {
+    const actions = el("span", "embed-actions");
+    actions.append(...items);
+    return actions;
+  }
+
+  /** Editors switch the block between full and compact; the choice is saved in its info string. */
+  private compactToggle() {
+    const compact = this.compact;
+    return button(compact ? "Full size" : "Compact", "embed-action", () => {
+      const pos = this.getPos();
+      if (!this.editor.isEditable || typeof pos !== "number") return;
+      const node = this.editor.state.doc.nodeAt(pos);
+      if (!node || node.type !== this.node.type) return;
+      this.editor.view.dispatch(
+        this.editor.state.tr.setNodeMarkup(pos, undefined, {
+          ...node.attrs,
+          language: embedInfoString(!compact),
+        }),
+      );
+    });
   }
 
   private skeleton(target: EmbedTarget) {
@@ -229,17 +437,21 @@ export class EmbedView implements NodeView {
     return card;
   }
 
-  private card(block: EmbedBlock, target: EmbedTarget, snapshot: EmbedSnapshot) {
-    const provider = PROVIDER_NAMES[target.provider];
-    const card = el("article", "embed-card");
-    card.dataset.provider = target.provider;
-
+  private head(target: EmbedTarget, snapshot: EmbedSnapshot) {
     const head = el("header", "embed-head");
     const who = el("div", "embed-who");
     if (snapshot.author) who.append(el("span", "embed-author", snapshot.author));
     if (snapshot.handle) who.append(el("span", "embed-handle", `@${snapshot.handle}`));
-    head.append(who, el("span", "embed-provider", provider));
-    card.append(head);
+    head.append(who, el("span", "embed-provider", PROVIDER_NAMES[target.provider]));
+    return head;
+  }
+
+  /** The full saved copy. */
+  private card(block: EmbedBlock, target: EmbedTarget, snapshot: EmbedSnapshot) {
+    const provider = PROVIDER_NAMES[target.provider];
+    const card = el("article", "embed-card");
+    card.dataset.provider = target.provider;
+    card.append(this.head(target, snapshot));
 
     // LinkedIn's headline is the post's first sentence; show it only when the text does not.
     if (snapshot.title && !snapshot.text?.startsWith(snapshot.title.replace(/…$/, ""))) {
@@ -266,23 +478,7 @@ export class EmbedView implements NodeView {
     if (facts.length > 0) foot.append(el("span", "embed-facts", facts.join(" · ")));
     const saved = formatDate(snapshot.fetchedAt);
     if (saved) foot.append(el("span", "embed-saved", `Saved ${saved}`));
-    const actions = el("span", "embed-actions");
-    actions.append(link(snapshot.url, `Open on ${provider}`));
-    if (target.frameUrl) {
-      const frameUrl = target.frameUrl;
-      actions.append(
-        button("Show live post", "embed-action", () =>
-          this.showLive(block, target, snapshot, frameUrl),
-        ),
-      );
-    }
-    if (this.editor.isEditable) {
-      actions.append(
-        button("Refresh copy", "embed-action embed-refresh", () => this.load(block, target, true)),
-      );
-    }
-    foot.append(actions);
-    card.append(foot);
+    card.append(foot, this.bar(block, target, "saved"));
     return card;
   }
 
@@ -303,33 +499,6 @@ export class EmbedView implements NodeView {
     return wrap;
   }
 
-  /** Nothing loads from the provider until this runs. */
-  private showLive(
-    block: EmbedBlock,
-    target: EmbedTarget,
-    snapshot: EmbedSnapshot,
-    frameUrl: string,
-  ) {
-    const provider = PROVIDER_NAMES[target.provider];
-    const wrap = el("div", "embed-live");
-    const frame = el("iframe", "embed-frame");
-    frame.setAttribute("sandbox", FRAME_SANDBOX);
-    frame.setAttribute("referrerpolicy", "strict-origin-when-cross-origin");
-    frame.title = `${provider} post`;
-    frame.src = frameUrl;
-    const bar = el("div", "embed-foot");
-    const actions = el("span", "embed-actions");
-    actions.append(
-      link(snapshot.url, `Open on ${provider}`),
-      button("Show saved copy", "embed-action", () =>
-        this.stage.replaceChildren(this.card(block, target, snapshot)),
-      ),
-    );
-    bar.append(actions);
-    wrap.append(frame, bar);
-    this.stage.replaceChildren(wrap);
-  }
-
   private linkCard(block: EmbedBlock, note: string | null) {
     const href = block.target?.canonicalUrl ?? block.url;
     const card = el("div", "embed-card embed-card-link");
@@ -339,6 +508,14 @@ export class EmbedView implements NodeView {
     if (note) card.append(el("p", "embed-note", note));
     return card;
   }
+
+  /** X's post embed reports its height; nothing else from a frame is read. */
+  private readonly onMessage = (event: MessageEvent) => {
+    const frame = this.frame;
+    if (!frame || event.origin !== X_ORIGIN || event.source !== frame.contentWindow) return;
+    const height = xFrameHeight(event.data);
+    if (height !== null) frame.style.height = `${height}px`;
+  };
 
   private readonly syncEditing = () => {
     const pos = this.getPos();

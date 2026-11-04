@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import {
   checkEmbedsIn,
   embedBlockBody,
+  embedInfoString,
+  embedOptions,
   embedsToLinks,
   isEmbedLanguage,
   matchEmbed,
@@ -15,7 +17,7 @@ const LINKEDIN = {
   kind: "post",
   id: ACTIVITY,
   canonicalUrl: `https://www.linkedin.com/feed/update/urn:li:activity:${ACTIVITY}`,
-  frameUrl: `https://www.linkedin.com/embed/feed/update/urn:li:activity:${ACTIVITY}`,
+  frameUrl: `https://www.linkedin.com/embed/feed/update/urn:li:activity:${ACTIVITY}?collapsed=1`,
 };
 
 describe("matchEmbed", () => {
@@ -33,7 +35,7 @@ describe("matchEmbed", () => {
   it("keeps the urn type LinkedIn used", () => {
     expect(
       matchEmbed(`https://www.linkedin.com/posts/a_b-ugcPost-${ACTIVITY}-xY_z`)?.frameUrl,
-    ).toBe(`https://www.linkedin.com/embed/feed/update/urn:li:ugcPost:${ACTIVITY}`);
+    ).toBe(`https://www.linkedin.com/embed/feed/update/urn:li:ugcPost:${ACTIVITY}?collapsed=1`);
     expect(
       matchEmbed(`https://www.linkedin.com/feed/update/urn:li:share:${ACTIVITY}`)?.canonicalUrl,
     ).toBe(`https://www.linkedin.com/feed/update/urn:li:share:${ACTIVITY}`);
@@ -51,7 +53,7 @@ describe("matchEmbed", () => {
       kind: "post",
       id: "20",
       canonicalUrl,
-      frameUrl: null,
+      frameUrl: "https://platform.twitter.com/embed/Tweet.html?id=20&dnt=true",
     });
   });
 
@@ -124,6 +126,14 @@ describe("parseEmbedBlock", () => {
       "https://x.com/a/status/1\nTwo lines",
     );
     expect(embedBlockBody("https://x.com/a/status/1")).toBe("https://x.com/a/status/1");
+  });
+
+  it("reads the compact option and ignores unknown words", () => {
+    expect(embedOptions("t3-embed")).toEqual({ compact: false });
+    expect(embedOptions("t3-embed compact")).toEqual({ compact: true });
+    expect(embedOptions("t3-embed later-option compact")).toEqual({ compact: true });
+    expect(embedInfoString(true)).toBe("t3-embed compact");
+    expect(embedInfoString(false)).toBe("t3-embed");
   });
 
   it("matches the language's first word", () => {
