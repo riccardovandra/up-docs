@@ -50,3 +50,27 @@ export function followClickedLink(event: MouseEvent): boolean {
   else window.open(link.url, "_blank", "noopener,noreferrer");
   return true;
 }
+
+/** Opens a link from a button: in place when it is a page of this app, else in a new tab. */
+export function openDocLink(href: string): void {
+  const link = resolveDocLink(href, window.location);
+  if (!link) return;
+  if (link.appPath !== null) navigate(link.appPath);
+  else window.open(link.url, "_blank", "noopener,noreferrer");
+}
+
+/**
+ * A link address shortened for display: the scheme and host in full, then the
+ * rest cut in the middle when it is long, as `/drive/folders/1…%5D-goto`.
+ */
+export function shortLink(
+  href: string,
+  keep = 14,
+): { readonly head: string; readonly tail: string } {
+  if (!URL.canParse(href) || !/^https?:/i.test(href)) return { head: href, tail: "" };
+  const url = new URL(href);
+  const head = `${url.protocol}//${url.host}`;
+  const rest = href.slice(head.length);
+  const tail = rest.length > keep * 2 + 1 ? `${rest.slice(0, keep)}…${rest.slice(-keep)}` : rest;
+  return { head, tail: tail === "/" ? "" : tail };
+}

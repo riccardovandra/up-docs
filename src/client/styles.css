@@ -1189,6 +1189,55 @@ span.tab-row-toggle {
   min-width: 10rem;
 }
 
+/* The menu under a link the caret is in: address, open, copy, edit, remove. */
+.link-menu {
+  display: flex;
+  align-items: center;
+  width: max-content;
+  max-width: min(32rem, calc(100vw - 2rem));
+  padding: 0.2rem 0.2rem 0.2rem 0.6rem;
+  background: var(--popover);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 6px 20px rgb(0 0 0 / 0.14);
+  z-index: 30;
+}
+
+.link-menu .toolbar-separator {
+  margin: 0 0.25rem;
+}
+
+.link-menu-url {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 0.85rem;
+  color: var(--text);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.link-menu-url-tail,
+.link-menu-note {
+  color: var(--muted);
+}
+
+.link-menu-note {
+  padding: 0 0.4rem;
+  font-size: 0.8rem;
+}
+
+.link-menu-edit {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.1rem 0;
+}
+
+.link-menu-edit input {
+  width: min(22rem, calc(100vw - 8rem));
+  font-size: 0.85rem;
+}
+
 .button.small {
   padding: 0.25rem 0.6rem;
   font-size: 0.8rem;

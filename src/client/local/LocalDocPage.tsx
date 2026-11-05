@@ -11,6 +11,7 @@ import { hasAddToChatHandler, subscribeAddToChat } from "../comments/addToChat.t
 import { useCommentSource } from "../comments/useComments.ts";
 import { selectionAnchor, useEditorComments } from "../comments/useEditorComments.ts";
 import { useMediaQuery } from "../comments/useMediaQuery.ts";
+import { LinkMenu } from "../editor/LinkMenu.tsx";
 import { SelectionToolbar } from "../editor/SelectionToolbar.tsx";
 
 import { HomeLink } from "../home/HomeLink.tsx";
@@ -356,6 +357,7 @@ function LocalDoc(props: { readonly path: string; readonly source: DocSource }) 
                 {editor && canComment && draft === null ? (
                   <SelectionToolbar editor={editor} canEdit={editable} onComment={startComment} />
                 ) : null}
+                {editor && editable ? <LinkMenu editor={editor} /> : null}
                 <TabEditor
                   markdown={snapshot.markdown}
                   revision={revision}

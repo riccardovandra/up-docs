@@ -45,6 +45,7 @@ import { useStableCallback } from "../doc/useStableCallback.ts";
 import { TabSaver } from "../doc/tabSaver.ts";
 import { applyPlacements, orderTabs, removeTabs } from "../doc/tabTree.ts";
 import { useDocRoom } from "../doc/useDocRoom.ts";
+import { LinkMenu } from "../editor/LinkMenu.tsx";
 import { SelectionToolbar } from "../editor/SelectionToolbar.tsx";
 import { TabEditor } from "../editor/TabEditor.tsx";
 import { WIDGET_PICK_EVENT, type WidgetPickDetail } from "../editor/widget/WidgetView.ts";
@@ -723,6 +724,7 @@ export function DocPage(props: { readonly docId: string; readonly tabId: string 
                     onComment={startComment}
                   />
                 ) : null}
+                {editor && abilities.edit ? <LinkMenu editor={editor} /> : null}
                 <TabEditor
                   key={activeTab.id}
                   markdown={activeTab.markdown}

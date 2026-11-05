@@ -5,6 +5,7 @@ import { BubbleMenu } from "@tiptap/react/menus";
 import { useState, type MouseEvent, type ReactNode } from "react";
 
 import { ChevronDown, CodeIcon, CommentIcon, LinkIcon, ListIcon } from "../doc/toolbar/icons.tsx";
+import { linkHref } from "./linkHref.ts";
 
 type TextStyle = "paragraph" | 1 | 2 | 3;
 type ListKind = "bulletList" | "orderedList" | "taskList";
@@ -25,14 +26,6 @@ const LISTS: ReadonlyArray<{ readonly value: ListKind; readonly label: string }>
 // Every press keeps the editor's focus and selection, so the menu stays up
 // and the command applies to what was selected.
 const keepSelection = (event: MouseEvent) => event.preventDefault();
-
-/** Links typed without a scheme open as https; anything but web and mail links is refused. */
-function linkHref(input: string): string | null {
-  const value = input.trim();
-  if (!value) return null;
-  const href = /^[a-z][a-z0-9+.-]*:/i.test(value) ? value : `https://${value}`;
-  return /^(https?|mailto):/i.test(href) ? href : null;
-}
 
 /**
  * The menu over a text selection: Comment first, then (for editors) text
