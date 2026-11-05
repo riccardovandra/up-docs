@@ -110,3 +110,28 @@ export const LinkIcon = () => (
     <path d="M9.2 6.8a2.6 2.6 0 0 0-3.7 0L3.2 9.1a2.6 2.6 0 0 0 3.7 3.7l.9-.9" />
   </Icon>
 );
+
+export const OpenIcon = () => (
+  <Icon>
+    <path d="M9.5 2.5h4v4M13.5 2.5L7.5 8.5M11.5 9.5v3a1 1 0 0 1-1 1h-7a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1h3" />
+  </Icon>
+);
+
+export const CopyIcon = () => (
+  <Icon>
+    <rect x="5.5" y="5.5" width="8" height="8" rx="1.5" />
+    <path d="M10.5 3.5v-.5a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h.5" />
+  </Icon>
+);
+
+export const EditIcon = () => (
+  <Icon>
+    <path d="M10.8 2.7a1.5 1.5 0 0 1 2.1 2.1L5.5 12.2l-2.8.7.7-2.8z" />
+  </Icon>
+);
+
+export const UnlinkIcon = () => (
+  <Icon>
+    <path d="M9.4 4.1l.6-.6a2.6 2.6 0 0 1 3.7 3.7l-.6.6M6.6 11.9l-.6.6a2.6 2.6 0 0 1-3.7-3.7l.6-.6M2.5 2.5l11 11" />
+  </Icon>
+);

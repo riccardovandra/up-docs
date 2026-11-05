@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Plugin } from "@tiptap/pm/state";
 
-import { followClickedLink, resolveDocLink } from "./docLinks.ts";
+import { followClickedLink, resolveDocLink, shortLink } from "./docLinks.ts";
 import { createEditorExtensions } from "./editor/extensions.ts";
 import { LinkClick } from "./editor/linkClick.ts";
 
@@ -144,5 +144,49 @@ describe("editor wiring", () => {
     ) => boolean;
     onClick({}, click("/d/doc1/tab2"));
     expect(win.location.pathname).toBe("/d/doc1/tab2");
+  });
+
+  it("leaves a plain click in an editable view to the caret, and opens Cmd+click", () => {
+    const [plugin] = LinkClick.config.addProseMirrorPlugins!.call({} as never) as Array<Plugin>;
+    const win = stubWindow();
+    const onClick = plugin!.props.handleDOMEvents!.click as unknown as (
+      view: unknown,
+      event: MouseEvent,
+    ) => boolean;
+    const plain = click("https://example.com/a");
+    expect(onClick({ editable: true }, plain)).toBe(false);
+    expect(plain.preventDefault).not.toHaveBeenCalled();
+    expect(win.open).not.toHaveBeenCalled();
+    expect(onClick({ editable: true }, click("https://example.com/a", { metaKey: true }))).toBe(
+      true,
+    );
+    expect(win.open).toHaveBeenCalled();
+  });
+});
+
+describe("shortLink", () => {
+  it("keeps a short address whole", () => {
+    expect(shortLink("https://example.com/a?b=1")).toEqual({
+      head: "https://example.com",
+      tail: "/a?b=1",
+    });
+    expect(shortLink("https://example.com/")).toEqual({
+      head: "https://example.com",
+      tail: "",
+    });
+  });
+
+  it("cuts a long path in the middle", () => {
+    const href = "https://drive.google.com/drive/folders/1AbCdEfGhIjKlMnOpQrStUvWxYz%5D-goto";
+    const { head, tail } = shortLink(href);
+    expect(head).toBe("https://drive.google.com");
+    expect(tail).toBe("/drive/folders…UvWxYz%5D-goto");
+  });
+
+  it("shows other addresses as they are", () => {
+    expect(shortLink("mailto:a@example.com")).toEqual({
+      head: "mailto:a@example.com",
+      tail: "",
+    });
   });
 });
