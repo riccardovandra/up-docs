@@ -1,5 +1,5 @@
 -- A tab's last push into a Claude Doc (claude.ai), one row per tab and Claude
--- Doc. widget_map is JSON {slug: {nodeId, hash}}. Rows go with their tab.
+-- Doc. widget_map is JSON {slug: {nodeId, hash, pub?}}. Rows go with their tab.
 
 CREATE TABLE claude_doc_links (
   tab_id TEXT NOT NULL REFERENCES tabs(id) ON DELETE CASCADE,
