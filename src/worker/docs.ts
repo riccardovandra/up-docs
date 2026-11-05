@@ -3,6 +3,7 @@
 // Writes to an existing doc must go through the DocRoom (see `rooms.ts`) so
 // open editors hear about them; these functions only touch D1.
 
+import type { ClaudeDocLink } from "../shared/claudeDocs/toClaudeDoc.ts";
 import { projectNameFromKey, titleProjectKey } from "../shared/embed.ts";
 import type {
   DocStatus,
@@ -600,4 +601,71 @@ export async function deleteTab(
     touchDocStatement(db, tab.docId, input.now),
   ]);
   return { deletedTabIds: ids, placements };
+}
+
+interface ClaudeDocLinkRow {
+  claude_doc_id: string;
+  claude_doc_url: string;
+  claude_tab_id: string;
+  claude_body_id: string;
+  widget_map: string;
+  pushed_version: number;
+  pushed_rev: number;
+  pushed_at: string;
+}
+
+const toClaudeDocLink = (row: ClaudeDocLinkRow): ClaudeDocLink => ({
+  claudeDocId: row.claude_doc_id,
+  claudeDocUrl: row.claude_doc_url,
+  claudeTabId: row.claude_tab_id,
+  claudeBodyId: row.claude_body_id,
+  widgetMap: JSON.parse(row.widget_map) as ClaudeDocLink["widgetMap"],
+  pushedVersion: row.pushed_version,
+  pushedRev: row.pushed_rev,
+  pushedAt: row.pushed_at,
+});
+
+/** The tab's last push into that Claude Doc, or null when it was never pushed there. */
+export async function getClaudeDocLink(
+  db: D1Database,
+  tabId: string,
+  claudeDocId: string,
+): Promise<ClaudeDocLink | null> {
+  const row = await db
+    .prepare("SELECT * FROM claude_doc_links WHERE tab_id = ? AND claude_doc_id = ?")
+    .bind(tabId, claudeDocId)
+    .first<ClaudeDocLinkRow>();
+  return row ? toClaudeDocLink(row) : null;
+}
+
+/** Records a push, replacing the tab's previous push into the same Claude Doc. */
+export async function saveClaudeDocLink(
+  db: D1Database,
+  tabId: string,
+  link: ClaudeDocLink,
+): Promise<ClaudeDocLink> {
+  await db
+    .prepare(
+      `INSERT INTO claude_doc_links (tab_id, claude_doc_id, claude_doc_url, claude_tab_id,
+         claude_body_id, widget_map, pushed_version, pushed_rev, pushed_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT (tab_id, claude_doc_id) DO UPDATE SET
+         claude_doc_url = excluded.claude_doc_url, claude_tab_id = excluded.claude_tab_id,
+         claude_body_id = excluded.claude_body_id, widget_map = excluded.widget_map,
+         pushed_version = excluded.pushed_version, pushed_rev = excluded.pushed_rev,
+         pushed_at = excluded.pushed_at`,
+    )
+    .bind(
+      tabId,
+      link.claudeDocId,
+      link.claudeDocUrl,
+      link.claudeTabId,
+      link.claudeBodyId,
+      JSON.stringify(link.widgetMap),
+      link.pushedVersion,
+      link.pushedRev,
+      link.pushedAt,
+    )
+    .run();
+  return link;
 }
