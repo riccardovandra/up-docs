@@ -761,3 +761,146 @@ describe("MCP diagrams", () => {
     expect(listed.body.threads[0]).toMatchObject({ anchor, status: "orphaned" });
   });
 });
+
+describe("Claude Docs push tools", () => {
+  const record = (tabId: string, version: number, widgetMap: Record<string, unknown>) => ({
+    tabId,
+    claudeDocId: "claude-doc-1",
+    claudeDocUrl: "https://claude.ai/artifact/abc",
+    claudeTabId: "file-1",
+    claudeBodyId: "node-body",
+    widgetMap,
+    pushedVersion: version,
+    pushedRev: 1,
+  });
+
+  it("prepares a new push, records it, then prepares an update", async () => {
+    const mcp = await makeMcpHarness();
+    const markdown = "# Plan\n\n```t3-widget id=flow\n" + FLOW_EXAMPLE + "\n```\n";
+    const { tab } = await mcp.seedDoc(markdown);
+
+    const first = await mcp.tool("prepare_claude_doc_push", {
+      tabId: tab.tabId,
+      claudeDocId: "claude-doc-1",
+    });
+    expect(first.isError).toBe(false);
+    expect(first.body).toMatchObject({
+      mode: "new",
+      link: null,
+      tab: { tabId: tab.tabId, title: "Plan" },
+      content: { markdown: "# Plan\n\n<?claude block w1?>\n" },
+    });
+    expect(first.body.batch).toHaveLength(5);
+    const [widget] = first.body.widgets;
+    expect(widget).toMatchObject({ key: "w1", slug: "flow", code: FLOW_EXAMPLE, nodeId: null });
+
+    const recorded = await mcp.tool(
+      "record_claude_doc_push",
+      record(tab.tabId, first.body.tab.version, {
+        flow: { nodeId: "node-flow", hash: widget.hash, pub: 3 },
+      }),
+    );
+    expect(recorded.body).toMatchObject({
+      ok: true,
+      link: { claudeTabId: "file-1", pushedAt: new Date(mcp.api.clock.now).toISOString() },
+    });
+
+    const second = await mcp.tool("prepare_claude_doc_push", {
+      tabId: tab.tabId,
+      claudeDocId: "claude-doc-1",
+    });
+    expect(second.body).toMatchObject({
+      mode: "update",
+      link: {
+        claudeDocId: "claude-doc-1",
+        widgetMap: { flow: { nodeId: "node-flow", hash: widget.hash, pub: 3 } },
+      },
+      content: { blocks: { w1: { ref: "node/node-flow" } } },
+      widgets: [{ nodeId: "node-flow", changed: false }],
+      widgetCreates: [],
+      removedWidgets: [],
+    });
+    expect(second.body.batch).toBeUndefined();
+
+    // A re-record replaces the link rather than adding a second one.
+    await mcp.tool("record_claude_doc_push", record(tab.tabId, 2, {}));
+    const rows = await mcp.api.db
+      .prepare("SELECT count(*) AS n FROM claude_doc_links")
+      .first<{ n: number }>();
+    expect(rows?.n).toBe(1);
+  });
+
+  it("refuses a viewer, an unknown tab and a bad widget map", async () => {
+    const mcp = await makeMcpHarness();
+    const { doc, tab } = await mcp.seedDoc("Text");
+    await mcp.tool("share_doc", { docId: doc.docId, email: "viewer@example.com", role: "viewer" });
+    const viewerCookie = await mcp.api.signIn("viewer@example.com");
+    const created = await mcp.api.call("POST", "/api/tokens", {
+      body: { name: "viewer agent" },
+      headers: { Cookie: viewerCookie },
+    });
+    const { token } = (await created.json()) as { token: string };
+    const asViewer = async (name: string, args: Record<string, unknown>) => {
+      const response = await handleMcp(
+        new Request(`${ORIGIN}/mcp`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+          body: JSON.stringify({
+            jsonrpc: "2.0",
+            id: 1,
+            method: "tools/call",
+            params: { name, arguments: args },
+          }),
+        }),
+        mcp.api.deps,
+      );
+      const { result } = (await response.json()) as {
+        result: { isError?: boolean; content: Array<{ text: string }> };
+      };
+      return { isError: result.isError === true, body: JSON.parse(result.content[0]!.text) };
+    };
+    for (const [name, args] of [
+      ["prepare_claude_doc_push", { tabId: tab.tabId, claudeDocId: "claude-doc-1" }],
+      ["record_claude_doc_push", record(tab.tabId, 1, {})],
+    ] as const) {
+      expect(await asViewer(name, args)).toMatchObject({
+        isError: true,
+        body: { error: "forbidden" },
+      });
+    }
+
+    expect(
+      await mcp.tool("prepare_claude_doc_push", { tabId: "missing", claudeDocId: "x" }),
+    ).toMatchObject({ isError: true, body: { error: "not_found" } });
+    expect(
+      await mcp.tool("record_claude_doc_push", record(tab.tabId, 1, { flow: { nodeId: "" } })),
+    ).toMatchObject({ isError: true, body: { error: "invalid_argument" } });
+    for (const pub of [-1, 1.5, "2"]) {
+      expect(
+        await mcp.tool(
+          "record_claude_doc_push",
+          record(tab.tabId, 1, { flow: { nodeId: "n", hash: "h", pub } }),
+        ),
+      ).toMatchObject({ isError: true, body: { error: "invalid_argument" } });
+    }
+  });
+
+  it("stores links in a migrated table that drops them with their tab", async () => {
+    const mcp = await makeMcpHarness();
+    const { doc, tab } = await mcp.seedDoc("Text");
+    const second = await mcp.tool("create_tab", { docId: doc.docId, title: "Second" });
+    const secondId = second.body.tab.tabId as string;
+    await mcp.tool("record_claude_doc_push", record(secondId, 1, {}));
+    await mcp.tool("record_claude_doc_push", record(tab.tabId, 1, {}));
+    const count = async () =>
+      (await mcp.api.db.prepare("SELECT count(*) AS n FROM claude_doc_links").first<{ n: number }>())
+        ?.n;
+    expect(await count()).toBe(2);
+    await mcp.tool("delete_tab", { tabId: secondId });
+    expect(await count()).toBe(1);
+    expect(await Docs.getClaudeDocLink(mcp.api.db, tab.tabId, "claude-doc-1")).toMatchObject({
+      claudeBodyId: "node-body",
+      widgetMap: {},
+    });
+  });
+});

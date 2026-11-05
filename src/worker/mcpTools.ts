@@ -38,6 +38,11 @@ import {
   type RichTable,
   type TableColumn,
 } from "../shared/table.ts";
+import {
+  ClaudeDocPushError,
+  prepareClaudeDocPush,
+  type WidgetLink,
+} from "../shared/claudeDocs/toClaudeDoc.ts";
 import { groupThreads } from "../shared/threads.ts";
 import { describeWidgetProblems } from "../shared/widget/check.ts";
 import { findWidgetFences, spliceFenceSource } from "../shared/widget/fence.ts";
@@ -112,6 +117,30 @@ function requireVersion(args: Args, key: string): number {
     return fail("invalid_argument", `"${key}" must be an integer tab version.`);
   }
   return value;
+}
+
+/** `widgetMap`: { [slug]: { nodeId, hash, pub? } }, strings non-empty, pub a non-negative integer. */
+function widgetMapArg(args: Args): Record<string, WidgetLink> {
+  const value = args.widgetMap;
+  const invalid = () =>
+    fail("invalid_argument", '"widgetMap" must be an object of { nodeId, hash, pub? } by diagram id.');
+  if (!value || typeof value !== "object" || Array.isArray(value)) return invalid();
+  const map: Record<string, WidgetLink> = {};
+  for (const [slug, entry] of Object.entries(value)) {
+    if (!entry || typeof entry !== "object") return invalid();
+    const { nodeId, hash, pub } = entry as Record<string, unknown>;
+    if (typeof nodeId !== "string" || !nodeId || typeof hash !== "string" || !hash) {
+      return invalid();
+    }
+    if (pub === undefined || pub === null) {
+      map[slug] = { nodeId, hash };
+    } else if (typeof pub === "number" && Number.isInteger(pub) && pub >= 0) {
+      map[slug] = { nodeId, hash, pub };
+    } else {
+      return fail("invalid_argument", `"widgetMap.${slug}.pub" must be a non-negative integer.`);
+    }
+  }
+  return map;
 }
 
 function projectKeyArg(args: Args): string | undefined {
@@ -745,6 +774,65 @@ export const TOOLS = [
       required: ["tabId", "diagramId", "textId", "value"],
     },
   },
+  {
+    name: "prepare_claude_doc_push",
+    description:
+      "Convert a tab for a push into a Claude Doc (claude.ai) as a tab. Returns the prose markdown with a <?claude block wN?> token per diagram, the embed blocks, each diagram's module code, conversion warnings, and the Claude Docs members to send: `batch` (mode \"new\", for batch(container={\"kind\":\"project\",\"id\":claudeDocId})) or `widgetCreates` (mode \"update\", when the tab was pushed to that Claude Doc before). Writes nothing. Needs editor access.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        tabId: { type: "string" },
+        claudeDocId: { type: "string", description: "The Claude Doc's id (frame.slug)." },
+        tabName: { type: "string", description: "The Claude Doc tab name; defaults to the tab title." },
+        order: { type: "string", description: 'The new tab\'s order key in the Claude Doc; default "z0".' },
+      },
+      required: ["tabId", "claudeDocId"],
+    },
+  },
+  {
+    name: "record_claude_doc_push",
+    description:
+      "Record a finished push of a tab into a Claude Doc, so the next prepare_claude_doc_push updates the same Claude Doc tab. Replaces the previous record for that tab and Claude Doc. Needs editor access.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        tabId: { type: "string" },
+        claudeDocId: { type: "string" },
+        claudeDocUrl: { type: "string" },
+        claudeTabId: { type: "string", description: "The Claude Docs file id of the tab." },
+        claudeBodyId: { type: "string", description: "The Claude Docs prose node id." },
+        widgetMap: {
+          type: "object",
+          description: "{ [diagram slug]: { nodeId, hash, pub? } }, hashes as prepare_claude_doc_push returned them, pub the widget's publish counter.",
+          additionalProperties: {
+            type: "object",
+            properties: {
+              nodeId: { type: "string" },
+              hash: { type: "string" },
+              pub: {
+                type: "integer",
+                minimum: 0,
+                description: "The widget's publish counter at push time.",
+              },
+            },
+            required: ["nodeId", "hash"],
+          },
+        },
+        pushedVersion: { type: "integer", description: "The tab version that was pushed." },
+        pushedRev: { type: "integer", description: "The prose node rev from the last Claude Docs ack." },
+      },
+      required: [
+        "tabId",
+        "claudeDocId",
+        "claudeDocUrl",
+        "claudeTabId",
+        "claudeBodyId",
+        "widgetMap",
+        "pushedVersion",
+        "pushedRev",
+      ],
+    },
+  },
 ] as const;
 
 type ToolName = (typeof TOOLS)[number]["name"];
@@ -1330,6 +1418,45 @@ const handlers: Record<ToolName, (args: Args, ctx: ToolContext) => Promise<objec
     return fail("busy", "The tab kept changing while editing. Re-read it and try again.", {
       version: tab.version,
     });
+  },
+  prepare_claude_doc_push: async (args, ctx) => {
+    const tab = await tabWith(ctx, requireString(args, "tabId"), "editor");
+    const claudeDocId = requireString(args, "claudeDocId");
+    const tabName = optionalString(args, "tabName", 255);
+    const order = optionalString(args, "order", 64);
+    const link = await Docs.getClaudeDocLink(ctx.deps.db, tab.id, claudeDocId);
+    try {
+      return await prepareClaudeDocPush({
+        tab,
+        claudeDocId,
+        link,
+        origin: ctx.origin,
+        ...(tabName === undefined ? {} : { tabName }),
+        ...(order === undefined ? {} : { order }),
+      });
+    } catch (cause) {
+      if (cause instanceof ClaudeDocPushError) return fail(cause.code, cause.message);
+      throw cause;
+    }
+  },
+
+  record_claude_doc_push: async (args, ctx) => {
+    const tab = await tabWith(ctx, requireString(args, "tabId"), "editor");
+    const claudeDocUrl = requireString(args, "claudeDocUrl", 2000);
+    if (!/^https:\/\//i.test(claudeDocUrl)) {
+      fail("invalid_argument", '"claudeDocUrl" must be an https link.');
+    }
+    const link = await Docs.saveClaudeDocLink(ctx.deps.db, tab.id, {
+      claudeDocId: requireString(args, "claudeDocId"),
+      claudeDocUrl,
+      claudeTabId: requireString(args, "claudeTabId"),
+      claudeBodyId: requireString(args, "claudeBodyId"),
+      widgetMap: widgetMapArg(args),
+      pushedVersion: requireVersion(args, "pushedVersion"),
+      pushedRev: requireVersion(args, "pushedRev"),
+      pushedAt: new Date(ctx.deps.now()).toISOString(),
+    });
+    return { ok: true, link };
   },
 };
 
