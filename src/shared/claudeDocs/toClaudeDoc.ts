@@ -31,6 +31,8 @@ export interface SourceTab {
 export interface WidgetLink {
   readonly nodeId: string;
   readonly hash: string;
+  /** The Claude widget's publish counter at push time; a later label edit in Claude Docs raises it. */
+  readonly pub?: number;
 }
 
 /** A tab's last push into one Claude Doc. */

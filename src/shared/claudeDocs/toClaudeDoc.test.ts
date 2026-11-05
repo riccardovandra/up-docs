@@ -306,7 +306,7 @@ describe("mode update", () => {
       claudeTabId: "file-9",
       claudeBodyId: "node-body",
       widgetMap: {
-        flow: { nodeId: "node-flow", hash: await widgetHash(FLOW_EXAMPLE) },
+        flow: { nodeId: "node-flow", hash: await widgetHash(FLOW_EXAMPLE), pub: 4 },
         pillars: { nodeId: "node-pillars", hash: "0000000000000000" },
         gone: { nodeId: "node-gone", hash: "1111111111111111" },
       },

@@ -797,7 +797,7 @@ describe("Claude Docs push tools", () => {
     const recorded = await mcp.tool(
       "record_claude_doc_push",
       record(tab.tabId, first.body.tab.version, {
-        flow: { nodeId: "node-flow", hash: widget.hash },
+        flow: { nodeId: "node-flow", hash: widget.hash, pub: 3 },
       }),
     );
     expect(recorded.body).toMatchObject({
@@ -811,7 +811,10 @@ describe("Claude Docs push tools", () => {
     });
     expect(second.body).toMatchObject({
       mode: "update",
-      link: { claudeDocId: "claude-doc-1", widgetMap: { flow: { nodeId: "node-flow" } } },
+      link: {
+        claudeDocId: "claude-doc-1",
+        widgetMap: { flow: { nodeId: "node-flow", hash: widget.hash, pub: 3 } },
+      },
       content: { blocks: { w1: { ref: "node/node-flow" } } },
       widgets: [{ nodeId: "node-flow", changed: false }],
       widgetCreates: [],
@@ -872,6 +875,14 @@ describe("Claude Docs push tools", () => {
     expect(
       await mcp.tool("record_claude_doc_push", record(tab.tabId, 1, { flow: { nodeId: "" } })),
     ).toMatchObject({ isError: true, body: { error: "invalid_argument" } });
+    for (const pub of [-1, 1.5, "2"]) {
+      expect(
+        await mcp.tool(
+          "record_claude_doc_push",
+          record(tab.tabId, 1, { flow: { nodeId: "n", hash: "h", pub } }),
+        ),
+      ).toMatchObject({ isError: true, body: { error: "invalid_argument" } });
+    }
   });
 
   it("stores links in a migrated table that drops them with their tab", async () => {

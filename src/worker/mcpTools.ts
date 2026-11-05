@@ -119,20 +119,26 @@ function requireVersion(args: Args, key: string): number {
   return value;
 }
 
-/** `widgetMap`: { [slug]: { nodeId, hash } } with non-empty strings. */
+/** `widgetMap`: { [slug]: { nodeId, hash, pub? } }, strings non-empty, pub a non-negative integer. */
 function widgetMapArg(args: Args): Record<string, WidgetLink> {
   const value = args.widgetMap;
   const invalid = () =>
-    fail("invalid_argument", '"widgetMap" must be an object of { nodeId, hash } by diagram id.');
+    fail("invalid_argument", '"widgetMap" must be an object of { nodeId, hash, pub? } by diagram id.');
   if (!value || typeof value !== "object" || Array.isArray(value)) return invalid();
   const map: Record<string, WidgetLink> = {};
   for (const [slug, entry] of Object.entries(value)) {
     if (!entry || typeof entry !== "object") return invalid();
-    const { nodeId, hash } = entry as Record<string, unknown>;
+    const { nodeId, hash, pub } = entry as Record<string, unknown>;
     if (typeof nodeId !== "string" || !nodeId || typeof hash !== "string" || !hash) {
       return invalid();
     }
-    map[slug] = { nodeId, hash };
+    if (pub === undefined || pub === null) {
+      map[slug] = { nodeId, hash };
+    } else if (typeof pub === "number" && Number.isInteger(pub) && pub >= 0) {
+      map[slug] = { nodeId, hash, pub };
+    } else {
+      return fail("invalid_argument", `"widgetMap.${slug}.pub" must be a non-negative integer.`);
+    }
   }
   return map;
 }
@@ -797,10 +803,18 @@ export const TOOLS = [
         claudeBodyId: { type: "string", description: "The Claude Docs prose node id." },
         widgetMap: {
           type: "object",
-          description: "{ [diagram slug]: { nodeId, hash } }, hashes as prepare_claude_doc_push returned them.",
+          description: "{ [diagram slug]: { nodeId, hash, pub? } }, hashes as prepare_claude_doc_push returned them, pub the widget's publish counter.",
           additionalProperties: {
             type: "object",
-            properties: { nodeId: { type: "string" }, hash: { type: "string" } },
+            properties: {
+              nodeId: { type: "string" },
+              hash: { type: "string" },
+              pub: {
+                type: "integer",
+                minimum: 0,
+                description: "The widget's publish counter at push time.",
+              },
+            },
             required: ["nodeId", "hash"],
           },
         },
