@@ -58,6 +58,8 @@ import { checkEmbedsIn } from "../shared/embeds.ts";
 import { checkVideosIn } from "../shared/video.ts";
 import { widgetProblems } from "./widgets.ts";
 import { FORMAT_GUIDES, FORMAT_TOPICS, type FormatTopic } from "./mcpGuide.ts";
+import { DOC_TYPES, docTypeChecklist, docTypeSkeleton, isDocType } from "./docTypes.ts";
+import * as Facts from "./projectFacts.ts";
 
 const MAX_MARKDOWN_LENGTH = 1_000_000;
 /** edit_tab re-applies against the latest version this many times before giving up. */
@@ -312,6 +314,12 @@ async function load<A>(promise: Promise<A>, what: string): Promise<A> {
     if (cause instanceof Access.LastOwnerError) {
       return fail("last_owner", "A doc must keep at least one owner.");
     }
+    if (cause instanceof Facts.TooManyFactsError) {
+      return fail(
+        "too_many_facts",
+        `A project keeps at most ${Facts.MAX_FACTS_PER_PROJECT} facts. Remove or merge some first.`,
+      );
+    }
     if (cause instanceof Access.SelfShareError) {
       return fail("self", "That address signs in as you, so it already has your access.");
     }
@@ -378,6 +386,42 @@ const docSummary = (ctx: ToolContext, doc: DocSummary, firstTabId: string | unde
   updatedAt: new Date(doc.updatedAt).toISOString(),
   url: firstTabId ? tabUrl(ctx, { docId: doc.id, id: firstTabId }) : `${ctx.origin}/d/${doc.id}`,
 });
+
+/** A project's facts as agents get them with a doc. */
+async function projectFactsFor(ctx: ToolContext, projectId: string | null) {
+  if (projectId === null) return [];
+  const facts = await Facts.listFacts(ctx.deps.db, projectId);
+  return facts.map(({ factId, text }) => ({ factId, text }));
+}
+
+/** An existing project the token user can see, by `projectId` or `projectKey`; never creates one. */
+async function existingProject(ctx: ToolContext, args: Args) {
+  const projectId = optionalString(args, "projectId");
+  const projectKey = projectKeyArg(args);
+  if ((projectId === undefined) === (projectKey === undefined)) {
+    fail("invalid_argument", 'Pass "projectId" or "projectKey".');
+  }
+  const project =
+    projectId !== undefined
+      ? await load(Docs.getProject(ctx.deps.db, projectId), "project")
+      : await Docs.findProjectByKey(ctx.deps.db, projectKey!);
+  if (!project || !(await Access.canSeeProject(ctx.deps.db, project.id, ctx.principal.userId))) {
+    return fail("not_found", "No project with that id or key.");
+  }
+  return project;
+}
+
+async function requireFactEditor(ctx: ToolContext, projectId: string): Promise<void> {
+  if (!(await Facts.canEditFacts(ctx.deps.db, projectId, ctx.principal.userId))) {
+    fail("forbidden", "Changing project facts needs editor access to a doc in the project.");
+  }
+}
+
+function factTextArg(args: Args, key: string): string {
+  const text = requireString(args, key, Facts.MAX_FACT_LENGTH).trim();
+  if (!text) fail("invalid_argument", `"${key}" must not be blank.`);
+  return text;
+}
 
 /** Tabs in reading order: each tab followed by its children, siblings by position. */
 function readingOrder(tabs: ReadonlyArray<Tab>): ReadonlyArray<{ tab: Tab; depth: number }> {
@@ -470,6 +514,38 @@ export const TOOLS = [
     },
   },
   {
+    name: "project_facts",
+    description:
+      "List a project's standing facts and house rules (tools it uses, names, things never to do). create_doc and read_doc return them too.",
+    inputSchema: {
+      type: "object",
+      properties: { projectKey: { type: "string" }, projectId: { type: "string" } },
+    },
+  },
+  {
+    name: "add_project_fact",
+    description:
+      "Save a lasting fact about a project, in one sentence, when the user corrects one or states a rule (\"We use NocoDB, never Airtable\"). Every later doc in the project gets it. Not for one-off details of a single doc.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        projectKey: { type: "string" },
+        projectId: { type: "string" },
+        fact: { type: "string", maxLength: Facts.MAX_FACT_LENGTH },
+      },
+      required: ["fact"],
+    },
+  },
+  {
+    name: "remove_project_fact",
+    description: "Remove a project fact that is wrong or no longer true, by factId.",
+    inputSchema: {
+      type: "object",
+      properties: { factId: { type: "string" } },
+      required: ["factId"],
+    },
+  },
+  {
     name: "list_projects",
     description:
       "List projects with their doc counts. Projects are T3 Code projects: key is the repository (github.com/owner/repo), or title:<name> for a project without a git remote. noProjectDocCount counts docs in no project.",
@@ -504,7 +580,7 @@ export const TOOLS = [
   {
     name: "create_doc",
     description:
-      "Create a doc. File it with projectKey (the T3 Code project's key from docs_cloud_project or list_projects; the project is created from projectKey and projectName if new) or projectId; omit both for no project. Pass the skeleton (section headings with one-line placeholders) as markdown for the first tab, then share the returned url with the user before filling it in.",
+      "Create a doc. File it with projectKey (the T3 Code project's key from docs_cloud_project or list_projects; the project is created from projectKey and projectName if new) or projectId; omit both for no project. Pass the skeleton (section headings with one-line placeholders) as markdown for the first tab, or a type for a ready skeleton, then share the returned url with the user before filling it in. The result lists the project's facts: follow them.",
     inputSchema: {
       type: "object",
       properties: {
@@ -515,7 +591,16 @@ export const TOOLS = [
         },
         projectId: { type: "string" },
         title: { type: "string" },
-        markdown: { type: "string", description: "Initial markdown for the first tab." },
+        markdown: {
+          type: "string",
+          description: "Initial markdown for the first tab. Omit it with type to get that type's skeleton.",
+        },
+        type: {
+          type: "string",
+          enum: DOC_TYPES,
+          description:
+            "The kind of doc: plan, spec, explainer, report or client (written to a client). Without markdown, the first tab gets that type's skeleton; the result adds a checklist for filling it.",
+        },
         group: {
           type: "string",
           description: "Group inside the project, such as Strategy or Posts. Omit for none.",
@@ -555,7 +640,7 @@ export const TOOLS = [
   {
     name: "read_doc",
     description:
-      "Read a doc: its tab tree (ids, versions, urls) and each tab's markdown. Pass tabId to read only that tab.",
+      "Read a doc: its tab tree (ids, versions, urls), each tab's markdown and the project's facts (follow them). Pass tabId to read only that tab.",
     inputSchema: {
       type: "object",
       properties: { docId: { type: "string" }, tabId: { type: "string" } },
@@ -720,10 +805,17 @@ export const TOOLS = [
   },
   {
     name: "resolve_comment",
-    description: "Resolve a comment thread once it has been addressed.",
+    description:
+      "Resolve a comment thread once it has been addressed. When the thread corrected a lasting fact about the project (a tool, a name, a rule), pass lesson: one sentence saved to the project's facts so later docs get it right.",
     inputSchema: {
       type: "object",
-      properties: { commentId: { type: "string" } },
+      properties: {
+        commentId: { type: "string" },
+        lesson: {
+          type: "string",
+          description: "A lasting fact this thread taught, saved to the project's facts.",
+        },
+      },
       required: ["commentId"],
     },
   },
@@ -857,6 +949,47 @@ const handlers: Record<ToolName, (args: Args, ctx: ToolContext) => Promise<objec
     return { topic, guide: FORMAT_GUIDES[topic as FormatTopic] };
   },
 
+  project_facts: async (args, ctx) => {
+    const project = await existingProject(ctx, args);
+    const facts = await Facts.listFacts(ctx.deps.db, project.id);
+    return {
+      project: { projectId: project.id, key: project.key, name: project.name },
+      facts: facts.map(({ factId, text, sourceCommentId, createdAt }) => ({
+        factId,
+        text,
+        sourceCommentId,
+        createdAt: new Date(createdAt).toISOString(),
+      })),
+    };
+  },
+
+  add_project_fact: async (args, ctx) => {
+    const text = factTextArg(args, "fact");
+    const project = await existingProject(ctx, args);
+    await requireFactEditor(ctx, project.id);
+    const fact = await load(
+      Facts.addFact(ctx.deps.db, {
+        projectId: project.id,
+        text,
+        createdBy: ctx.principal.userId,
+        now: ctx.deps.now(),
+      }),
+      "project",
+    );
+    return { fact: { factId: fact.factId, projectId: fact.projectId, text: fact.text } };
+  },
+
+  remove_project_fact: async (args, ctx) => {
+    const factId = requireString(args, "factId");
+    const fact = await Facts.getFact(ctx.deps.db, factId);
+    if (!fact || !(await Access.canSeeProject(ctx.deps.db, fact.projectId, ctx.principal.userId))) {
+      return fail("not_found", "No fact with that id.");
+    }
+    await requireFactEditor(ctx, fact.projectId);
+    await Facts.removeFact(ctx.deps.db, factId);
+    return { removed: true, factId };
+  },
+
   list_projects: async (_args, ctx) => {
     const library = await scopedLibrary(ctx);
     return {
@@ -913,7 +1046,13 @@ const handlers: Record<ToolName, (args: Args, ctx: ToolContext) => Promise<objec
 
   create_doc: async (args, ctx) => {
     const title = requireString(args, "title");
-    const markdown = markdownArg(args, "markdown", false);
+    const type = args.type;
+    if (type !== undefined && !isDocType(type)) {
+      fail("invalid_argument", `"type" must be one of: ${DOC_TYPES.join(", ")}.`);
+    }
+    const markdown =
+      markdownArg(args, "markdown", false) ??
+      (type === undefined ? undefined : docTypeSkeleton(type, title));
     const group = groupArg(args, false);
     const projectId = await targetProject(ctx, args);
     if (markdown) checkTables(markdown);
@@ -939,7 +1078,12 @@ const handlers: Record<ToolName, (args: Args, ctx: ToolContext) => Promise<objec
       });
       if (result.ok) tab = result.tab;
     }
-    return { doc: docSummary(ctx, created.doc, tab.id), tab: tabSummary(ctx, tab) };
+    return {
+      doc: docSummary(ctx, created.doc, tab.id),
+      tab: tabSummary(ctx, tab),
+      projectFacts: await projectFactsFor(ctx, projectId),
+      ...(type === undefined ? {} : { checklist: docTypeChecklist(type) }),
+    };
   },
 
   move_doc: async (args, ctx) => {
@@ -979,12 +1123,14 @@ const handlers: Record<ToolName, (args: Args, ctx: ToolContext) => Promise<objec
       if (!tab) fail("not_found", "No tab with that id in this doc.");
       return {
         doc: { ...docSummary(ctx, doc, ordered[0]?.tab.id), role },
+        projectFacts: await projectFactsFor(ctx, doc.projectId),
         tab: { ...tabSummary(ctx, tab), markdown: tab.markdown },
       };
     }
     const threads = await DocThreads.listDocThreads(ctx.deps.db, docId);
     return {
       doc: { ...docSummary(ctx, doc, ordered[0]?.tab.id), role },
+      projectFacts: await projectFactsFor(ctx, doc.projectId),
       // T3 Code threads started from this doc ("Start work").
       startedThreads: threads.map(({ environmentId, threadId, title }) => ({
         environmentId,
@@ -1298,12 +1444,32 @@ const handlers: Record<ToolName, (args: Args, ctx: ToolContext) => Promise<objec
     const commentId = requireString(args, "commentId");
     const target = await load(Comments.getComment(ctx.deps.db, commentId), "comment");
     await need(ctx, target.docId, "commenter");
+    const lesson = args.lesson === undefined ? undefined : factTextArg(args, "lesson");
+    let projectId: string | null = null;
+    if (lesson !== undefined) {
+      projectId = (await load(Docs.getDoc(ctx.deps.db, target.docId), "doc")).doc.projectId;
+      if (projectId === null) {
+        fail("no_project", "This doc is in no project, so the lesson has nowhere to live.");
+      }
+      await requireFactEditor(ctx, projectId);
+    }
     const root = await commentWrite(ctx, target.docId, {
       kind: "resolve",
       commentId,
       resolved: true,
     });
-    return { threadId: root.id, resolved: true };
+    if (lesson === undefined || projectId === null) return { threadId: root.id, resolved: true };
+    const fact = await load(
+      Facts.addFact(ctx.deps.db, {
+        projectId,
+        text: lesson,
+        createdBy: ctx.principal.userId,
+        sourceCommentId: root.id,
+        now: ctx.deps.now(),
+      }),
+      "project",
+    );
+    return { threadId: root.id, resolved: true, fact: { factId: fact.factId, text: fact.text } };
   },
 
   list_members: async (args, ctx) => {

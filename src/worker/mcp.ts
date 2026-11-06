@@ -22,12 +22,13 @@ export const MAX_INSTRUCTIONS_LENGTH = 3_900;
 export const MCP_INSTRUCTIONS = `UP Docs holds living markdown docs that the user watches update live in their editor.
 Projects are T3 Code projects, identified by key: the git repository (github.com/owner/repo), or title:<name> for a project without a remote. Inside T3 Code, docs_cloud_project gives the current project's key.
 Workflow:
-1. When asked for a doc, plan or write-up, create it first: create_doc with projectKey (and projectName), the title and a skeleton (the section headings, each with a one-line placeholder). Do this before research. Omit projectKey only when the doc belongs to no project.
+1. When asked for a doc, plan or write-up, create it first: create_doc with projectKey (and projectName), the title and a skeleton (the section headings, each with a one-line placeholder). Do this before research. Omit projectKey only when the doc belongs to no project. Pass type (plan, spec, explainer, report, client) for a ready skeleton in the shape below.
 2. Give the user the doc URL from the response right away, then work.
 3. Fill sections one at a time with edit_tab (replace a placeholder with the finished section), so the user watches the doc build. Use write_tab only for a new or fully rewritten tab.
 4. Use tabs (create_tab) for distinct parts such as research, plan and decisions; nest with parentTabId.
 5. Keep findings in the doc, not the chat. End with one line and the URL.
 Re-read a tab (read_doc with tabId) before editing it if the user may have changed it. Move a doc with move_doc (projectId: null for no project).
+Project facts: create_doc and read_doc return the project's standing facts (tools, names, rules). Follow them over your own assumptions. When the user corrects a lasting fact, save it with add_project_fact, or with resolve_comment's lesson when it came from a comment.
 How to write (what the user keeps asking for):
 - Before drafting, know the reader, the purpose and the decision the doc should drive. If one is unclear, ask one or two short questions first.
 - Foundation first: say what the doc is for and the end state, then the parts. A plan reads: purpose and reader; end state, with a diagram; components, each with its goal, when it is done and how it fits; order of work, easiest or first-needed first; open decisions.

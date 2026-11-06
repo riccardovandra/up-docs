@@ -2,67 +2,9 @@ import { describe, expect, it } from "vitest";
 
 import * as Docs from "./docs.ts";
 import { handleMcp } from "./mcp.ts";
-import { makeApiHarness, ORIGIN } from "./testing/apiHarness.ts";
+import { ORIGIN } from "./testing/apiHarness.ts";
+import { makeMcpHarness } from "./testing/mcpHarness.ts";
 import { FLOW_EXAMPLE } from "../shared/widget/testing/examples.ts";
-
-/** `requestOrigin` stands in for what request.url reports, which can differ from PUBLIC_ORIGIN. */
-async function makeMcpHarness(requestOrigin = ORIGIN) {
-  const api = makeApiHarness();
-  const cookie = await api.signIn();
-  const created = await api.call("POST", "/api/tokens", {
-    body: { name: "agent" },
-    headers: { Cookie: cookie },
-  });
-  const { token } = (await created.json()) as { token: string };
-  let nextId = 1;
-  // Echoed like a real client, once initialize hands one out.
-  let sessionId: string | null = null;
-
-  const post = (body: unknown, headers: Record<string, string> = {}) =>
-    handleMcp(
-      new Request(`${requestOrigin}/mcp`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", ...headers },
-        body: JSON.stringify(body),
-      }),
-      api.deps,
-    );
-
-  const rpc = async (method: string, params: Record<string, unknown> = {}) => {
-    const response = await post(
-      { jsonrpc: "2.0", id: nextId++, method, params },
-      { Authorization: `Bearer ${token}`, ...(sessionId ? { "Mcp-Session-Id": sessionId } : {}) },
-    );
-    sessionId = response.headers.get("Mcp-Session-Id") ?? sessionId;
-    return (await response.json()) as {
-      result?: Record<string, unknown> & {
-        content?: Array<{ text: string }>;
-        isError?: boolean;
-      };
-      error?: { code: number; message: string };
-    };
-  };
-
-  const tool = async (name: string, args: Record<string, unknown>) => {
-    const { result } = await rpc("tools/call", { name, arguments: args });
-    return {
-      isError: result?.isError === true,
-      body: JSON.parse(result!.content![0]!.text) as any,
-    };
-  };
-
-  const seedDoc = async (markdown?: string) => {
-    const project = await tool("create_project", { name: "Acme" });
-    const doc = await tool("create_doc", {
-      projectId: project.body.projectId,
-      title: "Plan",
-      ...(markdown === undefined ? {} : { markdown }),
-    });
-    return doc.body as { doc: { docId: string; url: string }; tab: { tabId: string } };
-  };
-
-  return { api, cookie, token, post, rpc, tool, seedDoc };
-}
 
 describe("MCP transport", () => {
   it("requires a bearer token, not a session cookie", async () => {
