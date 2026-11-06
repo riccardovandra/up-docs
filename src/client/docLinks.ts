@@ -32,6 +32,22 @@ export function resolveDocLink(
 }
 
 /**
+ * The tab id a link points to when it is another tab of the doc on screen, at
+ * any origin; null for everything else, the doc itself without a tab included.
+ */
+export function sameDocTabId(
+  href: string,
+  here: { readonly origin: string; readonly pathname: string },
+): string | null {
+  const link = resolveDocLink(href, here);
+  if (!link?.appPath) return null;
+  const route = parseRoute(link.appPath);
+  const current = parseRoute(here.pathname);
+  if (route.name !== "doc" || current.name !== "doc" || route.docId !== current.docId) return null;
+  return route.tabId !== null && route.tabId !== current.tabId ? route.tabId : null;
+}
+
+/**
  * Follows the link a click landed on, and says whether it did. A drag that
  * selected text, Shift and Alt are left to the caller, so link text stays
  * selectable and editable. Cmd/Ctrl+click opens a new tab. The panel's iframe

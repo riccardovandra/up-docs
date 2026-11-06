@@ -9,6 +9,7 @@ import { HeadingFold } from "./headingFold.ts";
 import { DocImage, type DocImageOptions, DocParagraph } from "./image.ts";
 import { LinkClick } from "./linkClick.ts";
 import { LinkPaste } from "./linkPaste.ts";
+import { TabLinks } from "./tabLinks.ts";
 import { VideoDrop, type VideoDropOptions } from "./video/videoDrop.ts";
 
 /**
@@ -33,5 +34,6 @@ export const createEditorExtensions = (
   HeadingFold,
   LinkClick,
   LinkPaste,
+  TabLinks,
   Markdown,
 ];

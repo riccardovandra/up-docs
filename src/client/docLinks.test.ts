@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Plugin } from "@tiptap/pm/state";
 
-import { followClickedLink, resolveDocLink, shortLink } from "./docLinks.ts";
+import { followClickedLink, resolveDocLink, sameDocTabId, shortLink } from "./docLinks.ts";
 import { createEditorExtensions } from "./editor/extensions.ts";
 import { LinkClick } from "./editor/linkClick.ts";
 
@@ -133,6 +133,23 @@ describe("followClickedLink", () => {
   });
 });
 
+describe("sameDocTabId", () => {
+  it("names another tab of this doc, at any origin", () => {
+    expect(sameDocTabId("https://docs.example.com/d/doc1/tab2", here)).toBe("tab2");
+    expect(sameDocTabId("https://old.example.org/d/doc1/tab2", here)).toBe("tab2");
+    expect(sameDocTabId("/d/doc1/tab2", here)).toBe("tab2");
+    expect(sameDocTabId("https://example.com/d/doc1/tab2", here)).toBe("tab2");
+  });
+
+  it("is null for this tab, the doc without a tab, other docs and other sites", () => {
+    expect(sameDocTabId("/d/doc1/tab1", here)).toBeNull();
+    expect(sameDocTabId("/d/doc1", here)).toBeNull();
+    expect(sameDocTabId("/d/doc2/tab2", here)).toBeNull();
+    expect(sameDocTabId("https://example.com/a", here)).toBeNull();
+    expect(sameDocTabId("javascript:alert(1)", here)).toBeNull();
+  });
+});
+
 describe("editor wiring", () => {
   it("is part of the editor and routes its clicks", () => {
     expect(createEditorExtensions().some((extension) => extension.name === "linkClick")).toBe(true);
@@ -161,6 +178,19 @@ describe("editor wiring", () => {
       true,
     );
     expect(win.open).toHaveBeenCalled();
+  });
+
+  it("opens a link to another tab of this doc in place on a plain click in an editable view", () => {
+    const [plugin] = LinkClick.config.addProseMirrorPlugins!.call({} as never) as Array<Plugin>;
+    const win = stubWindow();
+    const onClick = plugin!.props.handleDOMEvents!.click as unknown as (
+      view: unknown,
+      event: MouseEvent,
+    ) => boolean;
+    expect(onClick({ editable: true }, click("/d/doc1/tab2"))).toBe(true);
+    expect(win.location.pathname).toBe("/d/doc1/tab2");
+    expect(win.open).not.toHaveBeenCalled();
+    expect(onClick({ editable: true }, click("/d/doc2/tab9"))).toBe(false);
   });
 });
 

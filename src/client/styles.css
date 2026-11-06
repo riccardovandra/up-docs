@@ -827,6 +827,95 @@ span.tab-row-toggle {
   text-underline-offset: 2px;
 }
 
+/* A link to another tab of this doc shows as a tab chip (editor/tabLinks.ts). */
+.tab-editor .ProseMirror a:has(.tab-link) {
+  text-decoration: none;
+}
+
+.tab-editor .ProseMirror .tab-link {
+  padding: 0.05em 0.45em;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--accent) 11%, transparent);
+  color: var(--accent);
+  font-weight: 500;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+  cursor: pointer;
+}
+
+.tab-editor .ProseMirror .tab-link:hover {
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+/* A small window drawn in CSS: the CSP's img-src 'self' blocks data-URI icons. */
+.tab-editor .ProseMirror a > .tab-link:first-child::before {
+  content: "";
+  display: inline-block;
+  width: 0.8em;
+  height: 0.68em;
+  margin-right: 0.35em;
+  vertical-align: -0.02em;
+  border: 1.5px solid currentColor;
+  border-top-width: 3px;
+  border-radius: 2px;
+}
+
+.tab-link-card {
+  position: fixed;
+  z-index: 40;
+  width: 20rem;
+  padding: 0.7rem 0.85rem;
+  background: var(--popover);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 10px 30px rgb(0 0 0 / 0.16);
+  font-size: 0.82rem;
+  line-height: 1.45;
+  pointer-events: none;
+}
+
+.tab-link-card-title {
+  font-weight: 600;
+  font-size: 0.9rem;
+  color: var(--text);
+}
+
+.tab-link-card-meta,
+.tab-link-card-hint {
+  color: var(--text-subtle);
+  font-size: 0.75rem;
+}
+
+.tab-link-card ul {
+  margin: 0.45rem 0 0;
+  padding-left: 1.1rem;
+  color: var(--muted);
+}
+
+.tab-link-card-hint {
+  margin-top: 0.45rem;
+}
+
+.tab-link-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin-bottom: 0.75rem;
+  padding: 0.2rem 0.75rem 0.2rem 0.55rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+
+.tab-link-back:hover {
+  color: var(--text);
+  border-color: var(--accent);
+}
+
 .tab-editor .ProseMirror :not(pre) > code {
   border-radius: 4px;
   background: var(--code-bg);
