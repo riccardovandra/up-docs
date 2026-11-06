@@ -725,12 +725,34 @@ describe("MCP diagrams", () => {
   });
 
   it("documents the format with an example that passes the validator", async () => {
-    const { MCP_INSTRUCTIONS } = await import("./mcp.ts");
+    const mcp = await makeMcpHarness();
     const { findWidgetFences } = await import("../shared/widget/fence.ts");
     const { analyzeWidget } = await import("../shared/widget/validate.ts");
-    const [example] = findWidgetFences(MCP_INSTRUCTIONS);
+    const guide = await mcp.tool("format_guide", { topic: "diagram" });
+    expect(guide.isError).toBe(false);
+    const [example] = findWidgetFences(guide.body.guide as string);
     expect(example?.id).toBe("release-flow");
     expect(analyzeWidget(example!.source).diagnostics).toEqual([]);
+  });
+
+  it("keeps the instructions short enough that clients do not cut them", async () => {
+    const { MCP_INSTRUCTIONS, MAX_INSTRUCTIONS_LENGTH } = await import("./mcp.ts");
+    const { FORMAT_TOPICS } = await import("./mcpGuide.ts");
+    expect(MCP_INSTRUCTIONS.length).toBeLessThanOrEqual(MAX_INSTRUCTIONS_LENGTH);
+    expect(MCP_INSTRUCTIONS).toContain("format_guide");
+    for (const topic of FORMAT_TOPICS) expect(MCP_INSTRUCTIONS).toContain(`"${topic}"`);
+  });
+
+  it("serves every format guide and refuses an unknown topic", async () => {
+    const mcp = await makeMcpHarness();
+    const { FORMAT_TOPICS } = await import("./mcpGuide.ts");
+    for (const topic of FORMAT_TOPICS) {
+      const result = await mcp.tool("format_guide", { topic });
+      expect(result.isError).toBe(false);
+      expect((result.body.guide as string).length).toBeGreaterThan(100);
+    }
+    const unknown = await mcp.tool("format_guide", { topic: "slides" });
+    expect(unknown.body.error).toBe("invalid_argument");
   });
 
   it("comments on a diagram label, and orphans the thread when the label goes", async () => {

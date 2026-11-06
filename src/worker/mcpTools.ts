@@ -57,6 +57,7 @@ import * as Docs from "./docs.ts";
 import { checkEmbedsIn } from "../shared/embeds.ts";
 import { checkVideosIn } from "../shared/video.ts";
 import { widgetProblems } from "./widgets.ts";
+import { FORMAT_GUIDES, FORMAT_TOPICS, type FormatTopic } from "./mcpGuide.ts";
 
 const MAX_MARKDOWN_LENGTH = 1_000_000;
 /** edit_tab re-applies against the latest version this many times before giving up. */
@@ -287,7 +288,7 @@ function assertWidgets(markdown: string, previous?: string): void {
   fail(
     "widget_invalid",
     `Nothing was written: a diagram breaks the t3-widget format.\n${describeWidgetProblems(problems)}`,
-    { problems },
+    { problems, guide: 'format_guide {topic: "diagram"} has the full spec and a valid example.' },
   );
 }
 
@@ -458,6 +459,16 @@ function findDiagram(ctx: ToolContext, tab: Tab, diagramId: string) {
 }
 
 export const TOOLS = [
+  {
+    name: "format_guide",
+    description:
+      "The full spec of one doc format, with an example: diagram (t3-widget), table (t3-table), video (t3-video), embed (t3-embed), comments (anchors on passages, table cells and diagram labels), sharing, or claude_push. Call it before you first write that format in a session.",
+    inputSchema: {
+      type: "object",
+      properties: { topic: { type: "string", enum: FORMAT_TOPICS } },
+      required: ["topic"],
+    },
+  },
   {
     name: "list_projects",
     description:
@@ -838,6 +849,14 @@ export const TOOLS = [
 type ToolName = (typeof TOOLS)[number]["name"];
 
 const handlers: Record<ToolName, (args: Args, ctx: ToolContext) => Promise<object>> = {
+  format_guide: async (args) => {
+    const topic = requireString(args, "topic", 40);
+    if (!Object.hasOwn(FORMAT_GUIDES, topic)) {
+      fail("invalid_argument", `"topic" must be one of: ${FORMAT_TOPICS.join(", ")}.`);
+    }
+    return { topic, guide: FORMAT_GUIDES[topic as FormatTopic] };
+  },
+
   list_projects: async (_args, ctx) => {
     const library = await scopedLibrary(ctx);
     return {
