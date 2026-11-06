@@ -37,6 +37,7 @@ import { DocHead } from "../doc/header/DocHead.tsx";
 import { DocHeader } from "../doc/header/DocHeader.tsx";
 import { docAbilities } from "../doc/header/docAbilities.ts";
 import { OutlineRail } from "../doc/OutlineRail.tsx";
+import { TabLinkNav } from "../doc/TabLinkNav.tsx";
 import { useColumnWidth } from "../doc/toolbar/columnWidth.ts";
 import { DocToolbar } from "../doc/toolbar/DocToolbar.tsx";
 import { imageAttributes } from "../editor/image.ts";
@@ -725,6 +726,12 @@ export function DocPage(props: { readonly docId: string; readonly tabId: string 
                   />
                 ) : null}
                 {editor && abilities.edit ? <LinkMenu editor={editor} /> : null}
+                <TabLinkNav
+                  container={docBody}
+                  docId={props.docId}
+                  activeTabId={activeTabId}
+                  tabs={tabs}
+                />
                 <TabEditor
                   key={activeTab.id}
                   markdown={activeTab.markdown}
