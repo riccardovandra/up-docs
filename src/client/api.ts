@@ -29,15 +29,24 @@ const PART_RETRY_MS = 1000;
 async function uploadVideoPart(url: string, part: Blob): Promise<string> {
   for (let attempt = 1; ; attempt += 1) {
     try {
-      const response = await fetch(url, { method: "PUT", credentials: "same-origin", body: part });
-      const data = (await response.json().catch(() => ({}))) as { etag?: string; error?: string };
+      const response = await fetch(url, {
+        method: "PUT",
+        credentials: "same-origin",
+        body: part,
+      });
+      const data = (await response.json().catch(() => ({}))) as {
+        etag?: string;
+        error?: string;
+      };
       if (response.ok && data.etag) return data.etag;
       const failure = new ApiError(response.status, data);
       if (response.status < 500 || attempt === PART_ATTEMPTS) throw failure;
     } catch (cause) {
       if (cause instanceof ApiError || attempt === PART_ATTEMPTS) throw cause;
     }
-    await new Promise((resolve) => setTimeout(resolve, PART_RETRY_MS * attempt));
+    await new Promise((resolve) =>
+      setTimeout(resolve, PART_RETRY_MS * attempt),
+    );
   }
 }
 
@@ -66,7 +75,8 @@ async function request<T>(
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
   const data: unknown = await response.json().catch(() => ({}));
-  if (!response.ok) throw new ApiError(response.status, data as ApiError["body"]);
+  if (!response.ok)
+    throw new ApiError(response.status, data as ApiError["body"]);
   return data as T;
 }
 
@@ -80,9 +90,15 @@ export const api = {
   setName: (name: string) => request<Me>("PATCH", "/api/me", { name }),
   /** People on any doc the caller is on, for the share picker. */
   people: () =>
-    request<{ people: Array<Pick<UserSummary, "name" | "email">> }>("GET", "/api/people"),
+    request<{ people: Array<Pick<UserSummary, "name" | "email">> }>(
+      "GET",
+      "/api/people",
+    ),
   authConfig: () =>
-    request<{ emailEnabled: boolean; passwordEnabled: boolean }>("GET", "/api/auth/config"),
+    request<{ emailEnabled: boolean; passwordEnabled: boolean }>(
+      "GET",
+      "/api/auth/config",
+    ),
   signInWithPassword: (password: string) =>
     request<{ email: string }>("POST", "/api/auth/password", { password }),
   requestCode: (email: string) =>
@@ -115,10 +131,16 @@ export const api = {
     ),
   /** Admin only. Returns the existing project when one already has the key (or, without one, the name). */
   createProject: (name: string, key?: string) =>
-    request<{ project: Project }>("POST", "/api/projects", key ? { name, key } : { name }),
+    request<{ project: Project }>(
+      "POST",
+      "/api/projects",
+      key ? { name, key } : { name },
+    ),
   /** Admin only. The key stays, so T3 Code still finds the project. */
   renameProject: (projectId: string, name: string) =>
-    request<{ project: Project }>("PATCH", `/api/projects/${projectId}`, { name }),
+    request<{ project: Project }>("PATCH", `/api/projects/${projectId}`, {
+      name,
+    }),
   /** Admin only. Moves every doc in the project to `target`, or to no project when null. */
   moveProjectDocs: (projectId: string, target: string | null) =>
     request<{ moved: number }>("POST", `/api/projects/${projectId}/move-docs`, {
@@ -128,8 +150,16 @@ export const api = {
   /** Admin only. Refused with 409 project_not_empty while the project holds docs. */
   deleteProject: (projectId: string) =>
     request<{ ok: true }>("DELETE", `/api/projects/${projectId}`),
-  createDoc: (projectId: string | null, title: string, group: string | null = null) =>
-    request<DocWithTabs>("POST", "/api/docs", { projectId, title, ...(group ? { group } : {}) }),
+  createDoc: (
+    projectId: string | null,
+    title: string,
+    group: string | null = null,
+  ) =>
+    request<DocWithTabs>("POST", "/api/docs", {
+      projectId,
+      title,
+      ...(group ? { group } : {}),
+    }),
   doc: (docId: string) => request<DocView>("GET", `/api/docs/${docId}`),
   members: (docId: string) =>
     request<{ members: Array<DocMember> }>("GET", `/api/docs/${docId}/members`),
@@ -148,24 +178,51 @@ export const api = {
       { role },
     ),
   removeMember: (docId: string, memberId: string) =>
-    request<{ members: Array<DocMember> }>("DELETE", `/api/docs/${docId}/members/${memberId}`),
+    request<{ members: Array<DocMember> }>(
+      "DELETE",
+      `/api/docs/${docId}/members/${memberId}`,
+    ),
   setDocStatus: (docId: string, status: DocStatus) =>
-    request<{ doc: DocSummary }>("PATCH", `/api/docs/${docId}`, { status, clientId }),
+    request<{ doc: DocSummary }>("PATCH", `/api/docs/${docId}`, {
+      status,
+      clientId,
+    }),
   /** `null` moves the doc out of every project. */
   moveDoc: (docId: string, projectId: string | null) =>
-    request<{ doc: DocSummary }>("PATCH", `/api/docs/${docId}`, { projectId, clientId }),
+    request<{ doc: DocSummary }>("PATCH", `/api/docs/${docId}`, {
+      projectId,
+      clientId,
+    }),
   /** `null` takes the doc out of its group. */
   setDocGroup: (docId: string, group: string | null) =>
-    request<{ doc: DocSummary }>("PATCH", `/api/docs/${docId}`, { group, clientId }),
+    request<{ doc: DocSummary }>("PATCH", `/api/docs/${docId}`, {
+      group,
+      clientId,
+    }),
   renameDoc: (docId: string, title: string) =>
-    request<{ doc: DocSummary }>("PATCH", `/api/docs/${docId}`, { title, clientId }),
+    request<{ doc: DocSummary }>("PATCH", `/api/docs/${docId}`, {
+      title,
+      clientId,
+    }),
   /** Owner only; removes the doc, its tabs, comments, people, images and videos. */
   deleteDoc: (docId: string) =>
-    request<{ ok: true }>("DELETE", `/api/docs/${docId}?clientId=${encodeURIComponent(clientId)}`),
+    request<{ ok: true }>(
+      "DELETE",
+      `/api/docs/${docId}?clientId=${encodeURIComponent(clientId)}`,
+    ),
   /** The doc's saved copy of an embedded post, taken now if it has none. `refresh` needs an editor. */
-  embed: async (docId: string, url: string, refresh = false): Promise<EmbedSnapshot> =>
-    (await request<{ embed: EmbedSnapshot }>("POST", `/api/docs/${docId}/embeds`, { url, refresh }))
-      .embed,
+  embed: async (
+    docId: string,
+    url: string,
+    refresh = false,
+  ): Promise<EmbedSnapshot> =>
+    (
+      await request<{ embed: EmbedSnapshot }>(
+        "POST",
+        `/api/docs/${docId}/embeds`,
+        { url, refresh },
+      )
+    ).embed,
   uploadImage: async (docId: string, file: File): Promise<string> => {
     const response = await fetch(`/api/docs/${docId}/images`, {
       method: "POST",
@@ -173,10 +230,22 @@ export const api = {
       headers: { "Content-Type": file.type },
       body: file,
     });
-    const data = (await response.json().catch(() => ({}))) as { url?: string; error?: string };
+    const data = (await response.json().catch(() => ({}))) as {
+      url?: string;
+      error?: string;
+    };
     if (!response.ok || !data.url) throw new ApiError(response.status, data);
     return data.url;
   },
+  /** Copies an image link into the doc and returns the copy's URL. Editors only. */
+  importImage: async (docId: string, url: string): Promise<string> =>
+    (
+      await request<{ url: string }>(
+        "POST",
+        `/api/docs/${docId}/images/import`,
+        { url },
+      )
+    ).url,
   /** Uploads in parts and returns the video's URL. `onProgress` gets 0 to 1 as parts finish. */
   uploadVideo: async (
     docId: string,
@@ -185,7 +254,8 @@ export const api = {
   ): Promise<string> => {
     const type = videoTypeOf(file);
     if (!type) throw new ApiError(415, { error: "unsupported_type" });
-    if (file.size > MAX_VIDEO_BYTES) throw new ApiError(413, { error: "too_large" });
+    if (file.size > MAX_VIDEO_BYTES)
+      throw new ApiError(413, { error: "too_large" });
     const {
       file: name,
       uploadId,
@@ -207,7 +277,10 @@ export const api = {
         parts.push({ partNumber, etag: await uploadVideoPart(url, blob) });
         onProgress(partNumber / count);
       }
-      const { url } = await request<{ url: string }>("POST", path, { uploadId, parts });
+      const { url } = await request<{ url: string }>("POST", path, {
+        uploadId,
+        parts,
+      });
       return url;
     } catch (cause) {
       void request("DELETE", `${path}?uploadId=${id}`).catch(() => undefined);
@@ -215,27 +288,56 @@ export const api = {
     }
   },
   docThreads: (docId: string) =>
-    request<{ threads: Array<DocThreadLink> }>("GET", `/api/docs/${docId}/threads`),
-  linkThread: (docId: string, input: { environmentId: string; threadId: string; title: string }) =>
-    request<{ threads: Array<DocThreadLink> }>("POST", `/api/docs/${docId}/threads`, {
-      ...input,
-      clientId,
-    }),
+    request<{ threads: Array<DocThreadLink> }>(
+      "GET",
+      `/api/docs/${docId}/threads`,
+    ),
+  linkThread: (
+    docId: string,
+    input: { environmentId: string; threadId: string; title: string },
+  ) =>
+    request<{ threads: Array<DocThreadLink> }>(
+      "POST",
+      `/api/docs/${docId}/threads`,
+      {
+        ...input,
+        clientId,
+      },
+    ),
   unlinkThread: (docId: string, linkId: string) =>
     request<{ threads: Array<DocThreadLink> }>(
       "DELETE",
       `/api/docs/${docId}/threads/${linkId}?clientId=${encodeURIComponent(clientId)}`,
     ),
   tab: (tabId: string) => request<{ tab: Tab }>("GET", `/api/tabs/${tabId}`),
-  createTab: (docId: string, input: { title: string; parentTabId?: string | null }) =>
-    request<{ tab: Tab }>("POST", `/api/docs/${docId}/tabs`, { ...input, clientId }),
-  writeTab: (tabId: string, input: { baseVersion: number; markdown?: string; title?: string }) =>
-    request<{ tab: Tab }>("PATCH", `/api/tabs/${tabId}`, { ...input, clientId }),
-  moveTab: (tabId: string, input: { parentTabId: string | null; position: number }) =>
-    request<{ placements: Array<TabPlacement> }>("POST", `/api/tabs/${tabId}/move`, {
+  createTab: (
+    docId: string,
+    input: { title: string; parentTabId?: string | null },
+  ) =>
+    request<{ tab: Tab }>("POST", `/api/docs/${docId}/tabs`, {
       ...input,
       clientId,
     }),
+  writeTab: (
+    tabId: string,
+    input: { baseVersion: number; markdown?: string; title?: string },
+  ) =>
+    request<{ tab: Tab }>("PATCH", `/api/tabs/${tabId}`, {
+      ...input,
+      clientId,
+    }),
+  moveTab: (
+    tabId: string,
+    input: { parentTabId: string | null; position: number },
+  ) =>
+    request<{ placements: Array<TabPlacement> }>(
+      "POST",
+      `/api/tabs/${tabId}/move`,
+      {
+        ...input,
+        clientId,
+      },
+    ),
   deleteTab: (tabId: string) =>
     request<{ tabIds: Array<string> }>(
       "DELETE",
@@ -246,12 +348,20 @@ export const api = {
   createComment: (
     tabId: string,
     input: DocAnchor & { body: string; anchor?: StructuredAnchor | null },
-  ) => request<{ comment: Comment }>("POST", `/api/tabs/${tabId}/comments`, { ...input, clientId }),
-  replyComment: (commentId: string, body: string) =>
-    request<{ comment: Comment }>("POST", `/api/comments/${commentId}/replies`, {
-      body,
+  ) =>
+    request<{ comment: Comment }>("POST", `/api/tabs/${tabId}/comments`, {
+      ...input,
       clientId,
     }),
+  replyComment: (commentId: string, body: string) =>
+    request<{ comment: Comment }>(
+      "POST",
+      `/api/comments/${commentId}/replies`,
+      {
+        body,
+        clientId,
+      },
+    ),
   setCommentResolved: (commentId: string, resolved: boolean) =>
     request<{ comment: Comment }>(
       "POST",
@@ -263,8 +373,10 @@ export const api = {
       "DELETE",
       `/api/comments/${commentId}?clientId=${encodeURIComponent(clientId)}`,
     ),
-  tokens: () => request<{ tokens: Array<ApiTokenSummary> }>("GET", "/api/tokens"),
+  tokens: () =>
+    request<{ tokens: Array<ApiTokenSummary> }>("GET", "/api/tokens"),
   createToken: (name: string) =>
     request<{ id: string; token: string }>("POST", "/api/tokens", { name }),
-  revokeToken: (id: string) => request<{ ok: true }>("DELETE", `/api/tokens/${id}`),
+  revokeToken: (id: string) =>
+    request<{ ok: true }>("DELETE", `/api/tokens/${id}`),
 };

@@ -29,7 +29,10 @@ import {
   subscribeAddToChat,
 } from "../comments/addToChat.ts";
 import { isCommentMessage, useComments } from "../comments/useComments.ts";
-import { selectionAnchor, useEditorComments } from "../comments/useEditorComments.ts";
+import {
+  selectionAnchor,
+  useEditorComments,
+} from "../comments/useEditorComments.ts";
 import { useMediaQuery } from "../comments/useMediaQuery.ts";
 import { DocThreads, threadKey } from "../doc/DocThreads.tsx";
 import { exportActions } from "../doc/ExportMenu.tsx";
@@ -49,20 +52,32 @@ import { useDocRoom } from "../doc/useDocRoom.ts";
 import { LinkMenu } from "../editor/LinkMenu.tsx";
 import { SelectionToolbar } from "../editor/SelectionToolbar.tsx";
 import { TabEditor } from "../editor/TabEditor.tsx";
-import { WIDGET_PICK_EVENT, type WidgetPickDetail } from "../editor/widget/WidgetView.ts";
-import { postToEmbedParent, subscribeParentMessages, useEmbedFeatures } from "../embedBridge.ts";
+import {
+  WIDGET_PICK_EVENT,
+  type WidgetPickDetail,
+} from "../editor/widget/WidgetView.ts";
+import {
+  postToEmbedParent,
+  subscribeParentMessages,
+  useEmbedFeatures,
+} from "../embedBridge.ts";
 import { leaveDoc, setDocTabTitle } from "../openTabs.ts";
 import { docPath, navigate } from "../router.ts";
 import { useMe } from "../me.ts";
 import { useLockedProject } from "../lockedProject.ts";
 import { canonicalDocUrl } from "../share/ShareDialog.tsx";
 
-export function DocPage(props: { readonly docId: string; readonly tabId: string | null }) {
+export function DocPage(props: {
+  readonly docId: string;
+  readonly tabId: string | null;
+}) {
   const [doc, setDoc] = useState<DocSummary | null>(null);
   const lock = useLockedProject();
   const [role, setRole] = useState<DocRole>("viewer");
   const [owner, setOwner] = useState<UserSummary | null>(null);
-  const [threadLinks, setThreadLinks] = useState<ReadonlyArray<DocThreadLink>>([]);
+  const [threadLinks, setThreadLinks] = useState<ReadonlyArray<DocThreadLink>>(
+    [],
+  );
   const [tabs, setTabs] = useState<ReadonlyMap<string, Tab>>(new Map());
   const [notice, setNotice] = useState<string | null>(null);
   // A tab someone else, such as an agent, added while this doc was open.
@@ -104,11 +119,14 @@ export function DocPage(props: { readonly docId: string; readonly tabId: string 
 
   const tabList = [...tabs.values()];
   const activeTab =
-    (props.tabId ? tabs.get(props.tabId) : undefined) ?? orderTabs(tabList)[0]?.tab ?? null;
+    (props.tabId ? tabs.get(props.tabId) : undefined) ??
+    orderTabs(tabList)[0]?.tab ??
+    null;
   const activeTabId = activeTab?.id ?? null;
   // Visiting the tab by any route counts as seeing it, so the notice never returns.
   if (newTabId !== null && newTabId === activeTabId) setNewTabId(null);
-  const newTab = newTabId && newTabId !== activeTabId ? tabs.get(newTabId) : undefined;
+  const newTab =
+    newTabId && newTabId !== activeTabId ? tabs.get(newTabId) : undefined;
 
   // The URL follows the active tab, including after it is deleted elsewhere.
   useEffect(() => {
@@ -136,7 +154,9 @@ export function DocPage(props: { readonly docId: string; readonly tabId: string 
         );
       },
       onInvalidBlock: (kind) =>
-        setNotice(`A ${kind} in this tab has errors, so it is not saved until they are fixed.`),
+        setNotice(
+          `A ${kind} in this tab has errors, so it is not saved until they are fixed.`,
+        ),
     });
     saver.current = tabSaver;
     return () => {
@@ -181,7 +201,10 @@ export function DocPage(props: { readonly docId: string; readonly tabId: string 
       }
       if (message.type === "tab.deleted") {
         setTabs((current) =>
-          applyPlacements(removeTabs(current, message.tabIds), message.placements),
+          applyPlacements(
+            removeTabs(current, message.tabIds),
+            message.placements,
+          ),
         );
         return;
       }
@@ -209,7 +232,10 @@ export function DocPage(props: { readonly docId: string; readonly tabId: string 
   };
 
   const createTab = async (parentTabId: string | null) => {
-    const { tab } = await api.createTab(props.docId, { title: "Untitled tab", parentTabId });
+    const { tab } = await api.createTab(props.docId, {
+      title: "Untitled tab",
+      parentTabId,
+    });
     upsertTab(tab);
     navigate(docPath(props.docId, tab.id));
   };
@@ -218,20 +244,30 @@ export function DocPage(props: { readonly docId: string; readonly tabId: string 
     const tabSaver = tabId === activeTabId ? saver.current : null;
     // Land pending edits first so the title write does not race the body save.
     await tabSaver?.flush();
-    const write = (baseVersion: number) => api.writeTab(tabId, { baseVersion, title });
+    const write = (baseVersion: number) =>
+      api.writeTab(tabId, { baseVersion, title });
     let saved: Tab;
     try {
       saved = (await write(tabsRef.current.get(tabId)?.version ?? 1)).tab;
     } catch (cause) {
       // A title-only write is safe to reapply on top of a newer version.
-      if (!(cause instanceof ApiError && cause.status === 409 && cause.body.tab)) throw cause;
+      if (!(
+        cause instanceof ApiError &&
+        cause.status === 409 &&
+        cause.body.tab
+      ))
+        throw cause;
       saved = (await write(cause.body.tab.version)).tab;
     }
     tabSaver?.acceptRemote(saved);
     upsertTab(saved);
   };
 
-  const moveTab = async (tabId: string, parentTabId: string | null, position: number) => {
+  const moveTab = async (
+    tabId: string,
+    parentTabId: string | null,
+    position: number,
+  ) => {
     const { placements } = await api.moveTab(tabId, { parentTabId, position });
     setTabs((current) => applyPlacements(current, placements));
   };
@@ -243,7 +279,10 @@ export function DocPage(props: { readonly docId: string; readonly tabId: string 
 
   const embedFeatures = useEmbedFeatures();
   const abilities = useMemo(
-    () => docAbilities(role, { startWorkAvailable: !!embedFeatures?.includes("start-work") }),
+    () =>
+      docAbilities(role, {
+        startWorkAvailable: !!embedFeatures?.includes("start-work"),
+      }),
     [role, embedFeatures],
   );
 
@@ -255,13 +294,20 @@ export function DocPage(props: { readonly docId: string; readonly tabId: string 
   } | null>(null);
   const [docBody, setDocBody] = useState<HTMLDivElement | null>(null);
   const narrow = useMediaQuery("(max-width: 1279px)");
-  const canAddToChat = useSyncExternalStore(subscribeAddToChat, hasAddToChatHandler);
+  const canAddToChat = useSyncExternalStore(
+    subscribeAddToChat,
+    hasAddToChatHandler,
+  );
 
-  const threads = useMemo(() => groupThreads(comments.comments.values()), [comments.comments]);
+  const threads = useMemo(
+    () => groupThreads(comments.comments.values()),
+    [comments.comments],
+  );
   const openThreads = useMemo(
     () =>
       threads.filter(
-        (thread) => thread.root.tabId === activeTabId && thread.root.resolvedAt === null,
+        (thread) =>
+          thread.root.tabId === activeTabId && thread.root.resolvedAt === null,
       ),
     [threads, activeTabId],
   );
@@ -279,7 +325,13 @@ export function DocPage(props: { readonly docId: string; readonly tabId: string 
         structured: root.anchor,
       })),
       ...(draftAnchor
-        ? [{ id: DRAFT_COMMENT_ID, ...draftAnchor.anchor, structured: draftAnchor.structured }]
+        ? [
+            {
+              id: DRAFT_COMMENT_ID,
+              ...draftAnchor.anchor,
+              structured: draftAnchor.structured,
+            },
+          ]
         : []),
     ],
     [openThreads, draftAnchor],
@@ -297,7 +349,11 @@ export function DocPage(props: { readonly docId: string; readonly tabId: string 
   const startCellComment = (structured: StructuredAnchor, text: string) => {
     if (!abilities.comment || !activeTabId) return;
     setCommentsOpen(true);
-    setDraft({ tabId: activeTabId, anchor: { quote: text, prefix: "", suffix: "" }, structured });
+    setDraft({
+      tabId: activeTabId,
+      anchor: { quote: text, prefix: "", suffix: "" },
+      structured,
+    });
     setActiveCommentId(DRAFT_COMMENT_ID);
   };
 
@@ -313,7 +369,8 @@ export function DocPage(props: { readonly docId: string; readonly tabId: string 
   useEffect(() => {
     if (!docBody) return;
     const onPick = (event: Event) => {
-      const { diagramId, textId } = (event as CustomEvent<WidgetPickDetail>).detail;
+      const { diagramId, textId } = (event as CustomEvent<WidgetPickDetail>)
+        .detail;
       if (!textId || !(event.target instanceof HTMLElement)) {
         setLabelPick(null);
         return;
@@ -325,7 +382,9 @@ export function DocPage(props: { readonly docId: string; readonly tabId: string 
           root.anchor.textId === textId,
       );
       if (thread) setActiveCommentId(thread.root.id);
-      const top = event.target.getBoundingClientRect().top - docBody.getBoundingClientRect().top;
+      const top =
+        event.target.getBoundingClientRect().top -
+        docBody.getBoundingClientRect().top;
       setLabelPick({
         anchor: { kind: "label", blockId: diagramId, textId },
         top: Math.round(top),
@@ -340,7 +399,11 @@ export function DocPage(props: { readonly docId: string; readonly tabId: string 
     setLabelPick(null);
     setCommentsOpen(true);
     // The Worker fills the quote with the label's current words.
-    setDraft({ tabId: activeTabId, anchor: { quote: "", prefix: "", suffix: "" }, structured });
+    setDraft({
+      tabId: activeTabId,
+      anchor: { quote: "", prefix: "", suffix: "" },
+      structured,
+    });
     setActiveCommentId(DRAFT_COMMENT_ID);
   };
 
@@ -360,7 +423,8 @@ export function DocPage(props: { readonly docId: string; readonly tabId: string 
     setNotice("Could not update the comment. Reload and try again.");
     throw cause;
   };
-  const quietly = (promise: Promise<unknown>) => void promise.catch(() => undefined);
+  const quietly = (promise: Promise<unknown>) =>
+    void promise.catch(() => undefined);
 
   const addToChat = (root: Comment) => {
     addCommentToChat({
@@ -378,14 +442,19 @@ export function DocPage(props: { readonly docId: string; readonly tabId: string 
 
   const handlersFor = (thread: CommentThread) => ({
     ...(abilities.comment ? commentHandlers(thread) : {}),
-    ...(canAddToChat && abilities.comment ? { onAddToChat: () => addToChat(thread.root) } : {}),
+    ...(canAddToChat && abilities.comment
+      ? { onAddToChat: () => addToChat(thread.root) }
+      : {}),
   });
 
   const commentHandlers = (thread: CommentThread) => ({
-    onReply: (body: string) => comments.actions.reply(thread.root.id, body).catch(commentFailed),
+    onReply: (body: string) =>
+      comments.actions.reply(thread.root.id, body).catch(commentFailed),
     onResolve: () => {
       setActiveCommentId(null);
-      quietly(comments.actions.setResolved(thread.root.id, true).catch(commentFailed));
+      quietly(
+        comments.actions.setResolved(thread.root.id, true).catch(commentFailed),
+      );
     },
     onDelete: (commentId: string) =>
       quietly(comments.actions.delete(commentId).catch(commentFailed)),
@@ -393,12 +462,21 @@ export function DocPage(props: { readonly docId: string; readonly tabId: string 
 
   const embedded = embedFeatures !== null;
   // Which linked threads the embedding T3 Code can open, and their live titles.
-  const [openable, setOpenable] = useState<ReadonlyMap<string, string>>(new Map());
+  const [openable, setOpenable] = useState<ReadonlyMap<string, string>>(
+    new Map(),
+  );
   useEffect(
     () =>
       subscribeParentMessages((message) => {
         if (message.type === "t3-docs:threads") {
-          setOpenable(new Map(message.threads.map((thread) => [threadKey(thread), thread.title])));
+          setOpenable(
+            new Map(
+              message.threads.map((thread) => [
+                threadKey(thread),
+                thread.title,
+              ]),
+            ),
+          );
         }
       }),
     [],
@@ -407,7 +485,10 @@ export function DocPage(props: { readonly docId: string; readonly tabId: string 
     if (!embedded || threadLinks.length === 0) return;
     postToEmbedParent({
       type: "t3-docs:resolve-threads",
-      threads: threadLinks.map(({ environmentId, threadId }) => ({ environmentId, threadId })),
+      threads: threadLinks.map(({ environmentId, threadId }) => ({
+        environmentId,
+        threadId,
+      })),
     });
   }, [embedded, threadLinks]);
 
@@ -462,7 +543,10 @@ export function DocPage(props: { readonly docId: string; readonly tabId: string 
   const copyLink = useStableCallback(
     () =>
       void navigator.clipboard.writeText(canonicalDocUrl(props.docId)).then(
-        () => setNotice("Link copied. Only people the doc is shared with can open it."),
+        () =>
+          setNotice(
+            "Link copied. Only people the doc is shared with can open it.",
+          ),
         () => setNotice("Could not copy the link."),
       ),
   );
@@ -488,7 +572,8 @@ export function DocPage(props: { readonly docId: string; readonly tabId: string 
           setOwner(loaded.owner);
         },
         (cause: unknown) => {
-          if (cause instanceof ApiError && cause.status === 404) leaveDoc(props.docId);
+          if (cause instanceof ApiError && cause.status === 404)
+            leaveDoc(props.docId);
         },
       ),
   );
@@ -498,29 +583,46 @@ export function DocPage(props: { readonly docId: string; readonly tabId: string 
   });
 
   const tabActions = {
-    onSelect: useStableCallback((tabId: string) => navigate(docPath(props.docId, tabId))),
+    onSelect: useStableCallback((tabId: string) =>
+      navigate(docPath(props.docId, tabId)),
+    ),
     onCreate: useStableCallback(
-      (parentTabId: string | null) => void createTab(parentTabId).catch(report("create")),
+      (parentTabId: string | null) =>
+        void createTab(parentTabId).catch(report("create")),
     ),
     onRename: useStableCallback(
-      (tabId: string, title: string) => void renameTab(tabId, title).catch(report("rename")),
+      (tabId: string, title: string) =>
+        void renameTab(tabId, title).catch(report("rename")),
     ),
     onMove: useStableCallback(
       (tabId: string, parentTabId: string | null, position: number) =>
         void moveTab(tabId, parentTabId, position).catch(report("move")),
     ),
-    onDelete: useStableCallback((tabId: string) => void deleteTab(tabId).catch(report("delete"))),
+    onDelete: useStableCallback(
+      (tabId: string) => void deleteTab(tabId).catch(report("delete")),
+    ),
   };
 
-  const uploadImage = useStableCallback((file: File) => api.uploadImage(props.docId, file));
+  const uploadImage = useStableCallback((file: File) =>
+    api.uploadImage(props.docId, file),
+  );
+  const importImageLink = useStableCallback((url: string) =>
+    api.importImage(props.docId, url),
+  );
   const imageFailed = useStableCallback((cause: unknown) => {
     const code = cause instanceof ApiError ? cause.body.error : undefined;
     setNotice(
       code === "too_large"
         ? "That image is over 10 MB."
-        : code === "unsupported_type" || code === "invalid_image"
+        : code === "unsupported_type" ||
+            code === "invalid_image" ||
+            code === "not_an_image"
           ? "Only PNG, JPEG, GIF and WebP images can be added."
-          : "Could not upload the image. Try again.",
+          : code === "download_failed" ||
+              code === "blocked_host" ||
+              code === "invalid_url"
+            ? "Could not copy that image link. If it needs a sign-in, download the image and paste the file."
+            : "Could not upload the image. Try again.",
     );
   });
   const insertImage = useStableCallback((file: File) => {
@@ -551,31 +653,39 @@ export function DocPage(props: { readonly docId: string; readonly tabId: string 
   const loadEmbed = useStableCallback((url: string, refresh: boolean) =>
     api.embed(props.docId, url, refresh),
   );
-  const insertVideo = useStableCallback((file: File, at: number | null = null) => {
-    const target = editor;
-    setNotice(`Uploading ${file.name}...`);
-    void api
-      .uploadVideo(props.docId, file, (fraction) =>
-        setNotice(`Uploading ${file.name}: ${Math.round(fraction * 100)}%`),
-      )
-      .then((src) => {
-        if (target && !target.isDestroyed) {
-          setNotice(null);
-          insertVideoFile(target, src, file, at);
-        } else {
-          setNotice(`${file.name} uploaded, but its tab was closed. Upload it again to add it.`);
-        }
-      }, videoFailed);
-  });
+  const insertVideo = useStableCallback(
+    (file: File, at: number | null = null) => {
+      const target = editor;
+      setNotice(`Uploading ${file.name}...`);
+      void api
+        .uploadVideo(props.docId, file, (fraction) =>
+          setNotice(`Uploading ${file.name}: ${Math.round(fraction * 100)}%`),
+        )
+        .then((src) => {
+          if (target && !target.isDestroyed) {
+            setNotice(null);
+            insertVideoFile(target, src, file, at);
+          } else {
+            setNotice(
+              `${file.name} uploaded, but its tab was closed. Upload it again to add it.`,
+            );
+          }
+        }, videoFailed);
+    },
+  );
 
   const me = useMe();
   const [width, toggleWidth] = useColumnWidth(me?.user.id ?? "");
   const [commentsOpen, setCommentsOpen] = useState(true);
-  const toggleComments = useStableCallback(() => setCommentsOpen((open) => !open));
+  const toggleComments = useStableCallback(() =>
+    setCommentsOpen((open) => !open),
+  );
   const openCommentCount = useMemo(
     () =>
-      threads.filter((thread) => thread.root.resolvedAt === null && tabs.has(thread.root.tabId))
-        .length,
+      threads.filter(
+        (thread) =>
+          thread.root.resolvedAt === null && tabs.has(thread.root.tabId),
+      ).length,
     [threads, tabs],
   );
 
@@ -603,11 +713,18 @@ export function DocPage(props: { readonly docId: string; readonly tabId: string 
   );
 
   if (!doc || lock.kind === "loading") return null;
-  if (lock.kind === "locked" && (lock.projectId === null || doc.projectId !== lock.projectId)) {
+  if (
+    lock.kind === "locked" &&
+    (lock.projectId === null || doc.projectId !== lock.projectId)
+  ) {
     return (
       <main className="home">
         <p className="home-empty">This doc is not part of {lock.name}.</p>
-        <button type="button" className="button secondary" onClick={() => navigate("/")}>
+        <button
+          type="button"
+          className="button secondary"
+          onClick={() => navigate("/")}
+        >
           Back to {lock.name}
         </button>
       </main>
@@ -659,12 +776,19 @@ export function DocPage(props: { readonly docId: string; readonly tabId: string 
               threads={threadLinks}
               openable={openable}
               onOpen={({ environmentId, threadId }) =>
-                postToEmbedParent({ type: "t3-docs:open-thread", environmentId, threadId })
+                postToEmbedParent({
+                  type: "t3-docs:open-thread",
+                  environmentId,
+                  threadId,
+                })
               }
               onUnlink={(linkId) =>
                 void api.unlinkThread(props.docId, linkId).then(
                   (result) => setThreadLinks(result.threads),
-                  () => setNotice("Could not remove the thread. Reload and try again."),
+                  () =>
+                    setNotice(
+                      "Could not remove the thread. Reload and try again.",
+                    ),
                 )
               }
             />
@@ -673,10 +797,16 @@ export function DocPage(props: { readonly docId: string; readonly tabId: string 
                 threads={resolvedThreads}
                 tabs={tabs}
                 onReopen={(commentId) =>
-                  quietly(comments.actions.setResolved(commentId, false).catch(commentFailed))
+                  quietly(
+                    comments.actions
+                      .setResolved(commentId, false)
+                      .catch(commentFailed),
+                  )
                 }
                 onDelete={(commentId) =>
-                  quietly(comments.actions.delete(commentId).catch(commentFailed))
+                  quietly(
+                    comments.actions.delete(commentId).catch(commentFailed),
+                  )
                 }
               />
             ) : null}
@@ -688,7 +818,11 @@ export function DocPage(props: { readonly docId: string; readonly tabId: string 
           {notice ? (
             <div className="notice" role="status">
               {notice}
-              <button type="button" className="link-button" onClick={() => setNotice(null)}>
+              <button
+                type="button"
+                className="link-button"
+                onClick={() => setNotice(null)}
+              >
                 Dismiss
               </button>
             </div>
@@ -706,7 +840,11 @@ export function DocPage(props: { readonly docId: string; readonly tabId: string 
               >
                 Open
               </button>
-              <button type="button" className="link-button" onClick={() => setNewTabId(null)}>
+              <button
+                type="button"
+                className="link-button"
+                onClick={() => setNewTabId(null)}
+              >
                 Dismiss
               </button>
             </div>
@@ -717,7 +855,11 @@ export function DocPage(props: { readonly docId: string; readonly tabId: string 
               ref={setDocBody}
             >
               <div className="doc-column">
-                <DocHead title={doc.title} createdAt={doc.createdAt} owner={owner} />
+                <DocHead
+                  title={doc.title}
+                  createdAt={doc.createdAt}
+                  owner={owner}
+                />
                 {editor && abilities.comment && draftAnchor === null ? (
                   <SelectionToolbar
                     editor={editor}
@@ -738,6 +880,7 @@ export function DocPage(props: { readonly docId: string; readonly tabId: string 
                   revision={revision}
                   editable={abilities.edit}
                   uploadImage={uploadImage}
+                  importImageLink={importImageLink}
                   onUploadError={imageFailed}
                   onVideoFile={insertVideo}
                   loadEmbed={loadEmbed}
@@ -751,10 +894,14 @@ export function DocPage(props: { readonly docId: string; readonly tabId: string 
                   tops={tops}
                   activeId={activeCommentId}
                   narrow={narrow}
-                  selectionTop={abilities.comment ? (labelPick?.top ?? null) : null}
+                  selectionTop={
+                    abilities.comment ? (labelPick?.top ?? null) : null
+                  }
                   draftOpen={draftAnchor !== null}
                   offerAddToChat={canAddToChat}
-                  onStartComment={() => labelPick && startLabelComment(labelPick.anchor)}
+                  onStartComment={() =>
+                    labelPick && startLabelComment(labelPick.anchor)
+                  }
                   onSubmitDraft={async (body, toChat) => {
                     if (!draft) return;
                     const comment = await comments.actions

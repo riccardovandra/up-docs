@@ -20,7 +20,7 @@ export default () => { const W = 156, H = 48, rowA = 110, rowB = 230, c1 = 102, 
 {"id":"requests","columns":[{"id":"req","name":"Request","type":"text"},{"id":"status","name":"Status","type":"select","options":[{"value":"Not started","color":"gray"},{"value":"Done","color":"green"}]},{"id":"ticket","name":"Ticket","type":"link"}],"rows":[{"id":"r1","cells":{"req":"Fix Zebra MCP","status":"Not started","ticket":{"text":"TASK-5575","url":"https://example.atlassian.net/browse/TASK-5575"}}}]}
 \`\`\`
 Change one cell with update_table_cell and add rows with add_table_row rather than rewriting the block. Plain markdown tables still work for static data.`,
-  video: `Videos play inside the doc from a \`\`\`t3-video block. Its first line is the source and its optional second line is the title, nothing else. The source is a YouTube link (watch, youtu.be, shorts, embed), a Loom link (share, embed), or a /api/videos/<docId>/<file> URL already uploaded in the editor; agents cannot upload files. Bare links stay plain links. Example:
+  video: `Videos play inside the doc from a \`\`\`t3-video block. Its first line is the source and its optional second line is the title, nothing else. The source is a YouTube link (watch, youtu.be, shorts, embed), a Loom link (share, embed), or a /api/videos/<docId>/<file> URL already uploaded in the editor; agents cannot upload video files. Bare links stay plain links. Example:
 \`\`\`t3-video
 https://www.youtube.com/watch?v=dQw4w9WgXcQ
 Release walkthrough
@@ -30,6 +30,10 @@ Release walkthrough
 https://www.linkedin.com/posts/name_slug-activity-7209442266791186432-uyzh
 Hook: a number in the first line
 \`\`\``,
+  image: `Images are markdown: ![alt](src), alone on a line or inside text. Every image the doc shows is its own copy under /api/images/<docId>/<file>; readers' browsers never load another site.
+- A public https link: write ![alt](https://...) with create_doc, create_tab, edit_tab or write_tab. The Worker downloads it once, saves the copy and writes the copy's path instead; the result's "images" field lists what was copied and what failed. A failed link stays as written and shows as its alt text. import_image {docId, url, alt} does the same for one link and returns the markdown. Up to 20 links per write.
+- A file on your machine (a screenshot, an exported chart, an image from a downloaded document): prepare_image_upload {docId}, then run its curl command with the file and its Content-Type. The reply is {"url","markdown"}; insert the markdown with edit_tab. Use this for links that need a sign-in, such as Google Docs images: download the file first.
+- PNG, JPEG, GIF or WebP, up to 10 MB. A width after a pipe sets the display size: ![Chart|480](/api/images/...).`,
   comments: `Comments: when asked to review or address comments, list_comments, make the requested edits in the doc, reply_comment in each thread saying what changed (or answering the question), and resolve_comment once a thread is fully handled. To raise a point on a passage, create_comment with a short exact quote from the tab; on a table cell, pass anchor {"kind":"cell","blockId":<table id>,"rowId","colId"} instead, and on a diagram label {"kind":"label","blockId":<diagram id>,"textId"}.`,
   sharing: `Sharing: docs are private to the people on them. share_doc gives someone access by email (owner, editor, commenter or viewer); list_members and unshare_doc manage it. You act with the role of the person whose token you use.`,
   claude_push: `Claude Docs push: to put a tab into a Claude Doc (claude.ai) as a tab, call prepare_claude_doc_push {tabId, claudeDocId}; it writes nothing and returns the converted markdown, one widget per diagram (code copied byte for byte) and Claude Docs members. Mode "new": send its batch to the Claude Docs batch tool in the given order. Mode "update" (pushed before): send widgetCreates and replace the prose body with content. Show the warnings (rich tables, videos, embeds, mermaid and uploaded images do not carry over as-is). Then call record_claude_doc_push with the Claude Docs ids, {slug: {nodeId, hash}} and the prose rev, so the next push updates the same tab.`,
@@ -37,4 +41,6 @@ Hook: a number in the first line
 
 export type FormatTopic = keyof typeof FORMAT_GUIDES;
 
-export const FORMAT_TOPICS = Object.keys(FORMAT_GUIDES) as ReadonlyArray<FormatTopic>;
+export const FORMAT_TOPICS = Object.keys(
+  FORMAT_GUIDES,
+) as ReadonlyArray<FormatTopic>;

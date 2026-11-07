@@ -70,7 +70,7 @@ export interface FetchedPost {
  * GETs `url`, following up to three redirects that stay on `allowed` hosts,
  * and reads at most `maxBytes`. Null on any failure.
  */
-async function fetchLimited(
+export async function fetchLimited(
   fetchRemote: RemoteFetch,
   url: string,
   allowed: (host: string) => boolean,

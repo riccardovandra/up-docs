@@ -10,7 +10,12 @@ import { callTool, McpToolError, TOOLS } from "./mcpTools.ts";
  * editors exactly like REST writes do.
  */
 
-const SUPPORTED_PROTOCOL_VERSIONS = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"];
+const SUPPORTED_PROTOCOL_VERSIONS = [
+  "2025-11-25",
+  "2025-06-18",
+  "2025-03-26",
+  "2024-11-05",
+];
 
 /**
  * Clients cut long server instructions short (Claude Code keeps about 4,000
@@ -38,6 +43,7 @@ How to write (what the user keeps asking for):
 Formats: call format_guide {topic} before you first write one. Writes with a malformed block are refused with the reason.
 - Diagrams: \`\`\`t3-widget id=<slug> blocks (topic "diagram"). Existing \`\`\`mermaid blocks keep working; edit them in place, never convert them.
 - Rich tables with status chips, links and per-cell comments: \`\`\`t3-table (topic "table"). Plain markdown tables are fine for static data.
+- Images: ![alt](https://...) links are copied into the doc on write; a file on your machine goes up with prepare_image_upload (topic "image").
 - Videos: \`\`\`t3-video (topic "video"). LinkedIn and X posts: \`\`\`t3-embed (topic "embed").
 - Comments: when asked to address comments, list_comments, make the edits, reply_comment in each thread saying what changed, and resolve_comment once handled (topic "comments" for anchors on table cells and diagram labels).
 - Sharing: share_doc, list_members and unshare_doc (topic "sharing"). Pushing a tab to a Claude Doc: topic "claude_push".`;
@@ -49,7 +55,11 @@ interface JsonRpcRequest {
   readonly params?: Record<string, unknown>;
 }
 
-const rpcResult = (id: JsonRpcRequest["id"], result: unknown, headers: HeadersInit = {}) =>
+const rpcResult = (
+  id: JsonRpcRequest["id"],
+  result: unknown,
+  headers: HeadersInit = {},
+) =>
   Response.json(
     { jsonrpc: "2.0", id, result },
     { headers: { "Cache-Control": "no-store", ...headers } },
@@ -65,7 +75,9 @@ const SESSION_PREFIX = "c.";
 
 function sessionIdFor(clientName: string): string {
   const bytes = new TextEncoder().encode(clientName.slice(0, 60));
-  return SESSION_PREFIX + btoa(String.fromCharCode(...bytes)).replace(/=+$/, "");
+  return (
+    SESSION_PREFIX + btoa(String.fromCharCode(...bytes)).replace(/=+$/, "")
+  );
 }
 
 function clientNameFrom(request: Request): string | null {
@@ -73,14 +85,21 @@ function clientNameFrom(request: Request): string | null {
   if (!sessionId?.startsWith(SESSION_PREFIX)) return null;
   try {
     const binary = atob(sessionId.slice(SESSION_PREFIX.length));
-    const name = new TextDecoder().decode(Uint8Array.from(binary, (char) => char.charCodeAt(0)));
+    const name = new TextDecoder().decode(
+      Uint8Array.from(binary, (char) => char.charCodeAt(0)),
+    );
     return name.trim() || null;
   } catch {
     return null;
   }
 }
 
-const rpcError = (id: JsonRpcRequest["id"] | null, code: number, message: string, status = 200) =>
+const rpcError = (
+  id: JsonRpcRequest["id"] | null,
+  code: number,
+  message: string,
+  status = 200,
+) =>
   Response.json(
     { jsonrpc: "2.0", id, error: { code, message } },
     { status, headers: { "Cache-Control": "no-store" } },
@@ -92,7 +111,10 @@ function isRequest(body: unknown): body is JsonRpcRequest {
   return message.jsonrpc === "2.0" && typeof message.method === "string";
 }
 
-export async function handleMcp(request: Request, deps: ApiDeps): Promise<Response> {
+export async function handleMcp(
+  request: Request,
+  deps: ApiDeps,
+): Promise<Response> {
   const url = new URL(request.url);
   if (url.pathname.replace(/\/+$/, "") !== "/mcp") {
     return Response.json({ error: "not_found" }, { status: 404 });
@@ -107,7 +129,10 @@ export async function handleMcp(request: Request, deps: ApiDeps): Promise<Respon
   if (principal?.kind !== "token") {
     return Response.json(
       { error: "unauthorized" },
-      { status: 401, headers: { "WWW-Authenticate": 'Bearer realm="up-docs"' } },
+      {
+        status: 401,
+        headers: { "WWW-Authenticate": 'Bearer realm="up-docs"' },
+      },
     );
   }
 
@@ -130,12 +155,14 @@ export async function handleMcp(request: Request, deps: ApiDeps): Promise<Respon
     case "initialize": {
       const requested = params.protocolVersion;
       const clientInfo = params.clientInfo as { name?: unknown } | undefined;
-      const clientName = typeof clientInfo?.name === "string" ? clientInfo.name.trim() : "";
+      const clientName =
+        typeof clientInfo?.name === "string" ? clientInfo.name.trim() : "";
       return rpcResult(
         body.id,
         {
           protocolVersion:
-            typeof requested === "string" && SUPPORTED_PROTOCOL_VERSIONS.includes(requested)
+            typeof requested === "string" &&
+            SUPPORTED_PROTOCOL_VERSIONS.includes(requested)
               ? requested
               : SUPPORTED_PROTOCOL_VERSIONS[0],
           capabilities: { tools: { listChanged: false } },
@@ -151,7 +178,8 @@ export async function handleMcp(request: Request, deps: ApiDeps): Promise<Respon
       return rpcResult(body.id, { tools: TOOLS });
     case "tools/call": {
       const name = params.name;
-      if (typeof name !== "string") return rpcError(body.id, -32602, "Missing tool name");
+      if (typeof name !== "string")
+        return rpcError(body.id, -32602, "Missing tool name");
       const args =
         params.arguments && typeof params.arguments === "object"
           ? (params.arguments as Record<string, unknown>)
@@ -168,9 +196,12 @@ export async function handleMcp(request: Request, deps: ApiDeps): Promise<Respon
         });
       } catch (cause) {
         if (cause instanceof McpToolError) {
-          if (cause.unknownTool) return rpcError(body.id, -32602, cause.message);
+          if (cause.unknownTool)
+            return rpcError(body.id, -32602, cause.message);
           return rpcResult(body.id, {
-            content: [{ type: "text", text: JSON.stringify(cause.detail, null, 2) }],
+            content: [
+              { type: "text", text: JSON.stringify(cause.detail, null, 2) },
+            ],
             isError: true,
           });
         }
