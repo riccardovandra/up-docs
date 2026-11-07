@@ -3,10 +3,18 @@ import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { isAdmin } from "../../shared/access.ts";
 import type { ApiTokenSummary } from "../../shared/protocol.ts";
 import { api } from "../api.ts";
+import { isEmbedded } from "../embedBridge.ts";
 import { AccountMenu } from "../home/AccountMenu.tsx";
 import { HomeLink } from "../home/HomeLink.tsx";
 import { setMe, useMe } from "../me.ts";
+import { setAppearance, storedAppearance, type Appearance } from "../theme.ts";
 import { ProjectSettings } from "./ProjectSettings.tsx";
+
+const APPEARANCES: ReadonlyArray<readonly [Appearance, string]> = [
+  ["system", "System"],
+  ["light", "Light"],
+  ["dark", "Dark"],
+];
 
 export function SettingsPage() {
   const me = useMe();
@@ -15,6 +23,7 @@ export function SettingsPage() {
   const [tokens, setTokens] = useState<ReadonlyArray<ApiTokenSummary>>([]);
   const [name, setName] = useState("");
   const [created, setCreated] = useState<string | null>(null);
+  const [appearance, setChosenAppearance] = useState(storedAppearance);
 
   const reload = useCallback(async () => {
     setTokens((await api.tokens()).tokens);
@@ -70,6 +79,30 @@ export function SettingsPage() {
         </button>
         {nameSaved ? <span className="muted">Saved</span> : null}
       </form>
+      <h2>Appearance</h2>
+      {isEmbedded() ? (
+        <p className="muted">T3 Code sets the appearance here. Change it in T3 Code&apos;s settings.</p>
+      ) : (
+        <>
+          <p className="muted">System follows your device&apos;s light or dark mode.</p>
+          <div className="inline-form" role="group" aria-label="Appearance">
+            {APPEARANCES.map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                className={appearance === value ? "button" : "button secondary"}
+                aria-pressed={appearance === value}
+                onClick={() => {
+                  setAppearance(value);
+                  setChosenAppearance(value);
+                }}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
       {me && isAdmin(me.user.id) ? (
         <>
           <h2>Projects</h2>
