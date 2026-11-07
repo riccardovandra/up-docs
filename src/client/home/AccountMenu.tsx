@@ -26,7 +26,9 @@ const initials = (name: string) => {
  */
 export function AccountMenu() {
   const me = useMe();
-  const [appearance, setChosen] = useState(storedAppearance);
+  // Re-renders the menu after a pick; the saved value is read on each render so
+  // a change made on the Settings page shows here too.
+  const [, setChosen] = useState(storedAppearance);
   if (!me) return null;
   const name = displayName(me.user);
   const signOut = async () => {
@@ -64,7 +66,7 @@ export function AccountMenu() {
                   <MenuItem
                     key={value}
                     kind="radio"
-                    checked={appearance === value}
+                    checked={storedAppearance() === value}
                     onSelect={() => {
                       setAppearance(value);
                       setChosen(value);
