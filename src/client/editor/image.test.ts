@@ -4,18 +4,28 @@ import { EditorState } from "@tiptap/pm/state";
 import { describe, expect, it } from "vitest";
 
 import { createEditorExtensions } from "./extensions.ts";
+import { pastedImageLink } from "./image.ts";
 
-const markdown = new MarkdownManager({ extensions: flattenExtensions(createEditorExtensions()) });
-const roundTrip = (source: string) => markdown.serialize(markdown.parse(source));
+const markdown = new MarkdownManager({
+  extensions: flattenExtensions(createEditorExtensions()),
+});
+const roundTrip = (source: string) =>
+  markdown.serialize(markdown.parse(source));
 const schema = getSchema(flattenExtensions(createEditorExtensions()));
 
 const IMAGE = "![Chart](/api/images/d/x.png)";
 
 describe("image markdown", () => {
   it.each([
-    ["an uploaded image", "![Chart](/api/images/doc-1/0b6f3a52-6a3e-4b0c-9a55-2b1d1f4f2a10.png)"],
+    [
+      "an uploaded image",
+      "![Chart](/api/images/doc-1/0b6f3a52-6a3e-4b0c-9a55-2b1d1f4f2a10.png)",
+    ],
     ["an image inside a sentence", "Before ![a](/api/images/d/x.png) after."],
-    ["a remote image, kept as written", "![logo](https://example.com/logo.png)"],
+    [
+      "a remote image, kept as written",
+      "![logo](https://example.com/logo.png)",
+    ],
     ["a title", '![a](/api/images/d/x.png "The title")'],
     ["no alt text", "![](/api/images/d/x.png)"],
     ["a resized image", "![Chart|480](/api/images/d/x.png)"],
@@ -35,7 +45,10 @@ describe("image markdown", () => {
     expect(images).toEqual([
       expect.objectContaining({
         type: "image",
-        attrs: expect.objectContaining({ src: "/api/images/d/x.png", alt: "Chart" }),
+        attrs: expect.objectContaining({
+          src: "/api/images/d/x.png",
+          alt: "Chart",
+        }),
       }),
     ]);
   });
@@ -53,14 +66,18 @@ describe("image markdown", () => {
     ["in consecutive paragraphs", `${IMAGE}\n\n${IMAGE}`],
   ])("%s", (_name, source) => {
     it("parses to content the schema accepts", () => {
-      expect(() => schema.nodeFromJSON(markdown.parse(source)).check()).not.toThrow();
+      expect(() =>
+        schema.nodeFromJSON(markdown.parse(source)).check(),
+      ).not.toThrow();
     });
 
     it("survives the transaction that blanked the page", () => {
       // Tiptap's trailing node plugin appends a paragraph like this on load.
       const doc = schema.nodeFromJSON(markdown.parse(source));
       const { tr } = EditorState.create({ schema, doc });
-      expect(() => tr.insert(doc.content.size, schema.nodes.paragraph!.create())).not.toThrow();
+      expect(() =>
+        tr.insert(doc.content.size, schema.nodes.paragraph!.create()),
+      ).not.toThrow();
     });
 
     it("round-trips to the same text", () => {
@@ -70,18 +87,31 @@ describe("image markdown", () => {
 
   it("keeps an image in a table cell", () => {
     const source = `| a |\n| - |\n| ${IMAGE} |`;
-    expect(() => schema.nodeFromJSON(markdown.parse(source)).check()).not.toThrow();
+    expect(() =>
+      schema.nodeFromJSON(markdown.parse(source)).check(),
+    ).not.toThrow();
     expect(roundTrip(source)).toContain(IMAGE);
   });
 
   it("reloads an image uploaded onto an empty line", () => {
-    const image = schema.nodes.image!.create({ src: "/api/images/d/x.png", alt: "Chart" });
-    const empty = schema.nodes.doc!.create(null, schema.nodes.paragraph!.create());
-    const uploaded = EditorState.create({ schema, doc: empty }).tr.insert(1, image).doc;
+    const image = schema.nodes.image!.create({
+      src: "/api/images/d/x.png",
+      alt: "Chart",
+    });
+    const empty = schema.nodes.doc!.create(
+      null,
+      schema.nodes.paragraph!.create(),
+    );
+    const uploaded = EditorState.create({ schema, doc: empty }).tr.insert(
+      1,
+      image,
+    ).doc;
     const saved = markdown.serialize(uploaded.toJSON());
 
     expect(saved).toBe(IMAGE);
-    expect(() => schema.nodeFromJSON(markdown.parse(saved)).check()).not.toThrow();
+    expect(() =>
+      schema.nodeFromJSON(markdown.parse(saved)).check(),
+    ).not.toThrow();
   });
 
   it("reads a stored width into the node and writes a new one back", () => {
@@ -98,7 +128,31 @@ describe("image markdown", () => {
       alt: "Chart",
       width: 300,
     });
-    const resized = schema.nodes.doc!.create(null, schema.nodes.paragraph!.create(null, image));
-    expect(markdown.serialize(resized.toJSON())).toBe("![Chart|300](/api/images/d/x.png)");
+    const resized = schema.nodes.doc!.create(
+      null,
+      schema.nodes.paragraph!.create(null, image),
+    );
+    expect(markdown.serialize(resized.toJSON())).toBe(
+      "![Chart|300](/api/images/d/x.png)",
+    );
+  });
+});
+
+describe("pastedImageLink", () => {
+  it.each([
+    [
+      "https://cdn.example.com/a/chart.png",
+      "https://cdn.example.com/a/chart.png",
+    ],
+    [
+      "  https://cdn.example.com/photo.JPEG?w=800\n",
+      "https://cdn.example.com/photo.JPEG?w=800",
+    ],
+    ["https://example.com/page", null],
+    ["http://cdn.example.com/a.png", null],
+    ["see https://cdn.example.com/a.png", null],
+    ["/api/images/d/x.png", null],
+  ])("%j -> %j", (text, expected) => {
+    expect(pastedImageLink(text)).toBe(expected);
   });
 });

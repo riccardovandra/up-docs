@@ -7,7 +7,11 @@ import {
   type Tab,
   type TabPlacement,
 } from "../shared/protocol.ts";
-import { isDocRole, type DocRole, type EmailDelivery } from "../shared/access.ts";
+import {
+  isDocRole,
+  type DocRole,
+  type EmailDelivery,
+} from "../shared/access.ts";
 import {
   locateAnchor,
   markdownToText,
@@ -27,10 +31,15 @@ import * as Export from "./export.ts";
 import { docxResponse } from "./export/docx.ts";
 import * as Home from "./home.ts";
 import * as Images from "./images.ts";
+import * as ImageImport from "./imageImport.ts";
 import { IMAGE_TYPES, isImageDocId } from "../shared/images.ts";
 import { widgetProblems } from "./widgets.ts";
 import { checkTablesIn } from "../shared/table.ts";
-import { MAX_VIDEO_PARTS, VIDEO_PART_BYTES, videoFileType } from "../shared/video.ts";
+import {
+  MAX_VIDEO_PARTS,
+  VIDEO_PART_BYTES,
+  videoFileType,
+} from "../shared/video.ts";
 import * as Videos from "./videos.ts";
 import * as Embeds from "./embeds.ts";
 import { matchEmbed } from "../shared/embeds.ts";
@@ -79,10 +88,16 @@ export interface DocRooms {
     input: { readonly title: string; readonly origin: string | null },
   ): Promise<DocSummary>;
   /** Deletes the doc and closes every open socket on it. */
-  deleteDoc(docId: string, input: { readonly origin: string | null }): Promise<void>;
+  deleteDoc(
+    docId: string,
+    input: { readonly origin: string | null },
+  ): Promise<void>;
   setDocProject(
     docId: string,
-    input: { readonly projectId: string | null; readonly origin: string | null },
+    input: {
+      readonly projectId: string | null;
+      readonly origin: string | null;
+    },
   ): Promise<DocSummary>;
   setDocGroup(
     docId: string,
@@ -94,10 +109,17 @@ export interface DocRooms {
   ): Promise<Comments.CommentOpResult>;
   threadOp(
     docId: string,
-    input: { readonly op: DocThreads.DocThreadOp; readonly origin: string | null },
+    input: {
+      readonly op: DocThreads.DocThreadOp;
+      readonly origin: string | null;
+    },
   ): Promise<ReadonlyArray<DocThreadLink>>;
   /** `userId` tags the socket so removing that person from the doc can close it. */
-  openSocket(docId: string, request: Request, userId: string): Promise<Response>;
+  openSocket(
+    docId: string,
+    request: Request,
+    userId: string,
+  ): Promise<Response>;
   closeSockets(docId: string, userId: string): Promise<void>;
 }
 
@@ -125,25 +147,33 @@ export interface ApiDeps {
 }
 
 const json = (body: unknown, status = 200, headers: HeadersInit = {}) =>
-  Response.json(body, { status, headers: { "Cache-Control": "no-store", ...headers } });
+  Response.json(body, {
+    status,
+    headers: { "Cache-Control": "no-store", ...headers },
+  });
 
 const error = (status: number, code: string) => json({ error: code }, status);
 const widgetInvalid = (problems: ReadonlyArray<WidgetProblem>) =>
   json({ error: "widget_invalid", problems }, 422);
 
-const tableInvalid = (message: string) => json({ error: "table_invalid", message }, 422);
+const tableInvalid = (message: string) =>
+  json({ error: "table_invalid", message }, 422);
 
 async function readJson(request: Request): Promise<Record<string, unknown>> {
   try {
     const body: unknown = await request.json();
-    return body && typeof body === "object" ? (body as Record<string, unknown>) : {};
+    return body && typeof body === "object"
+      ? (body as Record<string, unknown>)
+      : {};
   } catch {
     return {};
   }
 }
 
 const str = (value: unknown, max = 200): string | null =>
-  typeof value === "string" && value.trim().length > 0 && value.length <= max ? value.trim() : null;
+  typeof value === "string" && value.trim().length > 0 && value.length <= max
+    ? value.trim()
+    : null;
 
 const MAX_MARKDOWN_LENGTH = 1_000_000;
 /** One T3 Code environment's projects per sync call. */
@@ -163,7 +193,8 @@ function syncedProjects(
   for (const entry of value as Array<unknown>) {
     if (!entry || typeof entry !== "object") return null;
     const fields = entry as Record<string, unknown>;
-    const key = typeof fields.key === "string" ? normalizeProjectKey(fields.key) : null;
+    const key =
+      typeof fields.key === "string" ? normalizeProjectKey(fields.key) : null;
     const name = str(fields.name);
     if (!key || !name) return null;
     // Two checkouts of one repository share a key; the last title wins.
@@ -188,10 +219,73 @@ function isSameOriginWrite(request: Request, deps: ApiDeps): boolean {
   if (request.method !== "POST") return true;
   const type = request.headers.get("Content-Type") ?? "";
   // Image uploads send raw bytes; image types are not CORS-safelisted either.
-  return type.startsWith("application/json") || Object.hasOwn(IMAGE_TYPES, type);
+  return (
+    type.startsWith("application/json") || Object.hasOwn(IMAGE_TYPES, type)
+  );
 }
 
 const SAFE_METHODS = new Set(["GET", "HEAD"]);
+
+/** What an image import needs: never fetch this app's own hosts. */
+export function importDeps(
+  deps: ApiDeps,
+  requestUrl: string,
+): ImageImport.ImportDeps {
+  const ownHosts = new Set(
+    [deps.publicOrigin, requestUrl].map((origin) =>
+      new URL(origin).hostname.toLowerCase(),
+    ),
+  );
+  return {
+    db: deps.db,
+    images: deps.images,
+    fetchRemote: deps.fetchRemote,
+    now: deps.now,
+    ownHosts,
+  };
+}
+
+/**
+ * `PUT /api/image-uploads/:token`: an agent sends one image file to the link
+ * prepare_image_upload gave it. The token is the only credential; it works
+ * once, for one doc, while its user is still an editor there.
+ */
+async function handleImageUploadLink(
+  request: Request,
+  token: string,
+  deps: ApiDeps,
+): Promise<Response> {
+  if (request.method !== "PUT" && request.method !== "POST")
+    return error(405, "method_not_allowed");
+  const claim = await ImageImport.claimUploadToken(deps.db, {
+    token,
+    now: deps.now(),
+  });
+  if (!claim) return error(404, "upload_link_invalid");
+  try {
+    await Access.requireDocRole(deps.db, claim.docId, claim.userId, "editor");
+  } catch (cause) {
+    if (
+      cause instanceof Docs.NotFoundError ||
+      cause instanceof Access.ForbiddenError
+    ) {
+      return error(403, "forbidden");
+    }
+    throw cause;
+  }
+  const result = await Images.uploadImage(deps.images, {
+    docId: claim.docId,
+    request,
+  });
+  if (!result.ok) {
+    await claim.release();
+    return error(result.status, result.error);
+  }
+  return json(
+    { url: result.url, markdown: ImageImport.imageMarkdown(result.url, "") },
+    201,
+  );
+}
 
 /**
  * `PATCH /api/projects/:id` renames, `POST /api/projects/:id/move-docs` moves
@@ -212,18 +306,22 @@ async function handleProject(
   if (!sub && method === "PATCH") {
     const name = str((await readJson(request)).name);
     if (!name) return error(400, "invalid_name");
-    return json({ project: await Docs.renameProject(deps.db, { projectId: id, name }) });
+    return json({
+      project: await Docs.renameProject(deps.db, { projectId: id, name }),
+    });
   }
   if (sub === "move-docs" && route.segments.length === 3 && method === "POST") {
     const body = await readJson(request);
     const projectId = projectIdArg(body.projectId);
-    if (projectId === false || projectId === undefined) return error(400, "invalid_project");
+    if (projectId === false || projectId === undefined)
+      return error(400, "invalid_project");
     if (projectId === id) return error(400, "same_project");
     if (projectId !== null) await Docs.getProject(deps.db, projectId);
     const origin = str(body.clientId);
     const docIds = await Docs.projectDocIds(deps.db, id);
     // Through each DocRoom, so pages open on a moved doc hear about it.
-    for (const docId of docIds) await deps.rooms.setDocProject(docId, { projectId, origin });
+    for (const docId of docIds)
+      await deps.rooms.setDocProject(docId, { projectId, origin });
     return json({ moved: docIds.length });
   }
   if (!sub && method === "DELETE") {
@@ -233,15 +331,23 @@ async function handleProject(
   return null;
 }
 
-export async function handleApi(request: Request, deps: ApiDeps): Promise<Response> {
+export async function handleApi(
+  request: Request,
+  deps: ApiDeps,
+): Promise<Response> {
   const url = new URL(request.url);
   const path = url.pathname.replace(/\/+$/, "");
   const method = request.method;
   const now = deps.now();
 
   if (path.startsWith("/api/auth/")) return handleAuth(request, path, deps);
+  const uploadLink = /^\/api\/image-uploads\/([^/]+)$/.exec(path);
+  if (uploadLink) return handleImageUploadLink(request, uploadLink[1]!, deps);
 
-  const principal = await Auth.authenticate(deps.db, request, { owners: deps.owners, now });
+  const principal = await Auth.authenticate(deps.db, request, {
+    owners: deps.owners,
+    now,
+  });
   if (!principal) return error(401, "unauthorized");
   const need = (docId: string, role: DocRole) =>
     Access.requireDocRole(deps.db, docId, principal.userId, role);
@@ -253,10 +359,15 @@ export async function handleApi(request: Request, deps: ApiDeps): Promise<Respon
   // cookie-authed socket must come from this origin.
   if (resource === "docs" && id && sub === "ws" && method === "GET") {
     const origin = request.headers.get("Origin");
-    if (principal.kind === "session" && origin !== null && !isOwnOrigin(origin, request, deps)) {
+    if (
+      principal.kind === "session" &&
+      origin !== null &&
+      !isOwnOrigin(origin, request, deps)
+    ) {
       return error(403, "forbidden_origin");
     }
-    if (request.headers.get("Upgrade") !== "websocket") return error(426, "expected_websocket");
+    if (request.headers.get("Upgrade") !== "websocket")
+      return error(426, "expected_websocket");
     try {
       // Sockets only receive; every role may listen, and writes are checked on REST.
       await need(id, "viewer");
@@ -289,7 +400,9 @@ export async function handleApi(request: Request, deps: ApiDeps): Promise<Respon
     }
 
     if (path === "/api/people" && method === "GET") {
-      return json({ people: await Access.listPeople(deps.db, principal.userId, deps.owners) });
+      return json({
+        people: await Access.listPeople(deps.db, principal.userId, deps.owners),
+      });
     }
 
     if (resource === "tokens") {
@@ -303,7 +416,10 @@ export async function handleApi(request: Request, deps: ApiDeps): Promise<Respon
         const body = await readJson(request);
         const name = str(body.name, 100);
         if (!name) return error(400, "invalid_name");
-        return json(await Auth.createApiToken(deps.db, { name, userId, now }), 201);
+        return json(
+          await Auth.createApiToken(deps.db, { name, userId, now }),
+          201,
+        );
       }
       if (id && method === "DELETE") {
         return (await Auth.revokeApiToken(deps.db, { id, userId, now }))
@@ -326,7 +442,12 @@ export async function handleApi(request: Request, deps: ApiDeps): Promise<Respon
       if (query.length < SEARCH_MIN_QUERY || query.length > SEARCH_MAX_QUERY) {
         return error(400, "invalid_query");
       }
-      return json({ hits: await Home.searchTabs(deps.db, { userId: principal.userId, query }) });
+      return json({
+        hits: await Home.searchTabs(deps.db, {
+          userId: principal.userId,
+          query,
+        }),
+      });
     }
 
     if (path === "/api/projects" && method === "POST") {
@@ -335,11 +456,18 @@ export async function handleApi(request: Request, deps: ApiDeps): Promise<Respon
       const name = str(body.name);
       if (!name) return error(400, "invalid_name");
       if (body.key === undefined) {
-        return json({ project: await Docs.createProject(deps.db, name, now) }, 201);
+        return json(
+          { project: await Docs.createProject(deps.db, name, now) },
+          201,
+        );
       }
-      const key = typeof body.key === "string" ? normalizeProjectKey(body.key) : null;
+      const key =
+        typeof body.key === "string" ? normalizeProjectKey(body.key) : null;
       if (!key) return error(400, "invalid_key");
-      return json({ project: await Docs.ensureProject(deps.db, { key, name, now }) }, 201);
+      return json(
+        { project: await Docs.ensureProject(deps.db, { key, name, now }) },
+        201,
+      );
     }
 
     // T3 Code upserts its environment's projects here, so every machine converges on one list.
@@ -348,13 +476,19 @@ export async function handleApi(request: Request, deps: ApiDeps): Promise<Respon
       const projects = syncedProjects((await readJson(request)).projects);
       if (!projects) return error(400, "invalid_projects");
       const synced = await Docs.syncProjects(deps.db, projects, now);
-      return json({ projects: synced.map(({ id, key, name }) => ({ id, key, name })) });
+      return json({
+        projects: synced.map(({ id, key, name }) => ({ id, key, name })),
+      });
     }
 
     // Project housekeeping from Settings. Admin only, like creating projects.
     if (resource === "projects" && id && id !== "sync") {
       if (!Access.isAdmin(principal.userId)) return error(403, "forbidden");
-      const response = await handleProject(request, { id, sub, method, segments }, deps);
+      const response = await handleProject(
+        request,
+        { id, sub, method, segments },
+        deps,
+      );
       if (response) return response;
     }
 
@@ -363,8 +497,12 @@ export async function handleApi(request: Request, deps: ApiDeps): Promise<Respon
       const projectId = projectIdArg(body.projectId);
       const title = str(body.title);
       const group = docGroupArg(body.group);
-      if (projectId === false || !title || group === false) return error(400, "invalid_doc");
-      if (projectId && !(await Access.canSeeProject(deps.db, projectId, principal.userId))) {
+      if (projectId === false || !title || group === false)
+        return error(400, "invalid_doc");
+      if (
+        projectId &&
+        !(await Access.canSeeProject(deps.db, projectId, principal.userId))
+      ) {
         return error(404, "not_found");
       }
       const ownerId = principal.userId;
@@ -384,14 +522,22 @@ export async function handleApi(request: Request, deps: ApiDeps): Promise<Respon
       const role = await need(id, "viewer");
       // Agents read docs all the time; only a person opening one moves "Opened".
       if (principal.kind === "session") {
-        await Home.recordOpen(deps.db, { docId: id, userId: principal.userId, now });
+        await Home.recordOpen(deps.db, {
+          docId: id,
+          userId: principal.userId,
+          now,
+        });
       }
       const owner = await Access.docOwner(deps.db, id, deps.owners);
       return json({ ...(await Docs.getDoc(deps.db, id)), role, owner });
     }
 
     if (resource === "docs" && id && sub === "members") {
-      const response = await handleMembers(request, { id, subId, method, principal }, deps);
+      const response = await handleMembers(
+        request,
+        { id, subId, method, principal },
+        deps,
+      );
       if (response) return response;
     }
 
@@ -409,11 +555,14 @@ export async function handleApi(request: Request, deps: ApiDeps): Promise<Respon
       }
       if (body.group !== undefined) {
         const group = docGroupArg(body.group);
-        if (group === false || group === undefined) return error(400, "invalid_group");
+        if (group === false || group === undefined)
+          return error(400, "invalid_group");
         if (body.status !== undefined || body.projectId !== undefined) {
           return error(400, "one_change_at_a_time");
         }
-        return json({ doc: await deps.rooms.setDocGroup(id, { group, origin }) });
+        return json({
+          doc: await deps.rooms.setDocGroup(id, { group, origin }),
+        });
       }
       const status = body.status;
       if (status !== undefined && !DOC_STATUSES.includes(status as DocStatus)) {
@@ -421,32 +570,78 @@ export async function handleApi(request: Request, deps: ApiDeps): Promise<Respon
       }
       const projectId = projectIdArg(body.projectId);
       if (projectId === false) return error(400, "invalid_project");
-      if (status === undefined && projectId === undefined) return error(400, "empty_write");
+      if (status === undefined && projectId === undefined)
+        return error(400, "empty_write");
       let doc: DocSummary | undefined;
       if (projectId !== undefined) {
-        if (projectId && !(await Access.canSeeProject(deps.db, projectId, principal.userId))) {
+        if (
+          projectId &&
+          !(await Access.canSeeProject(deps.db, projectId, principal.userId))
+        ) {
           return error(404, "not_found");
         }
         doc = await deps.rooms.setDocProject(id, { projectId, origin });
       }
       if (status !== undefined) {
-        doc = await deps.rooms.setDocStatus(id, { status: status as DocStatus, origin });
+        doc = await deps.rooms.setDocStatus(id, {
+          status: status as DocStatus,
+          origin,
+        });
       }
       return json({ doc });
     }
 
     if (resource === "docs" && id && !sub && method === "DELETE") {
       await need(id, "owner");
-      await deps.rooms.deleteDoc(id, { origin: url.searchParams.get("clientId") });
+      await deps.rooms.deleteDoc(id, {
+        origin: url.searchParams.get("clientId"),
+      });
       deps.waitUntil(deps.images.deletePrefix(Images.docImagesPrefix(id)));
-      if (deps.videos) deps.waitUntil(deps.videos.deletePrefix(Videos.docVideosPrefix(id)));
+      if (deps.videos)
+        deps.waitUntil(deps.videos.deletePrefix(Videos.docVideosPrefix(id)));
       return json({ ok: true });
     }
 
-    if (resource === "docs" && id && sub === "images" && !subId && method === "POST") {
+    if (
+      resource === "docs" &&
+      id &&
+      sub === "images" &&
+      !subId &&
+      method === "POST"
+    ) {
       await need(id, "editor");
-      const result = await Images.uploadImage(deps.images, { docId: id, request });
-      return result.ok ? json({ url: result.url }, 201) : error(result.status, result.error);
+      const result = await Images.uploadImage(deps.images, {
+        docId: id,
+        request,
+      });
+      return result.ok
+        ? json({ url: result.url }, 201)
+        : error(result.status, result.error);
+    }
+
+    // Copies an image link into the doc (a pasted link, or one already in it).
+    if (
+      resource === "docs" &&
+      id &&
+      sub === "images" &&
+      subId === "import" &&
+      method === "POST"
+    ) {
+      await need(id, "editor");
+      const body = await readJson(request);
+      if (typeof body.url !== "string") return error(400, "invalid_url");
+      const result = await ImageImport.importImage(
+        importDeps(deps, request.url),
+        {
+          docId: id,
+          link: body.url,
+        },
+      );
+      if (result.ok) return json({ url: result.src }, 201);
+      return error(
+        result.error === "too_many_imports" ? 429 : 422,
+        result.error,
+      );
     }
 
     if (resource === "images" && id && sub && !subId && method === "GET") {
@@ -460,17 +655,30 @@ export async function handleApi(request: Request, deps: ApiDeps): Promise<Respon
 
     // The doc's saved copy of an embedded post, taken on first request.
     // Any reader may ask for a missing copy; only an editor may retake one.
-    if (resource === "docs" && id && sub === "embeds" && !subId && method === "POST") {
+    if (
+      resource === "docs" &&
+      id &&
+      sub === "embeds" &&
+      !subId &&
+      method === "POST"
+    ) {
       const body = await readJson(request);
       const target = typeof body.url === "string" ? matchEmbed(body.url) : null;
       if (!target) return error(400, "embed_unsupported");
       const refresh = body.refresh === true;
       await need(id, refresh ? "editor" : "viewer");
       const result = await Embeds.loadEmbed(
-        { db: deps.db, images: deps.images, fetchRemote: deps.fetchRemote, now: deps.now },
+        {
+          db: deps.db,
+          images: deps.images,
+          fetchRemote: deps.fetchRemote,
+          now: deps.now,
+        },
         { docId: id, target, refresh },
       );
-      return result.ok ? json({ embed: result.snapshot }) : error(result.status, result.error);
+      return result.ok
+        ? json({ embed: result.snapshot })
+        : error(result.status, result.error);
     }
 
     if (resource === "docs" && id && sub === "videos" && segments.length <= 4) {
@@ -483,27 +691,49 @@ export async function handleApi(request: Request, deps: ApiDeps): Promise<Respon
       if (response) return response;
     }
 
-    if (resource === "videos" && id && sub && segments.length === 3 && SAFE_METHODS.has(method)) {
+    if (
+      resource === "videos" &&
+      id &&
+      sub &&
+      segments.length === 3 &&
+      SAFE_METHODS.has(method)
+    ) {
       if (!isImageDocId(id)) return error(404, "not_found");
       await need(id, "viewer");
       const served = deps.videos
-        ? await Videos.videoResponse(deps.videos, { docId: id, file: sub, request })
+        ? await Videos.videoResponse(deps.videos, {
+            docId: id,
+            file: sub,
+            request,
+          })
         : null;
       return served ?? error(404, "not_found");
     }
 
     if (resource === "docs" && id && sub === "threads") {
-      const response = await handleDocThreads(request, { id, subId, method, url, principal }, deps);
+      const response = await handleDocThreads(
+        request,
+        { id, subId, method, url, principal },
+        deps,
+      );
       if (response) return response;
     }
 
     if (resource === "docs" && id && sub === "export.md" && method === "GET") {
       await need(id, "viewer");
       const doc = await Docs.getDoc(deps.db, id);
-      return Export.markdownResponse(Export.docMarkdown(doc, deps.publicOrigin), doc.doc.title);
+      return Export.markdownResponse(
+        Export.docMarkdown(doc, deps.publicOrigin),
+        doc.doc.title,
+      );
     }
 
-    if (resource === "docs" && id && sub === "export.docx" && method === "GET") {
+    if (
+      resource === "docs" &&
+      id &&
+      sub === "export.docx" &&
+      method === "GET"
+    ) {
       await need(id, "viewer");
       const doc = await Docs.getDoc(deps.db, id);
       return docxResponse({
@@ -516,7 +746,8 @@ export async function handleApi(request: Request, deps: ApiDeps): Promise<Respon
     if (resource === "docs" && id && sub === "tabs" && method === "POST") {
       const body = await readJson(request);
       const title = str(body.title) ?? "Untitled";
-      const parentTabId = body.parentTabId === undefined ? null : body.parentTabId;
+      const parentTabId =
+        body.parentTabId === undefined ? null : body.parentTabId;
       if (parentTabId !== null && typeof parentTabId !== "string") {
         return error(400, "invalid_parent");
       }
@@ -545,10 +776,18 @@ export async function handleApi(request: Request, deps: ApiDeps): Promise<Respon
     if (resource === "tabs" && id && sub === "export.md" && method === "GET") {
       const tab = await Docs.getTab(deps.db, id);
       await need(tab.docId, "viewer");
-      return Export.markdownResponse(Export.tabMarkdown(tab, deps.publicOrigin), tab.title);
+      return Export.markdownResponse(
+        Export.tabMarkdown(tab, deps.publicOrigin),
+        tab.title,
+      );
     }
 
-    if (resource === "tabs" && id && sub === "export.docx" && method === "GET") {
+    if (
+      resource === "tabs" &&
+      id &&
+      sub === "export.docx" &&
+      method === "GET"
+    ) {
       const tab = await Docs.getTab(deps.db, id);
       await need(tab.docId, "viewer");
       return docxResponse({
@@ -564,19 +803,26 @@ export async function handleApi(request: Request, deps: ApiDeps): Promise<Respon
       if (typeof baseVersion !== "number" || !Number.isInteger(baseVersion)) {
         return error(400, "invalid_base_version");
       }
-      const markdown = typeof body.markdown === "string" ? body.markdown : undefined;
+      const markdown =
+        typeof body.markdown === "string" ? body.markdown : undefined;
       if (markdown !== undefined && markdown.length > MAX_MARKDOWN_LENGTH) {
         return error(413, "too_large");
       }
       const title = body.title === undefined ? undefined : str(body.title);
       if (title === null) return error(400, "invalid_title");
-      if (markdown === undefined && title === undefined) return error(400, "empty_write");
+      if (markdown === undefined && title === undefined)
+        return error(400, "empty_write");
       const current = await Docs.getTab(deps.db, id);
       await need(current.docId, "editor");
-      const problems = markdown === undefined ? null : widgetProblems(markdown, current.markdown);
+      const problems =
+        markdown === undefined
+          ? null
+          : widgetProblems(markdown, current.markdown);
       if (problems) return widgetInvalid(problems);
       const tableProblem =
-        markdown === undefined ? null : checkTablesIn(markdown, current.markdown);
+        markdown === undefined
+          ? null
+          : checkTablesIn(markdown, current.markdown);
       if (tableProblem) return tableInvalid(tableProblem);
       const result = await deps.rooms.writeTab(current.docId, {
         tabId: id,
@@ -592,12 +838,17 @@ export async function handleApi(request: Request, deps: ApiDeps): Promise<Respon
 
     if (resource === "tabs" && id && sub === "move" && method === "POST") {
       const body = await readJson(request);
-      const parentTabId = body.parentTabId === undefined ? null : body.parentTabId;
+      const parentTabId =
+        body.parentTabId === undefined ? null : body.parentTabId;
       if (parentTabId !== null && typeof parentTabId !== "string") {
         return error(400, "invalid_parent");
       }
       const position = body.position;
-      if (typeof position !== "number" || !Number.isInteger(position) || position < 0) {
+      if (
+        typeof position !== "number" ||
+        !Number.isInteger(position) ||
+        position < 0
+      ) {
         return error(400, "invalid_position");
       }
       const current = await Docs.getTab(deps.db, id);
@@ -636,21 +887,30 @@ export async function handleApi(request: Request, deps: ApiDeps): Promise<Respon
     }
     if (cause instanceof Access.LastOwnerError) return error(409, "last_owner");
     if (cause instanceof Access.SelfShareError) return error(409, "self");
-    if (cause instanceof Access.ReservedEmailError) return error(400, "invalid_email");
-    if (cause instanceof Docs.InvalidMoveError) return error(400, "invalid_move");
+    if (cause instanceof Access.ReservedEmailError)
+      return error(400, "invalid_email");
+    if (cause instanceof Docs.InvalidMoveError)
+      return error(400, "invalid_move");
     if (cause instanceof Docs.LastTabError) return error(409, "last_tab");
-    if (cause instanceof Docs.ProjectNotEmptyError) return error(409, "project_not_empty");
+    if (cause instanceof Docs.ProjectNotEmptyError)
+      return error(409, "project_not_empty");
     throw cause;
   }
 }
 
 function videoParts(value: unknown): ReadonlyArray<Videos.VideoPart> | null {
-  if (!Array.isArray(value) || value.length === 0 || value.length > MAX_VIDEO_PARTS) return null;
+  if (
+    !Array.isArray(value) ||
+    value.length === 0 ||
+    value.length > MAX_VIDEO_PARTS
+  )
+    return null;
   const parts: Array<Videos.VideoPart> = [];
   for (const [index, entry] of (value as Array<unknown>).entries()) {
     if (!entry || typeof entry !== "object") return null;
     const { partNumber, etag } = entry as Record<string, unknown>;
-    if (partNumber !== index + 1 || typeof etag !== "string" || etag === "") return null;
+    if (partNumber !== index + 1 || typeof etag !== "string" || etag === "")
+      return null;
     parts.push({ partNumber, etag });
   }
   return parts;
@@ -669,7 +929,9 @@ async function handleVideoUpload(
   need: (docId: string, role: DocRole) => Promise<DocRole>,
 ): Promise<Response | null> {
   const { id, file, method, url } = route;
-  const routed = file ? ["PUT", "POST", "DELETE"].includes(method) : method === "POST";
+  const routed = file
+    ? ["PUT", "POST", "DELETE"].includes(method)
+    : method === "POST";
   if (!routed) return null;
   await need(id, "editor");
   if (!deps.videos) return error(503, "video_storage_unavailable");
@@ -693,7 +955,11 @@ async function handleVideoUpload(
     const uploadId = url.searchParams.get("uploadId");
     const partNumber = Number(url.searchParams.get("part"));
     if (!uploadId) return error(400, "invalid_upload");
-    if (!Number.isInteger(partNumber) || partNumber < 1 || partNumber > MAX_VIDEO_PARTS) {
+    if (
+      !Number.isInteger(partNumber) ||
+      partNumber < 1 ||
+      partNumber > MAX_VIDEO_PARTS
+    ) {
       return error(400, "invalid_part");
     }
     const length = Number(request.headers.get("Content-Length") ?? "0");
@@ -701,8 +967,15 @@ async function handleVideoUpload(
     if (!Number.isInteger(length) || length <= 0 || !request.body) {
       return error(400, "invalid_part");
     }
-    const etag = await deps.videos.uploadPart(key, uploadId, partNumber, request.body);
-    return etag === null ? error(404, "upload_not_found") : json({ partNumber, etag });
+    const etag = await deps.videos.uploadPart(
+      key,
+      uploadId,
+      partNumber,
+      request.body,
+    );
+    return etag === null
+      ? error(404, "upload_not_found")
+      : json({ partNumber, etag });
   }
 
   if (method === "POST") {
@@ -717,7 +990,9 @@ async function handleVideoUpload(
       uploadId,
       parts,
     });
-    return result.ok ? json({ url: result.url }, 201) : error(result.status, result.error);
+    return result.ok
+      ? json({ url: result.url }, 201)
+      : error(result.status, result.error);
   }
 
   const uploadId = url.searchParams.get("uploadId");
@@ -756,8 +1031,10 @@ async function handleDocThreads(
     const environmentId = str(body.environmentId);
     const threadId = str(body.threadId);
     // Thread titles can run long; the label only needs a recognisable start.
-    const title = typeof body.title === "string" ? body.title.trim().slice(0, 200) : "";
-    if (!environmentId || !threadId || !title) return error(400, "invalid_thread");
+    const title =
+      typeof body.title === "string" ? body.title.trim().slice(0, 200) : "";
+    if (!environmentId || !threadId || !title)
+      return error(400, "invalid_thread");
     const threads = await deps.rooms.threadOp(id, {
       op: { kind: "link", environmentId, threadId, title },
       origin: str(body.clientId),
@@ -781,7 +1058,12 @@ async function commentActor(
   docId: string,
   minimum: DocRole,
 ): Promise<Comments.CommentActor> {
-  const docRole = await Access.requireDocRole(deps.db, docId, principal.userId, minimum);
+  const docRole = await Access.requireDocRole(
+    deps.db,
+    docId,
+    principal.userId,
+    minimum,
+  );
   return principal.kind === "session"
     ? {
         kind: "person",
@@ -789,7 +1071,9 @@ async function commentActor(
         // A password session writes as ADMIN_SESSION_EMAIL, whatever OWNER_EMAILS says.
         emails: [
           ...(await Access.userEmails(deps.db, principal.userId, deps.owners)),
-          ...(Access.isAdmin(principal.userId) ? [Access.ADMIN_SESSION_EMAIL] : []),
+          ...(Access.isAdmin(principal.userId)
+            ? [Access.ADMIN_SESSION_EMAIL]
+            : []),
         ],
         docRole,
       }
@@ -797,7 +1081,11 @@ async function commentActor(
 }
 
 /** Exact text, not trimmed: anchors must match the tab character for character. */
-const anchorText = (value: unknown, max: number, required: boolean): string | null => {
+const anchorText = (
+  value: unknown,
+  max: number,
+  required: boolean,
+): string | null => {
   if (value === undefined && !required) return "";
   if (typeof value !== "string" || value.length > max) return null;
   return required && value.trim().length === 0 ? null : value;
@@ -823,23 +1111,34 @@ async function handleComments(
   if (resource === "docs" && id && sub === "comments" && method === "GET") {
     await actorOn(id, "viewer");
     const tabId = url.searchParams.get("tabId") ?? undefined;
-    return json({ comments: await Comments.listComments(deps.db, { docId: id, tabId }) });
+    return json({
+      comments: await Comments.listComments(deps.db, { docId: id, tabId }),
+    });
   }
 
   if (resource === "tabs" && id && sub === "comments" && method === "POST") {
     const body = await readJson(request);
     // A cell or label anchor; the quote then only labels the thread.
-    const structured = body.anchor == null ? null : parseStructuredAnchor(body.anchor);
-    if (body.anchor != null && structured === null) return error(400, "invalid_anchor");
-    const quote = anchorText(body.quote, Comments.MAX_QUOTE_LENGTH, structured === null);
+    const structured =
+      body.anchor == null ? null : parseStructuredAnchor(body.anchor);
+    if (body.anchor != null && structured === null)
+      return error(400, "invalid_anchor");
+    const quote = anchorText(
+      body.quote,
+      Comments.MAX_QUOTE_LENGTH,
+      structured === null,
+    );
     const prefix = anchorText(body.prefix, Comments.MAX_CONTEXT_LENGTH, false);
     const suffix = anchorText(body.suffix, Comments.MAX_CONTEXT_LENGTH, false);
-    if (quote === null || prefix === null || suffix === null) return error(400, "invalid_anchor");
+    if (quote === null || prefix === null || suffix === null)
+      return error(400, "invalid_anchor");
     const text = str(body.body, Comments.MAX_COMMENT_LENGTH);
     if (!text) return error(400, "invalid_body");
     const tab = await Docs.getTab(deps.db, id);
     const actor = await actorOn(tab.docId, "commenter");
-    const target = structured ? resolveStructuredAnchor(tab.markdown, structured) : null;
+    const target = structured
+      ? resolveStructuredAnchor(tab.markdown, structured)
+      : null;
     // A structured anchor must name a part that exists; there is no text to fall back on.
     if (structured && !target) return error(409, "anchor_not_found");
     // Imports ask for this so a comment whose passage is gone is reported, not stored detached.
@@ -855,7 +1154,11 @@ async function handleComments(
         kind: "create",
         tabId: id,
         anchor: target
-          ? { quote: Comments.structuredQuote(target, quote), prefix: "", suffix: "" }
+          ? {
+              quote: Comments.structuredQuote(target, quote),
+              prefix: "",
+              suffix: "",
+            }
           : { quote, prefix, suffix },
         structuredAnchor: structured,
         body: text,
@@ -875,14 +1178,20 @@ async function handleComments(
     const text = str(body.body, Comments.MAX_COMMENT_LENGTH);
     if (!text) return error(400, "invalid_body");
     const result = await deps.rooms.commentOp(existing.docId, {
-      op: { kind: "reply", commentId: id, body: text, author: Comments.actorAuthor(actor) },
+      op: {
+        kind: "reply",
+        commentId: id,
+        body: text,
+        author: Comments.actorAuthor(actor),
+      },
       origin: str(body.clientId),
     });
     return json(result, 201);
   }
 
   if (!sub && method === "PATCH") {
-    if (!Comments.canEditComment(actor, existing)) return error(403, "forbidden");
+    if (!Comments.canEditComment(actor, existing))
+      return error(403, "forbidden");
     const body = await readJson(request);
     const text = str(body.body, Comments.MAX_COMMENT_LENGTH);
     if (!text) return error(400, "invalid_body");
@@ -903,7 +1212,8 @@ async function handleComments(
   }
 
   if (!sub && method === "DELETE") {
-    if (!Comments.canDeleteComment(actor, existing)) return error(403, "forbidden");
+    if (!Comments.canDeleteComment(actor, existing))
+      return error(403, "forbidden");
     const result = await deps.rooms.commentOp(existing.docId, {
       op: { kind: "delete", commentId: id },
       origin: url.searchParams.get("clientId"),
@@ -928,7 +1238,12 @@ async function handleMembers(
   deps: ApiDeps,
 ): Promise<Response | null> {
   const { id, subId, method, principal } = route;
-  const role = await Access.requireDocRole(deps.db, id, principal.userId, "viewer");
+  const role = await Access.requireDocRole(
+    deps.db,
+    id,
+    principal.userId,
+    "viewer",
+  );
   const members = () => Access.listMembers(deps.db, id, deps.owners);
 
   if (!subId && method === "GET") return json({ members: await members() });
@@ -951,7 +1266,10 @@ async function handleMembers(
     const emailDelivery = created
       ? await inviteByEmail(deps, { docId: id, to: member.email, principal })
       : null;
-    return json({ member, members: await members(), emailDelivery }, created ? 201 : 200);
+    return json(
+      { member, members: await members(), emailDelivery },
+      created ? 201 : 200,
+    );
   }
 
   if (subId && method === "PATCH") {
@@ -982,7 +1300,11 @@ async function handleMembers(
 /** Tells a newly added person the doc is theirs to open. The share stands whatever this returns. */
 export async function inviteByEmail(
   deps: ApiDeps,
-  input: { readonly docId: string; readonly to: string; readonly principal: Auth.Principal },
+  input: {
+    readonly docId: string;
+    readonly to: string;
+    readonly principal: Auth.Principal;
+  },
 ): Promise<EmailDelivery> {
   const [inviter, { doc, tabs }] = await Promise.all([
     Access.getUser(deps.db, input.principal.userId, deps.owners),
@@ -997,7 +1319,11 @@ export async function inviteByEmail(
   });
 }
 
-async function handleAuth(request: Request, path: string, deps: ApiDeps): Promise<Response> {
+async function handleAuth(
+  request: Request,
+  path: string,
+  deps: ApiDeps,
+): Promise<Response> {
   if (path === "/api/auth/config" && request.method === "GET") {
     return json({
       emailEnabled: deps.emailEnabled,
@@ -1014,9 +1340,14 @@ async function handleAuth(request: Request, path: string, deps: ApiDeps): Promis
     if (!email) return error(400, "invalid_email");
     // Answers the same for every address, so it reveals nothing about who has access.
     if (!deps.emailEnabled) return error(503, "email_not_configured");
-    const code = await Auth.issueLoginCode(deps.db, { email, owners: deps.owners, now });
+    const code = await Auth.issueLoginCode(deps.db, {
+      email,
+      owners: deps.owners,
+      now,
+    });
     // Delivery happens after the response so owners and strangers answer alike.
-    if (code) deps.waitUntil(deps.sendLoginCode(Auth.normalizeEmail(email), code));
+    if (code)
+      deps.waitUntil(deps.sendLoginCode(Auth.normalizeEmail(email), code));
     return json({ ok: true });
   }
 
@@ -1024,7 +1355,12 @@ async function handleAuth(request: Request, path: string, deps: ApiDeps): Promis
     const email = str(body.email, 320);
     const code = str(body.code, 12);
     if (!email || !code) return error(401, "invalid_code");
-    const token = await Auth.verifyLoginCode(deps.db, { email, code, owners: deps.owners, now });
+    const token = await Auth.verifyLoginCode(deps.db, {
+      email,
+      code,
+      owners: deps.owners,
+      now,
+    });
     if (!token) return error(401, "invalid_code");
     return json({ email: Auth.normalizeEmail(email) }, 200, {
       "Set-Cookie": Auth.sessionCookie(token, Auth.SESSION_TTL_MS),
@@ -1044,7 +1380,9 @@ async function handleAuth(request: Request, path: string, deps: ApiDeps): Promis
       now,
     });
     if (!result.ok) {
-      return result.locked ? error(429, "too_many_attempts") : error(401, "invalid_password");
+      return result.locked
+        ? error(429, "too_many_attempts")
+        : error(401, "invalid_password");
     }
     return json({ email: Access.ADMIN_SESSION_EMAIL }, 200, {
       "Set-Cookie": Auth.sessionCookie(result.token, Auth.SESSION_TTL_MS),

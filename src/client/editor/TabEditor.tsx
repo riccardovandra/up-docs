@@ -1,6 +1,12 @@
 import type { Editor } from "@tiptap/core";
 import { EditorContent, useEditor } from "@tiptap/react";
-import { Component, type ReactNode, useEffect, useLayoutEffect, useRef } from "react";
+import {
+  Component,
+  type ReactNode,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+} from "react";
 
 import type { EmbedLoader } from "./embed/embedSupport.ts";
 import { createEditorExtensions } from "./extensions.ts";
@@ -17,6 +23,8 @@ interface TabEditorProps {
   /** Uploads a pasted or dropped image; resolves to its URL. */
   readonly uploadImage: (file: File) => Promise<string>;
   readonly onUploadError: (error: unknown) => void;
+  /** Copies an image link into the doc; absent where there is no server to copy it. */
+  readonly importImageLink?: (url: string) => Promise<string>;
   /** Takes a pasted or dropped video; `at` is the drop position. */
   readonly onVideoFile: (file: File, at: number | null) => void;
   /** The doc's saved copies of embedded posts; absent where there are none (project files). */
@@ -27,7 +35,10 @@ interface TabEditorProps {
 export function TabEditorFallback(props: { readonly markdown: string }) {
   return (
     <div className="tab-editor-fallback" role="alert">
-      <p>This tab could not be opened in the editor. Its text is unchanged and shown below.</p>
+      <p>
+        This tab could not be opened in the editor. Its text is unchanged and
+        shown below.
+      </p>
       <pre>{props.markdown}</pre>
     </div>
   );
@@ -58,7 +69,8 @@ export class TabEditorBoundary extends Component<
   }
 
   override render() {
-    if (this.state.failed) return <TabEditorFallback markdown={this.props.markdown} />;
+    if (this.state.failed)
+      return <TabEditorFallback markdown={this.props.markdown} />;
     return this.props.children;
   }
 }
@@ -83,11 +95,21 @@ function MarkdownEditor(props: TabEditorProps) {
     onChange.current = props.onChange;
   });
   const knownMarkdown = useRef(props.markdown);
-  const images = useRef({ upload: props.uploadImage, onUploadError: props.onUploadError });
+  const images = useRef({
+    upload: props.uploadImage,
+    onUploadError: props.onUploadError,
+    importLink: props.importImageLink,
+  });
+  // Fixed for the editor's life, like hasEmbeds below.
+  const canImportLinks = useRef(props.importImageLink !== undefined).current;
   const onVideoFile = useRef(props.onVideoFile);
   const loadEmbed = useRef(props.loadEmbed);
   useLayoutEffect(() => {
-    images.current = { upload: props.uploadImage, onUploadError: props.onUploadError };
+    images.current = {
+      upload: props.uploadImage,
+      onUploadError: props.onUploadError,
+      importLink: props.importImageLink,
+    };
     onVideoFile.current = props.onVideoFile;
     loadEmbed.current = props.loadEmbed;
   });
@@ -99,12 +121,21 @@ function MarkdownEditor(props: TabEditorProps) {
       {
         upload: (file) => images.current.upload(file),
         onUploadError: (error) => images.current.onUploadError(error),
+        importLink: canImportLinks
+          ? (url) =>
+              images.current.importLink?.(url) ??
+              Promise.reject(new Error("no imports"))
+          : null,
       },
-      { onFiles: (files, at) => files.forEach((file) => onVideoFile.current(file, at)) },
+      {
+        onFiles: (files, at) =>
+          files.forEach((file) => onVideoFile.current(file, at)),
+      },
       {
         load: hasEmbeds
           ? (url, refresh) =>
-              loadEmbed.current?.(url, refresh) ?? Promise.reject(new Error("no embeds"))
+              loadEmbed.current?.(url, refresh) ??
+              Promise.reject(new Error("no embeds"))
           : null,
       },
     ),
@@ -120,7 +151,8 @@ function MarkdownEditor(props: TabEditorProps) {
   });
 
   useEffect(() => {
-    if (editor.isEditable !== props.editable) editor.setEditable(props.editable, false);
+    if (editor.isEditable !== props.editable)
+      editor.setEditable(props.editable, false);
   }, [editor, props.editable]);
 
   const { onEditor } = props;
@@ -142,7 +174,10 @@ function MarkdownEditor(props: TabEditorProps) {
     editor
       .chain()
       .setMeta(EXTERNAL_CONTENT_META, true)
-      .setContent(latestMarkdown.current, { contentType: "markdown", emitUpdate: false })
+      .setContent(latestMarkdown.current, {
+        contentType: "markdown",
+        emitUpdate: false,
+      })
       .run();
   }, [editor, props.revision]);
 

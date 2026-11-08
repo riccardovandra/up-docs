@@ -294,7 +294,70 @@ async function mainFlow(): Promise<void> {
           replace: block,
         });
         const { tab } = await api("GET", `/api/tabs/${tabId}`);
-        check(tab.markdown.includes(block), "embed block not stored as written");
+        check(
+          tab.markdown.includes(block),
+          "embed block not stored as written",
+        );
+      });
+      // Reaches Google from the Worker, so it fails if that image moves.
+      const remoteImage =
+        "https://www.google.com/images/branding/googlelogo/1x/googlelogo_color_272x92dp.png";
+      await step("mcp copies an image link (import_image)", async () => {
+        const result = await callTool("import_image", {
+          docId,
+          url: remoteImage,
+          alt: "Logo",
+        });
+        check(
+          typeof result.src === "string" &&
+            result.src.startsWith(`/api/images/${docId}/`),
+          "no copy path",
+        );
+        const response = await fetch(`${base}${result.src}`, {
+          headers: { Cookie: session },
+        });
+        check(response.ok, `copy not served: ${response.status}`);
+        await response.body?.cancel();
+      });
+      await step("mcp write saves a copy of a remote image", async () => {
+        const result = await callTool("edit_tab", {
+          tabId,
+          find: "# Smoke",
+          replace: `# Smoke\n\n![Logo](${remoteImage})`,
+        });
+        check(
+          result.images?.imported?.length === 1,
+          "image not reported as copied",
+        );
+        const { tab } = await api("GET", `/api/tabs/${tabId}`);
+        check(
+          tab.markdown.includes(`![Logo](/api/images/${docId}/`) &&
+            !tab.markdown.includes(remoteImage),
+          "tab still holds the remote link",
+        );
+      });
+      await step("mcp upload link takes a file once", async () => {
+        const prepared = await callTool("prepare_image_upload", { docId });
+        const put = () =>
+          fetch(prepared.uploadUrl, {
+            method: "PUT",
+            headers: { "Content-Type": "image/png" },
+            body: PNG,
+          });
+        const first = await put();
+        const data = (await first.json().catch(() => ({}))) as { url?: string };
+        check(first.status === 201 && data.url, `upload: ${first.status}`);
+        const back = await fetch(`${base}${data.url}`, {
+          headers: { Cookie: session },
+        });
+        check(
+          back.ok &&
+            sha256(new Uint8Array(await back.arrayBuffer())) === sha256(PNG),
+          "uploaded file differs",
+        );
+        const second = await put();
+        await second.body?.cancel();
+        check(second.status === 404, `second upload: ${second.status}`);
       });
       // Reaches X from the Worker, so it fails if X stops answering.
       await step("save a copy of an X post", async () => {

@@ -15,7 +15,10 @@ import {
   parseStructuredAnchor,
   resolveStructuredAnchor,
 } from "../shared/anchors.ts";
-import { MAX_PROJECT_KEY_LENGTH, normalizeProjectKey } from "../shared/embed.ts";
+import {
+  MAX_PROJECT_KEY_LENGTH,
+  normalizeProjectKey,
+} from "../shared/embed.ts";
 import {
   DOC_STATUSES,
   docGroupArg,
@@ -43,22 +46,29 @@ import {
   prepareClaudeDocPush,
   type WidgetLink,
 } from "../shared/claudeDocs/toClaudeDoc.ts";
+import { IMAGE_TYPES, MAX_IMAGE_BYTES } from "../shared/images.ts";
 import { groupThreads } from "../shared/threads.ts";
 import { describeWidgetProblems } from "../shared/widget/check.ts";
 import { findWidgetFences, spliceFenceSource } from "../shared/widget/fence.ts";
 import { MAX_LABEL_LENGTH, rewriteLabel } from "../shared/widget/rewrite.ts";
 import { analyzeWidget, formatDiagnostic } from "../shared/widget/validate.ts";
 import * as Access from "./access.ts";
-import { inviteByEmail, type ApiDeps } from "./api.ts";
+import { importDeps, inviteByEmail, type ApiDeps } from "./api.ts";
 import type { Principal } from "./auth.ts";
 import * as Comments from "./comments.ts";
 import * as DocThreads from "./docThreads.ts";
 import * as Docs from "./docs.ts";
+import * as ImageImport from "./imageImport.ts";
 import { checkEmbedsIn } from "../shared/embeds.ts";
 import { checkVideosIn } from "../shared/video.ts";
 import { widgetProblems } from "./widgets.ts";
 import { FORMAT_GUIDES, FORMAT_TOPICS, type FormatTopic } from "./mcpGuide.ts";
-import { DOC_TYPES, docTypeChecklist, docTypeSkeleton, isDocType } from "./docTypes.ts";
+import {
+  DOC_TYPES,
+  docTypeChecklist,
+  docTypeSkeleton,
+  isDocType,
+} from "./docTypes.ts";
 import * as Facts from "./projectFacts.ts";
 
 const MAX_MARKDOWN_LENGTH = 1_000_000;
@@ -76,7 +86,11 @@ export class McpToolError extends Error {
   }
 }
 
-function fail(error: string, message: string, extra: Record<string, unknown> = {}): never {
+function fail(
+  error: string,
+  message: string,
+  extra: Record<string, unknown> = {},
+): never {
   throw new McpToolError({ error, message, ...extra });
 }
 
@@ -93,24 +107,45 @@ type Args = Record<string, unknown>;
 
 function requireString(args: Args, key: string, max = 200): string {
   const value = args[key];
-  if (typeof value !== "string" || value.trim().length === 0 || value.length > max) {
-    return fail("invalid_argument", `"${key}" must be a non-empty string up to ${max} characters.`);
+  if (
+    typeof value !== "string" ||
+    value.trim().length === 0 ||
+    value.length > max
+  ) {
+    return fail(
+      "invalid_argument",
+      `"${key}" must be a non-empty string up to ${max} characters.`,
+    );
   }
   return value.trim();
 }
 
-function optionalString(args: Args, key: string, max = 200): string | undefined {
-  return args[key] === undefined || args[key] === null ? undefined : requireString(args, key, max);
+function optionalString(
+  args: Args,
+  key: string,
+  max = 200,
+): string | undefined {
+  return args[key] === undefined || args[key] === null
+    ? undefined
+    : requireString(args, key, max);
 }
 
 /** Markdown is taken verbatim, so whitespace and empty strings survive. */
-function markdownArg(args: Args, key: string, required: boolean): string | undefined {
+function markdownArg(
+  args: Args,
+  key: string,
+  required: boolean,
+): string | undefined {
   const value = args[key];
   if (value === undefined || value === null) {
-    return required ? fail("invalid_argument", `"${key}" is required.`) : undefined;
+    return required
+      ? fail("invalid_argument", `"${key}" is required.`)
+      : undefined;
   }
-  if (typeof value !== "string") return fail("invalid_argument", `"${key}" must be a string.`);
-  if (value.length > MAX_MARKDOWN_LENGTH) return fail("too_large", `"${key}" is too large.`);
+  if (typeof value !== "string")
+    return fail("invalid_argument", `"${key}" must be a string.`);
+  if (value.length > MAX_MARKDOWN_LENGTH)
+    return fail("too_large", `"${key}" is too large.`);
   return value;
 }
 
@@ -126,13 +161,22 @@ function requireVersion(args: Args, key: string): number {
 function widgetMapArg(args: Args): Record<string, WidgetLink> {
   const value = args.widgetMap;
   const invalid = () =>
-    fail("invalid_argument", '"widgetMap" must be an object of { nodeId, hash, pub? } by diagram id.');
-  if (!value || typeof value !== "object" || Array.isArray(value)) return invalid();
+    fail(
+      "invalid_argument",
+      '"widgetMap" must be an object of { nodeId, hash, pub? } by diagram id.',
+    );
+  if (!value || typeof value !== "object" || Array.isArray(value))
+    return invalid();
   const map: Record<string, WidgetLink> = {};
   for (const [slug, entry] of Object.entries(value)) {
     if (!entry || typeof entry !== "object") return invalid();
     const { nodeId, hash, pub } = entry as Record<string, unknown>;
-    if (typeof nodeId !== "string" || !nodeId || typeof hash !== "string" || !hash) {
+    if (
+      typeof nodeId !== "string" ||
+      !nodeId ||
+      typeof hash !== "string" ||
+      !hash
+    ) {
       return invalid();
     }
     if (pub === undefined || pub === null) {
@@ -140,7 +184,10 @@ function widgetMapArg(args: Args): Record<string, WidgetLink> {
     } else if (typeof pub === "number" && Number.isInteger(pub) && pub >= 0) {
       map[slug] = { nodeId, hash, pub };
     } else {
-      return fail("invalid_argument", `"widgetMap.${slug}.pub" must be a non-negative integer.`);
+      return fail(
+        "invalid_argument",
+        `"widgetMap.${slug}.pub" must be a non-negative integer.`,
+      );
     }
   }
   return map;
@@ -151,7 +198,10 @@ function projectKeyArg(args: Args): string | undefined {
   if (raw === undefined) return undefined;
   return (
     normalizeProjectKey(raw) ??
-    fail("invalid_argument", '"projectKey" must be a key from list_projects or docs_cloud_project.')
+    fail(
+      "invalid_argument",
+      '"projectKey" must be a key from list_projects or docs_cloud_project.',
+    )
   );
 }
 
@@ -160,7 +210,10 @@ function projectKeyArg(args: Args): string | undefined {
  * and `projectName` when new, by the admin only), else no project. Null means
  * no project. Someone else only files into a project they can already see.
  */
-async function targetProject(ctx: ToolContext, args: Args): Promise<string | null> {
+async function targetProject(
+  ctx: ToolContext,
+  args: Args,
+): Promise<string | null> {
   const projectId = optionalString(args, "projectId");
   const projectKey = projectKeyArg(args);
   if (projectId !== undefined && projectKey !== undefined) {
@@ -181,7 +234,8 @@ async function targetProject(ctx: ToolContext, args: Args): Promise<string | nul
     }
     return existing.id;
   }
-  if (!Access.isAdmin(userId)) fail("forbidden", "Only the workspace admin creates projects.");
+  if (!Access.isAdmin(userId))
+    fail("forbidden", "Only the workspace admin creates projects.");
   const project = await Docs.ensureProject(ctx.deps.db, {
     key: projectKey,
     name: optionalString(args, "projectName"),
@@ -222,6 +276,33 @@ function checkMediaBlocks(markdown: string, previous?: string): void {
   }
 }
 
+/**
+ * Copies the remote images in markdown an agent writes (`![alt](https://...)`)
+ * into the doc, so the write saves our copies. Links that fail stay as written
+ * and come back in the report, which is null when there were none.
+ */
+async function withImportedImages(
+  ctx: ToolContext,
+  docId: string,
+  markdown: string,
+): Promise<{
+  readonly markdown: string;
+  readonly images: ImageImport.ImportReport | null;
+}> {
+  const { markdown: rewritten, report } =
+    await ImageImport.importMarkdownImages(importDeps(ctx.deps, ctx.origin), {
+      docId,
+      markdown,
+    });
+  if (rewritten.length > MAX_MARKDOWN_LENGTH)
+    fail("too_large", "The tab would be too large.");
+  return { markdown: rewritten, images: report };
+}
+
+/** The `images` field of a write's result, present only when it had image links. */
+const imagesField = (images: ImageImport.ImportReport | null) =>
+  images ? { images } : {};
+
 const listIds = (items: ReadonlyArray<{ readonly id: string }>) => {
   const ids = items.slice(0, 20).map((item) => `"${item.id}"`);
   return items.length > 20 ? `${ids.join(", ")}, ...` : ids.join(", ");
@@ -236,14 +317,21 @@ async function changeTable<A>(
   ctx: ToolContext,
   tabId: string,
   tableId: string,
-  change: (table: RichTable) => { readonly table: RichTable; readonly result: A },
+  change: (table: RichTable) => {
+    readonly table: RichTable;
+    readonly result: A;
+  },
 ): Promise<{ readonly tab: Tab; readonly result: A }> {
   let tab = await tabWith(ctx, tabId, "editor");
   for (let attempt = 0; attempt < EDIT_ATTEMPTS; attempt += 1) {
     const blocks = findTables(tab.markdown);
-    const block = blocks.find(({ parsed }) => parsed.ok && parsed.table.id === tableId);
+    const block = blocks.find(
+      ({ parsed }) => parsed.ok && parsed.table.id === tableId,
+    );
     if (!block?.parsed.ok) {
-      const ids = blocks.flatMap(({ parsed }) => (parsed.ok ? [parsed.table] : []));
+      const ids = blocks.flatMap(({ parsed }) =>
+        parsed.ok ? [parsed.table] : [],
+      );
       return fail(
         "table_not_found",
         `No t3-table with id "${tableId}" in this tab${ids.length > 0 ? ` (tables: ${listIds(ids)})` : ""}. Re-read it with read_doc.`,
@@ -254,11 +342,13 @@ async function changeTable<A>(
     try {
       changed = change(block.parsed.table);
     } catch (cause) {
-      if (cause instanceof TableError) return fail("invalid_value", cause.message);
+      if (cause instanceof TableError)
+        return fail("invalid_value", cause.message);
       throw cause;
     }
     const markdown = replaceTable(tab.markdown, block, changed.table);
-    if (markdown.length > MAX_MARKDOWN_LENGTH) fail("too_large", "The tab would be too large.");
+    if (markdown.length > MAX_MARKDOWN_LENGTH)
+      fail("too_large", "The tab would be too large.");
     const written = await ctx.deps.rooms.writeTab(tab.docId, {
       tabId,
       baseVersion: tab.version,
@@ -268,18 +358,25 @@ async function changeTable<A>(
     if (written.ok) return { tab: written.tab, result: changed.result };
     tab = written.conflict;
   }
-  return fail("busy", "The tab kept changing while editing the table. Try again.");
+  return fail(
+    "busy",
+    "The tab kept changing while editing the table. Try again.",
+  );
 }
 
 function findRow(table: RichTable, rowId: string) {
   const index = table.rows.findIndex((row) => row.id === rowId);
-  if (index === -1) throw new TableError(`No row "${rowId}" (rows: ${listIds(table.rows)}).`);
+  if (index === -1)
+    throw new TableError(`No row "${rowId}" (rows: ${listIds(table.rows)}).`);
   return index;
 }
 
 function findColumn(table: RichTable, colId: string): TableColumn {
   const column = table.columns.find((candidate) => candidate.id === colId);
-  if (!column) throw new TableError(`No column "${colId}" (columns: ${listIds(table.columns)}).`);
+  if (!column)
+    throw new TableError(
+      `No column "${colId}" (columns: ${listIds(table.columns)}).`,
+    );
   return column;
 }
 
@@ -290,7 +387,11 @@ function assertWidgets(markdown: string, previous?: string): void {
   fail(
     "widget_invalid",
     `Nothing was written: a diagram breaks the t3-widget format.\n${describeWidgetProblems(problems)}`,
-    { problems, guide: 'format_guide {topic: "diagram"} has the full spec and a valid example.' },
+    {
+      problems,
+      guide:
+        'format_guide {topic: "diagram"} has the full spec and a valid example.',
+    },
   );
 }
 
@@ -298,18 +399,28 @@ async function load<A>(promise: Promise<A>, what: string): Promise<A> {
   try {
     return await promise;
   } catch (cause) {
-    if (cause instanceof Docs.NotFoundError) return fail("not_found", `No ${what} with that id.`);
+    if (cause instanceof Docs.NotFoundError)
+      return fail("not_found", `No ${what} with that id.`);
     if (cause instanceof Docs.InvalidMoveError) {
-      return fail("invalid_move", "A tab cannot move under itself or one of its own children.");
+      return fail(
+        "invalid_move",
+        "A tab cannot move under itself or one of its own children.",
+      );
     }
     if (cause instanceof Docs.LastTabError) {
       return fail("last_tab", "A doc must keep at least one top-level tab.");
     }
     if (cause instanceof Access.ForbiddenError) {
-      return fail("forbidden", `This needs ${cause.required} access to the doc.`);
+      return fail(
+        "forbidden",
+        `This needs ${cause.required} access to the doc.`,
+      );
     }
     if (cause instanceof Access.ReservedEmailError) {
-      return fail("invalid_argument", "That address is reserved and cannot be shared with.");
+      return fail(
+        "invalid_argument",
+        "That address is reserved and cannot be shared with.",
+      );
     }
     if (cause instanceof Access.LastOwnerError) {
       return fail("last_owner", "A doc must keep at least one owner.");
@@ -321,7 +432,10 @@ async function load<A>(promise: Promise<A>, what: string): Promise<A> {
       );
     }
     if (cause instanceof Access.SelfShareError) {
-      return fail("self", "That address signs in as you, so it already has your access.");
+      return fail(
+        "self",
+        "That address signs in as you, so it already has your access.",
+      );
     }
     throw cause;
   }
@@ -329,10 +443,17 @@ async function load<A>(promise: Promise<A>, what: string): Promise<A> {
 
 /** The token user's role on the doc, failing when it is below `minimum`. */
 const need = (ctx: ToolContext, docId: string, minimum: DocRole) =>
-  load(Access.requireDocRole(ctx.deps.db, docId, ctx.principal.userId, minimum), "doc");
+  load(
+    Access.requireDocRole(ctx.deps.db, docId, ctx.principal.userId, minimum),
+    "doc",
+  );
 
 /** A tab the token user may act on with `minimum`. */
-async function tabWith(ctx: ToolContext, tabId: string, minimum: DocRole): Promise<Tab> {
+async function tabWith(
+  ctx: ToolContext,
+  tabId: string,
+  minimum: DocRole,
+): Promise<Tab> {
   const tab = await load(Docs.getTab(ctx.deps.db, tabId), "tab");
   await need(ctx, tab.docId, minimum);
   return tab;
@@ -373,18 +494,25 @@ function groupArg(args: Args, required: boolean): string | null | undefined {
       `"group" must be text of at most ${MAX_DOC_GROUP_LENGTH} characters, or null.`,
     );
   }
-  if (group === undefined && required) fail("invalid_argument", 'Pass "group", or null for none.');
+  if (group === undefined && required)
+    fail("invalid_argument", 'Pass "group", or null for none.');
   return group;
 }
 
-const docSummary = (ctx: ToolContext, doc: DocSummary, firstTabId: string | undefined) => ({
+const docSummary = (
+  ctx: ToolContext,
+  doc: DocSummary,
+  firstTabId: string | undefined,
+) => ({
   docId: doc.id,
   projectId: doc.projectId,
   title: doc.title,
   status: doc.status,
   group: doc.group,
   updatedAt: new Date(doc.updatedAt).toISOString(),
-  url: firstTabId ? tabUrl(ctx, { docId: doc.id, id: firstTabId }) : `${ctx.origin}/d/${doc.id}`,
+  url: firstTabId
+    ? tabUrl(ctx, { docId: doc.id, id: firstTabId })
+    : `${ctx.origin}/d/${doc.id}`,
 });
 
 /** A project's facts as agents get them with a doc. */
@@ -405,15 +533,26 @@ async function existingProject(ctx: ToolContext, args: Args) {
     projectId !== undefined
       ? await load(Docs.getProject(ctx.deps.db, projectId), "project")
       : await Docs.findProjectByKey(ctx.deps.db, projectKey!);
-  if (!project || !(await Access.canSeeProject(ctx.deps.db, project.id, ctx.principal.userId))) {
+  if (
+    !project ||
+    !(await Access.canSeeProject(ctx.deps.db, project.id, ctx.principal.userId))
+  ) {
     return fail("not_found", "No project with that id or key.");
   }
   return project;
 }
 
-async function requireFactEditor(ctx: ToolContext, projectId: string): Promise<void> {
-  if (!(await Facts.canEditFacts(ctx.deps.db, projectId, ctx.principal.userId))) {
-    fail("forbidden", "Changing project facts needs editor access to a doc in the project.");
+async function requireFactEditor(
+  ctx: ToolContext,
+  projectId: string,
+): Promise<void> {
+  if (
+    !(await Facts.canEditFacts(ctx.deps.db, projectId, ctx.principal.userId))
+  ) {
+    fail(
+      "forbidden",
+      "Changing project facts needs editor access to a doc in the project.",
+    );
   }
 }
 
@@ -424,7 +563,9 @@ function factTextArg(args: Args, key: string): string {
 }
 
 /** Tabs in reading order: each tab followed by its children, siblings by position. */
-function readingOrder(tabs: ReadonlyArray<Tab>): ReadonlyArray<{ tab: Tab; depth: number }> {
+function readingOrder(
+  tabs: ReadonlyArray<Tab>,
+): ReadonlyArray<{ tab: Tab; depth: number }> {
   const children = new Map<string | null, Array<Tab>>();
   for (const tab of tabs) {
     const siblings = children.get(tab.parentTabId) ?? [];
@@ -433,7 +574,9 @@ function readingOrder(tabs: ReadonlyArray<Tab>): ReadonlyArray<{ tab: Tab; depth
   }
   const ordered: Array<{ tab: Tab; depth: number }> = [];
   const visit = (parentId: string | null, depth: number) => {
-    const siblings = (children.get(parentId) ?? []).toSorted((a, b) => a.position - b.position);
+    const siblings = (children.get(parentId) ?? []).toSorted(
+      (a, b) => a.position - b.position,
+    );
     for (const tab of siblings) {
       ordered.push({ tab, depth });
       visit(tab.id, depth + 1);
@@ -445,7 +588,11 @@ function readingOrder(tabs: ReadonlyArray<Tab>): ReadonlyArray<{ tab: Tab; depth
 
 function countOccurrences(haystack: string, needle: string): number {
   let count = 0;
-  for (let at = haystack.indexOf(needle); at !== -1; at = haystack.indexOf(needle, at + 1)) {
+  for (
+    let at = haystack.indexOf(needle);
+    at !== -1;
+    at = haystack.indexOf(needle, at + 1)
+  ) {
     count += 1;
   }
   return count;
@@ -466,13 +613,20 @@ async function commentWrite(
   docId: string,
   op: Comments.CommentOp,
 ): Promise<Comment> {
-  const result = await load(ctx.deps.rooms.commentOp(docId, { op, origin: null }), "comment");
+  const result = await load(
+    ctx.deps.rooms.commentOp(docId, { op, origin: null }),
+    "comment",
+  );
   if (result.kind === "deleted") throw new Error("unexpected comment delete");
   return result.comment;
 }
 
 /** Writes through the DocRoom, retrying a title-only change against the latest version. */
-async function renameTab(ctx: ToolContext, tabId: string, title: string): Promise<Tab> {
+async function renameTab(
+  ctx: ToolContext,
+  tabId: string,
+  title: string,
+): Promise<Tab> {
   let tab = await tabWith(ctx, tabId, "editor");
   for (let attempt = 0; attempt < EDIT_ATTEMPTS; attempt += 1) {
     const result = await ctx.deps.rooms.writeTab(tab.docId, {
@@ -497,7 +651,10 @@ function findDiagram(ctx: ToolContext, tab: Tab, diagramId: string) {
     });
   }
   if (matches.length > 1) {
-    fail("ambiguous_diagram", "Two diagrams in this tab share that id; rename one with edit_tab.");
+    fail(
+      "ambiguous_diagram",
+      "Two diagrams in this tab share that id; rename one with edit_tab.",
+    );
   }
   return matches[0]!;
 }
@@ -519,13 +676,16 @@ export const TOOLS = [
       "List a project's standing facts and house rules (tools it uses, names, things never to do). create_doc and read_doc return them too.",
     inputSchema: {
       type: "object",
-      properties: { projectKey: { type: "string" }, projectId: { type: "string" } },
+      properties: {
+        projectKey: { type: "string" },
+        projectId: { type: "string" },
+      },
     },
   },
   {
     name: "add_project_fact",
     description:
-      "Save a lasting fact about a project, in one sentence, when the user corrects one or states a rule (\"We use NocoDB, never Airtable\"). Every later doc in the project gets it. Not for one-off details of a single doc.",
+      'Save a lasting fact about a project, in one sentence, when the user corrects one or states a rule ("We use NocoDB, never Airtable"). Every later doc in the project gets it. Not for one-off details of a single doc.',
     inputSchema: {
       type: "object",
       properties: {
@@ -538,7 +698,8 @@ export const TOOLS = [
   },
   {
     name: "remove_project_fact",
-    description: "Remove a project fact that is wrong or no longer true, by factId.",
+    description:
+      "Remove a project fact that is wrong or no longer true, by factId.",
     inputSchema: {
       type: "object",
       properties: { factId: { type: "string" } },
@@ -587,13 +748,15 @@ export const TOOLS = [
         projectKey: { type: "string" },
         projectName: {
           type: "string",
-          description: "Name for a project created from projectKey; ignored when it exists.",
+          description:
+            "Name for a project created from projectKey; ignored when it exists.",
         },
         projectId: { type: "string" },
         title: { type: "string" },
         markdown: {
           type: "string",
-          description: "Initial markdown for the first tab. Omit it with type to get that type's skeleton.",
+          description:
+            "Initial markdown for the first tab. Omit it with type to get that type's skeleton.",
         },
         type: {
           type: "string",
@@ -603,7 +766,8 @@ export const TOOLS = [
         },
         group: {
           type: "string",
-          description: "Group inside the project, such as Strategy or Posts. Omit for none.",
+          description:
+            "Group inside the project, such as Strategy or Posts. Omit for none.",
         },
       },
       required: ["title"],
@@ -649,7 +813,8 @@ export const TOOLS = [
   },
   {
     name: "create_tab",
-    description: "Add a tab to a doc, after its siblings. Nest it with parentTabId.",
+    description:
+      "Add a tab to a doc, after its siblings. Nest it with parentTabId.",
     inputSchema: {
       type: "object",
       properties: {
@@ -669,7 +834,10 @@ export const TOOLS = [
       type: "object",
       properties: {
         tabId: { type: "string" },
-        find: { type: "string", description: "Exact text currently in the tab." },
+        find: {
+          type: "string",
+          description: "Exact text currently in the tab.",
+        },
         replace: { type: "string" },
       },
       required: ["tabId", "find", "replace"],
@@ -687,6 +855,33 @@ export const TOOLS = [
         baseVersion: { type: "integer" },
       },
       required: ["tabId", "markdown", "baseVersion"],
+    },
+  },
+  {
+    name: "import_image",
+    description:
+      "Copy an image from a public https link into a doc and get the markdown to insert. The doc keeps its own copy, so it survives the link expiring. Image links written with create_doc, create_tab, edit_tab or write_tab are copied the same way automatically; use this to get the path first. For a file on your machine, use prepare_image_upload.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        docId: { type: "string" },
+        url: {
+          type: "string",
+          description: "https link to a PNG, JPEG, GIF or WebP image.",
+        },
+        alt: { type: "string", description: "Alt text for the markdown line." },
+      },
+      required: ["docId", "url"],
+    },
+  },
+  {
+    name: "prepare_image_upload",
+    description:
+      "Get a one-time link to upload an image file (PNG, JPEG, GIF or WebP, up to 10 MB) from your machine into a doc, such as a screenshot or an exported chart. Send the file with the returned curl command; its JSON reply has the image's url and markdown, which you then insert with edit_tab. The link works once and expires after 10 minutes.",
+    inputSchema: {
+      type: "object",
+      properties: { docId: { type: "string" } },
+      required: ["docId"],
     },
   },
   {
@@ -714,7 +909,8 @@ export const TOOLS = [
   },
   {
     name: "delete_tab",
-    description: "Delete a tab and all of its child tabs. A doc keeps at least one top-level tab.",
+    description:
+      "Delete a tab and all of its child tabs. A doc keeps at least one top-level tab.",
     inputSchema: {
       type: "object",
       properties: { tabId: { type: "string" } },
@@ -726,7 +922,10 @@ export const TOOLS = [
     description: "Set a doc's status.",
     inputSchema: {
       type: "object",
-      properties: { docId: { type: "string" }, status: { type: "string", enum: DOC_STATUSES } },
+      properties: {
+        docId: { type: "string" },
+        status: { type: "string", enum: DOC_STATUSES },
+      },
       required: ["docId", "status"],
     },
   },
@@ -813,7 +1012,8 @@ export const TOOLS = [
         commentId: { type: "string" },
         lesson: {
           type: "string",
-          description: "A lasting fact this thread taught, saved to the project's facts.",
+          description:
+            "A lasting fact this thread taught, saved to the project's facts.",
         },
       },
       required: ["commentId"],
@@ -845,7 +1045,8 @@ export const TOOLS = [
   },
   {
     name: "unshare_doc",
-    description: "Remove a person's access to a doc. Owner only; a doc keeps at least one owner.",
+    description:
+      "Remove a person's access to a doc. Owner only; a doc keeps at least one owner.",
     inputSchema: {
       type: "object",
       properties: { docId: { type: "string" }, email: { type: "string" } },
@@ -872,7 +1073,10 @@ export const TOOLS = [
         tabId: { type: "string" },
         diagramId: { type: "string" },
         textId: { type: "string" },
-        value: { type: "string", description: "The label's new words, one line." },
+        value: {
+          type: "string",
+          description: "The label's new words, one line.",
+        },
       },
       required: ["tabId", "diagramId", "textId", "value"],
     },
@@ -880,14 +1084,24 @@ export const TOOLS = [
   {
     name: "prepare_claude_doc_push",
     description:
-      "Convert a tab for a push into a Claude Doc (claude.ai) as a tab. Returns the prose markdown with a <?claude block wN?> token per diagram, the embed blocks, each diagram's module code, conversion warnings, and the Claude Docs members to send: `batch` (mode \"new\", for batch(container={\"kind\":\"project\",\"id\":claudeDocId})) or `widgetCreates` (mode \"update\", when the tab was pushed to that Claude Doc before). Writes nothing. Needs editor access.",
+      'Convert a tab for a push into a Claude Doc (claude.ai) as a tab. Returns the prose markdown with a <?claude block wN?> token per diagram, the embed blocks, each diagram\'s module code, conversion warnings, and the Claude Docs members to send: `batch` (mode "new", for batch(container={"kind":"project","id":claudeDocId})) or `widgetCreates` (mode "update", when the tab was pushed to that Claude Doc before). Writes nothing. Needs editor access.',
     inputSchema: {
       type: "object",
       properties: {
         tabId: { type: "string" },
-        claudeDocId: { type: "string", description: "The Claude Doc's id (frame.slug)." },
-        tabName: { type: "string", description: "The Claude Doc tab name; defaults to the tab title." },
-        order: { type: "string", description: 'The new tab\'s order key in the Claude Doc; default "z0".' },
+        claudeDocId: {
+          type: "string",
+          description: "The Claude Doc's id (frame.slug).",
+        },
+        tabName: {
+          type: "string",
+          description: "The Claude Doc tab name; defaults to the tab title.",
+        },
+        order: {
+          type: "string",
+          description:
+            'The new tab\'s order key in the Claude Doc; default "z0".',
+        },
       },
       required: ["tabId", "claudeDocId"],
     },
@@ -902,11 +1116,18 @@ export const TOOLS = [
         tabId: { type: "string" },
         claudeDocId: { type: "string" },
         claudeDocUrl: { type: "string" },
-        claudeTabId: { type: "string", description: "The Claude Docs file id of the tab." },
-        claudeBodyId: { type: "string", description: "The Claude Docs prose node id." },
+        claudeTabId: {
+          type: "string",
+          description: "The Claude Docs file id of the tab.",
+        },
+        claudeBodyId: {
+          type: "string",
+          description: "The Claude Docs prose node id.",
+        },
         widgetMap: {
           type: "object",
-          description: "{ [diagram slug]: { nodeId, hash, pub? } }, hashes as prepare_claude_doc_push returned them, pub the widget's publish counter.",
+          description:
+            "{ [diagram slug]: { nodeId, hash, pub? } }, hashes as prepare_claude_doc_push returned them, pub the widget's publish counter.",
           additionalProperties: {
             type: "object",
             properties: {
@@ -921,8 +1142,14 @@ export const TOOLS = [
             required: ["nodeId", "hash"],
           },
         },
-        pushedVersion: { type: "integer", description: "The tab version that was pushed." },
-        pushedRev: { type: "integer", description: "The prose node rev from the last Claude Docs ack." },
+        pushedVersion: {
+          type: "integer",
+          description: "The tab version that was pushed.",
+        },
+        pushedRev: {
+          type: "integer",
+          description: "The prose node rev from the last Claude Docs ack.",
+        },
       },
       required: [
         "tabId",
@@ -940,11 +1167,17 @@ export const TOOLS = [
 
 type ToolName = (typeof TOOLS)[number]["name"];
 
-const handlers: Record<ToolName, (args: Args, ctx: ToolContext) => Promise<object>> = {
+const handlers: Record<
+  ToolName,
+  (args: Args, ctx: ToolContext) => Promise<object>
+> = {
   format_guide: async (args) => {
     const topic = requireString(args, "topic", 40);
     if (!Object.hasOwn(FORMAT_GUIDES, topic)) {
-      fail("invalid_argument", `"topic" must be one of: ${FORMAT_TOPICS.join(", ")}.`);
+      fail(
+        "invalid_argument",
+        `"topic" must be one of: ${FORMAT_TOPICS.join(", ")}.`,
+      );
     }
     return { topic, guide: FORMAT_GUIDES[topic as FormatTopic] };
   },
@@ -976,13 +1209,22 @@ const handlers: Record<ToolName, (args: Args, ctx: ToolContext) => Promise<objec
       }),
       "project",
     );
-    return { fact: { factId: fact.factId, projectId: fact.projectId, text: fact.text } };
+    return {
+      fact: { factId: fact.factId, projectId: fact.projectId, text: fact.text },
+    };
   },
 
   remove_project_fact: async (args, ctx) => {
     const factId = requireString(args, "factId");
     const fact = await Facts.getFact(ctx.deps.db, factId);
-    if (!fact || !(await Access.canSeeProject(ctx.deps.db, fact.projectId, ctx.principal.userId))) {
+    if (
+      !fact ||
+      !(await Access.canSeeProject(
+        ctx.deps.db,
+        fact.projectId,
+        ctx.principal.userId,
+      ))
+    ) {
       return fail("not_found", "No fact with that id.");
     }
     await requireFactEditor(ctx, fact.projectId);
@@ -1026,12 +1268,16 @@ const handlers: Record<ToolName, (args: Args, ctx: ToolContext) => Promise<objec
       docs = library.noProjectDocs;
     } else if (projectId !== undefined || projectKey !== undefined) {
       const project = library.projects.find(
-        (candidate) => candidate.id === projectId || candidate.key === projectKey,
+        (candidate) =>
+          candidate.id === projectId || candidate.key === projectKey,
       );
       if (!project) return fail("not_found", "No project with that id or key.");
       docs = project.docs;
     } else {
-      docs = [...library.projects.flatMap((project) => project.docs), ...library.noProjectDocs];
+      docs = [
+        ...library.projects.flatMap((project) => project.docs),
+        ...library.noProjectDocs,
+      ];
     }
     return {
       docs: docs
@@ -1048,7 +1294,10 @@ const handlers: Record<ToolName, (args: Args, ctx: ToolContext) => Promise<objec
     const title = requireString(args, "title");
     const type = args.type;
     if (type !== undefined && !isDocType(type)) {
-      fail("invalid_argument", `"type" must be one of: ${DOC_TYPES.join(", ")}.`);
+      fail(
+        "invalid_argument",
+        `"type" must be one of: ${DOC_TYPES.join(", ")}.`,
+      );
     }
     const markdown =
       markdownArg(args, "markdown", false) ??
@@ -1069,11 +1318,14 @@ const handlers: Record<ToolName, (args: Args, ctx: ToolContext) => Promise<objec
       "project",
     );
     let tab = created.tabs[0]!;
+    let images: ImageImport.ImportReport | null = null;
     if (markdown) {
+      const imported = await withImportedImages(ctx, created.doc.id, markdown);
+      images = imported.images;
       const result = await ctx.deps.rooms.writeTab(created.doc.id, {
         tabId: tab.id,
         baseVersion: tab.version,
-        markdown,
+        markdown: imported.markdown,
         origin: null,
       });
       if (result.ok) tab = result.tab;
@@ -1081,6 +1333,7 @@ const handlers: Record<ToolName, (args: Args, ctx: ToolContext) => Promise<objec
     return {
       doc: docSummary(ctx, created.doc, tab.id),
       tab: tabSummary(ctx, tab),
+      ...imagesField(images),
       projectFacts: await projectFactsFor(ctx, projectId),
       ...(type === undefined ? {} : { checklist: docTypeChecklist(type) }),
     };
@@ -1088,8 +1341,13 @@ const handlers: Record<ToolName, (args: Args, ctx: ToolContext) => Promise<objec
 
   move_doc: async (args, ctx) => {
     const docId = requireString(args, "docId");
-    const toNoProject = args.projectId === null && args.projectKey === undefined;
-    if (!toNoProject && args.projectId === undefined && args.projectKey === undefined) {
+    const toNoProject =
+      args.projectId === null && args.projectKey === undefined;
+    if (
+      !toNoProject &&
+      args.projectId === undefined &&
+      args.projectKey === undefined
+    ) {
       fail(
         "invalid_argument",
         'Pass "projectKey", "projectId", or "projectId": null for no project.',
@@ -1097,7 +1355,10 @@ const handlers: Record<ToolName, (args: Args, ctx: ToolContext) => Promise<objec
     }
     await need(ctx, docId, "editor");
     const projectId = toNoProject ? null : await targetProject(ctx, args);
-    const doc = await load(ctx.deps.rooms.setDocProject(docId, { projectId, origin: null }), "doc");
+    const doc = await load(
+      ctx.deps.rooms.setDocProject(docId, { projectId, origin: null }),
+      "doc",
+    );
     return { doc: docSummary(ctx, doc, undefined) };
   },
 
@@ -1155,31 +1416,47 @@ const handlers: Record<ToolName, (args: Args, ctx: ToolContext) => Promise<objec
     checkMediaBlocks(markdown);
     assertWidgets(markdown);
     if (parentTabId !== null) {
-      const parent = await load(Docs.getTab(ctx.deps.db, parentTabId), "parent tab");
-      if (parent.docId !== docId) fail("not_found", "The parent tab is in another doc.");
+      const parent = await load(
+        Docs.getTab(ctx.deps.db, parentTabId),
+        "parent tab",
+      );
+      if (parent.docId !== docId)
+        fail("not_found", "The parent tab is in another doc.");
     }
+    const imported = await withImportedImages(ctx, docId, markdown);
     const tab = await ctx.deps.rooms.createTab(docId, {
       parentTabId,
       title,
-      markdown,
+      markdown: imported.markdown,
       origin: null,
     });
-    return { tab: tabSummary(ctx, tab) };
+    return { tab: tabSummary(ctx, tab), ...imagesField(imported.images) };
   },
 
   edit_tab: async (args, ctx) => {
     const tabId = requireString(args, "tabId");
     const find = markdownArg(args, "find", true)!;
-    const replace = markdownArg(args, "replace", true)!;
-    if (find.length === 0) fail("invalid_argument", '"find" must not be empty.');
+    const replaceArg = markdownArg(args, "replace", true)!;
+    if (find.length === 0)
+      fail("invalid_argument", '"find" must not be empty.');
     let tab = await tabWith(ctx, tabId, "editor");
+    // Only the new text's image links are copied; the rest of the tab is as it was.
+    const { markdown: replace, images } = await withImportedImages(
+      ctx,
+      tab.docId,
+      replaceArg,
+    );
     for (let attempt = 0; attempt < EDIT_ATTEMPTS; attempt += 1) {
       const matches = countOccurrences(tab.markdown, find);
       if (matches === 0) {
-        fail("no_match", '"find" does not appear in the tab. Re-read it with read_doc.', {
-          version: tab.version,
-          url: tabUrl(ctx, tab),
-        });
+        fail(
+          "no_match",
+          '"find" does not appear in the tab. Re-read it with read_doc.',
+          {
+            version: tab.version,
+            url: tabUrl(ctx, tab),
+          },
+        );
       }
       if (matches > 1) {
         fail(
@@ -1189,8 +1466,12 @@ const handlers: Record<ToolName, (args: Args, ctx: ToolContext) => Promise<objec
         );
       }
       const at = tab.markdown.indexOf(find);
-      const markdown = tab.markdown.slice(0, at) + replace + tab.markdown.slice(at + find.length);
-      if (markdown.length > MAX_MARKDOWN_LENGTH) fail("too_large", "The tab would be too large.");
+      const markdown =
+        tab.markdown.slice(0, at) +
+        replace +
+        tab.markdown.slice(at + find.length);
+      if (markdown.length > MAX_MARKDOWN_LENGTH)
+        fail("too_large", "The tab would be too large.");
       checkTables(markdown, tab.markdown);
       checkMediaBlocks(markdown, tab.markdown);
       assertWidgets(markdown, tab.markdown);
@@ -1200,13 +1481,18 @@ const handlers: Record<ToolName, (args: Args, ctx: ToolContext) => Promise<objec
         markdown,
         origin: null,
       });
-      if (result.ok) return { tab: tabSummary(ctx, result.tab) };
+      if (result.ok)
+        return { tab: tabSummary(ctx, result.tab), ...imagesField(images) };
       // Someone else wrote first; apply the same edit to their version if it still fits.
       tab = result.conflict;
     }
-    return fail("busy", "The tab kept changing while editing. Re-read it and try again.", {
-      version: tab.version,
-    });
+    return fail(
+      "busy",
+      "The tab kept changing while editing. Re-read it and try again.",
+      {
+        version: tab.version,
+      },
+    );
   },
 
   write_tab: async (args, ctx) => {
@@ -1217,22 +1503,77 @@ const handlers: Record<ToolName, (args: Args, ctx: ToolContext) => Promise<objec
     checkTables(markdown, current.markdown);
     checkMediaBlocks(markdown, current.markdown);
     assertWidgets(markdown, current.markdown);
+    const imported = await withImportedImages(ctx, current.docId, markdown);
     const result = await ctx.deps.rooms.writeTab(current.docId, {
       tabId,
       baseVersion,
-      markdown,
+      markdown: imported.markdown,
       origin: null,
     });
-    if (result.ok) return { tab: tabSummary(ctx, result.tab) };
+    if (result.ok)
+      return {
+        tab: tabSummary(ctx, result.tab),
+        ...imagesField(imported.images),
+      };
     return fail(
       "version_conflict",
       "The tab changed since you read it. Nothing was written; re-read it with read_doc and retry.",
-      { currentVersion: result.conflict.version, url: tabUrl(ctx, result.conflict) },
+      {
+        currentVersion: result.conflict.version,
+        url: tabUrl(ctx, result.conflict),
+      },
     );
   },
 
+  import_image: async (args, ctx) => {
+    const docId = requireString(args, "docId");
+    const link = requireString(args, "url", ImageImport.MAX_SOURCE_URL_LENGTH);
+    const alt = optionalString(args, "alt", 500) ?? "";
+    await need(ctx, docId, "editor");
+    const result = await ImageImport.importImage(
+      importDeps(ctx.deps, ctx.origin),
+      {
+        docId,
+        link,
+      },
+    );
+    if (!result.ok)
+      fail(result.error, ImageImport.IMPORT_FAILURE_MESSAGES[result.error]);
+    return {
+      src: result.src,
+      markdown: ImageImport.imageMarkdown(result.src, alt),
+    };
+  },
+
+  prepare_image_upload: async (args, ctx) => {
+    const docId = requireString(args, "docId");
+    await need(ctx, docId, "editor");
+    const { token, expiresAt } = await ImageImport.createUploadToken(
+      ctx.deps.db,
+      {
+        docId,
+        userId: ctx.principal.userId,
+        now: ctx.deps.now(),
+      },
+    );
+    const uploadUrl = `${ctx.origin}/api/image-uploads/${token}`;
+    return {
+      uploadUrl,
+      method: "PUT",
+      expiresAt: new Date(expiresAt).toISOString(),
+      maxBytes: MAX_IMAGE_BYTES,
+      contentTypes: Object.keys(IMAGE_TYPES),
+      curl: `curl -sS -X PUT -H 'Content-Type: image/png' --data-binary @<file> '${uploadUrl}'`,
+      next: "Set Content-Type to the file's type. The reply is JSON with url and markdown; put the markdown in the tab with edit_tab, adding alt text between the brackets. A refused file (wrong type, over the limit) leaves the link usable until it expires.",
+    };
+  },
+
   rename_tab: async (args, ctx) => {
-    const tab = await renameTab(ctx, requireString(args, "tabId"), requireString(args, "title"));
+    const tab = await renameTab(
+      ctx,
+      requireString(args, "tabId"),
+      requireString(args, "title"),
+    );
     return { tab: tabSummary(ctx, tab) };
   },
 
@@ -1240,12 +1581,21 @@ const handlers: Record<ToolName, (args: Args, ctx: ToolContext) => Promise<objec
     const tabId = requireString(args, "tabId");
     const parentTabId = optionalString(args, "parentTabId") ?? null;
     const position = args.position ?? Number.MAX_SAFE_INTEGER;
-    if (typeof position !== "number" || !Number.isInteger(position) || position < 0) {
+    if (
+      typeof position !== "number" ||
+      !Number.isInteger(position) ||
+      position < 0
+    ) {
       fail("invalid_argument", '"position" must be a non-negative integer.');
     }
     const current = await tabWith(ctx, tabId, "editor");
     await load(
-      ctx.deps.rooms.moveTab(current.docId, { tabId, parentTabId, position, origin: null }),
+      ctx.deps.rooms.moveTab(current.docId, {
+        tabId,
+        parentTabId,
+        position,
+        origin: null,
+      }),
       "parent tab in this doc",
     );
     return { tab: tabSummary(ctx, await Docs.getTab(ctx.deps.db, tabId)) };
@@ -1265,11 +1615,17 @@ const handlers: Record<ToolName, (args: Args, ctx: ToolContext) => Promise<objec
     const docId = requireString(args, "docId");
     const status = args.status;
     if (!DOC_STATUSES.includes(status as DocStatus)) {
-      fail("invalid_argument", `"status" must be one of ${DOC_STATUSES.join(", ")}.`);
+      fail(
+        "invalid_argument",
+        `"status" must be one of ${DOC_STATUSES.join(", ")}.`,
+      );
     }
     await need(ctx, docId, "editor");
     const doc = await load(
-      ctx.deps.rooms.setDocStatus(docId, { status: status as DocStatus, origin: null }),
+      ctx.deps.rooms.setDocStatus(docId, {
+        status: status as DocStatus,
+        origin: null,
+      }),
       "doc",
     );
     return { doc: docSummary(ctx, doc, undefined) };
@@ -1336,7 +1692,11 @@ const handlers: Record<ToolName, (args: Args, ctx: ToolContext) => Promise<objec
       const comment = await commentWrite(ctx, tab.docId, {
         kind: "create",
         tabId,
-        anchor: { quote: Comments.structuredQuote(target, label), prefix: "", suffix: "" },
+        anchor: {
+          quote: Comments.structuredQuote(target, label),
+          prefix: "",
+          suffix: "",
+        },
         structuredAnchor: anchor,
         body,
         author: commentAuthor(ctx),
@@ -1351,13 +1711,18 @@ const handlers: Record<ToolName, (args: Args, ctx: ToolContext) => Promise<objec
       };
     }
     const quote = markdownArg(args, "quote", true)!;
-    if (quote.length > Comments.MAX_QUOTE_LENGTH) fail("too_large", '"quote" is too long.');
+    if (quote.length > Comments.MAX_QUOTE_LENGTH)
+      fail("too_large", '"quote" is too long.');
     const tab = await tabWith(ctx, tabId, "commenter");
     const match = findQuote(markdownToText(tab.markdown), quote);
     if (match.kind === "missing") {
-      fail("quote_not_found", '"quote" does not appear in the tab. Re-read it with read_doc.', {
-        url: tabUrl(ctx, tab),
-      });
+      fail(
+        "quote_not_found",
+        '"quote" does not appear in the tab. Re-read it with read_doc.',
+        {
+          url: tabUrl(ctx, tab),
+        },
+      );
     }
     if (match.kind === "ambiguous") {
       fail(
@@ -1373,7 +1738,13 @@ const handlers: Record<ToolName, (args: Args, ctx: ToolContext) => Promise<objec
       body,
       author: commentAuthor(ctx),
     });
-    return { comment: { ...commentSummary(comment), quote: comment.quote, url: tabUrl(ctx, tab) } };
+    return {
+      comment: {
+        ...commentSummary(comment),
+        quote: comment.quote,
+        url: tabUrl(ctx, tab),
+      },
+    };
   },
 
   update_table_cell: async (args, ctx) => {
@@ -1387,10 +1758,16 @@ const handlers: Record<ToolName, (args: Args, ctx: ToolContext) => Promise<objec
       const index = findRow(table, rowId);
       const column = findColumn(table, colId);
       const value = checkCell(column, args.value, `"value"`);
-      const rows = table.rows.with(index, withCell(table.rows[index]!, colId, value));
+      const rows = table.rows.with(
+        index,
+        withCell(table.rows[index]!, colId, value),
+      );
       return { table: { ...table, rows }, result: value };
     });
-    return { tab: tabSummary(ctx, tab), cell: { tableId, rowId, colId, value: result } };
+    return {
+      tab: tabSummary(ctx, tab),
+      cell: { tableId, rowId, colId, value: result },
+    };
   },
 
   add_table_row: async (args, ctx) => {
@@ -1403,11 +1780,15 @@ const handlers: Record<ToolName, (args: Args, ctx: ToolContext) => Promise<objec
     }
     const { tab, result } = await changeTable(ctx, tabId, tableId, (table) => {
       if (table.rows.length >= MAX_TABLE_ROWS) {
-        throw new TableError(`A table can have at most ${MAX_TABLE_ROWS} rows.`);
+        throw new TableError(
+          `A table can have at most ${MAX_TABLE_ROWS} rows.`,
+        );
       }
       // Column names are accepted too, since that is what an agent sees in a rendered table.
       const byId: Record<string, unknown> = {};
-      for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+      for (const [key, value] of Object.entries(
+        raw as Record<string, unknown>,
+      )) {
         const named = table.columns.filter((column) => column.name === key);
         const id = table.columns.some((column) => column.id === key)
           ? key
@@ -1418,8 +1799,12 @@ const handlers: Record<ToolName, (args: Args, ctx: ToolContext) => Promise<objec
       }
       const cells = checkCells(table.columns, byId, '"cells"');
       let rowId = newTableId("r");
-      while (table.rows.some((row) => row.id === rowId)) rowId = newTableId("r");
-      const at = afterRowId === undefined ? table.rows.length : findRow(table, afterRowId) + 1;
+      while (table.rows.some((row) => row.id === rowId))
+        rowId = newTableId("r");
+      const at =
+        afterRowId === undefined
+          ? table.rows.length
+          : findRow(table, afterRowId) + 1;
       const rows = table.rows.toSpliced(at, 0, { id: rowId, cells });
       return { table: { ...table, rows }, result: rowId };
     });
@@ -1429,7 +1814,10 @@ const handlers: Record<ToolName, (args: Args, ctx: ToolContext) => Promise<objec
   reply_comment: async (args, ctx) => {
     const commentId = requireString(args, "commentId");
     const body = requireString(args, "body", Comments.MAX_COMMENT_LENGTH);
-    const target = await load(Comments.getComment(ctx.deps.db, commentId), "comment");
+    const target = await load(
+      Comments.getComment(ctx.deps.db, commentId),
+      "comment",
+    );
     await need(ctx, target.docId, "commenter");
     const reply = await commentWrite(ctx, target.docId, {
       kind: "reply",
@@ -1442,14 +1830,22 @@ const handlers: Record<ToolName, (args: Args, ctx: ToolContext) => Promise<objec
 
   resolve_comment: async (args, ctx) => {
     const commentId = requireString(args, "commentId");
-    const target = await load(Comments.getComment(ctx.deps.db, commentId), "comment");
+    const target = await load(
+      Comments.getComment(ctx.deps.db, commentId),
+      "comment",
+    );
     await need(ctx, target.docId, "commenter");
-    const lesson = args.lesson === undefined ? undefined : factTextArg(args, "lesson");
+    const lesson =
+      args.lesson === undefined ? undefined : factTextArg(args, "lesson");
     let projectId: string | null = null;
     if (lesson !== undefined) {
-      projectId = (await load(Docs.getDoc(ctx.deps.db, target.docId), "doc")).doc.projectId;
+      projectId = (await load(Docs.getDoc(ctx.deps.db, target.docId), "doc"))
+        .doc.projectId;
       if (projectId === null) {
-        fail("no_project", "This doc is in no project, so the lesson has nowhere to live.");
+        fail(
+          "no_project",
+          "This doc is in no project, so the lesson has nowhere to live.",
+        );
       }
       await requireFactEditor(ctx, projectId);
     }
@@ -1458,7 +1854,8 @@ const handlers: Record<ToolName, (args: Args, ctx: ToolContext) => Promise<objec
       commentId,
       resolved: true,
     });
-    if (lesson === undefined || projectId === null) return { threadId: root.id, resolved: true };
+    if (lesson === undefined || projectId === null)
+      return { threadId: root.id, resolved: true };
     const fact = await load(
       Facts.addFact(ctx.deps.db, {
         projectId,
@@ -1469,23 +1866,35 @@ const handlers: Record<ToolName, (args: Args, ctx: ToolContext) => Promise<objec
       }),
       "project",
     );
-    return { threadId: root.id, resolved: true, fact: { factId: fact.factId, text: fact.text } };
+    return {
+      threadId: root.id,
+      resolved: true,
+      fact: { factId: fact.factId, text: fact.text },
+    };
   },
 
   list_members: async (args, ctx) => {
     const docId = requireString(args, "docId");
     await need(ctx, docId, "viewer");
-    const members = await Access.listMembers(ctx.deps.db, docId, ctx.deps.owners);
+    const members = await Access.listMembers(
+      ctx.deps.db,
+      docId,
+      ctx.deps.owners,
+    );
     return { members: members.map(memberSummary) };
   },
 
   share_doc: async (args, ctx) => {
     const docId = requireString(args, "docId");
     const email = requireString(args, "email", 320);
-    if (!email.includes("@")) fail("invalid_argument", '"email" must be an email address.');
+    if (!email.includes("@"))
+      fail("invalid_argument", '"email" must be an email address.');
     const role = args.role;
     if (!isDocRole(role))
-      fail("invalid_argument", `"role" must be one of ${DOC_ROLES.join(", ")}.`);
+      fail(
+        "invalid_argument",
+        `"role" must be one of ${DOC_ROLES.join(", ")}.`,
+      );
     await need(ctx, docId, "owner");
     const { member, created } = await load(
       Access.shareDoc(ctx.deps.db, {
@@ -1532,7 +1941,11 @@ const handlers: Record<ToolName, (args: Args, ctx: ToolContext) => Promise<objec
       "doc",
     );
     if (userId) await ctx.deps.rooms.closeSockets(docId, userId);
-    const members = await Access.listMembers(ctx.deps.db, docId, ctx.deps.owners);
+    const members = await Access.listMembers(
+      ctx.deps.db,
+      docId,
+      ctx.deps.owners,
+    );
     return { members: members.map(memberSummary) };
   },
 
@@ -1600,9 +2013,13 @@ const handlers: Record<ToolName, (args: Args, ctx: ToolContext) => Promise<objec
       }
       tab = result.conflict;
     }
-    return fail("busy", "The tab kept changing while editing. Re-read it and try again.", {
-      version: tab.version,
-    });
+    return fail(
+      "busy",
+      "The tab kept changing while editing. Re-read it and try again.",
+      {
+        version: tab.version,
+      },
+    );
   },
   prepare_claude_doc_push: async (args, ctx) => {
     const tab = await tabWith(ctx, requireString(args, "tabId"), "editor");
@@ -1620,7 +2037,8 @@ const handlers: Record<ToolName, (args: Args, ctx: ToolContext) => Promise<objec
         ...(order === undefined ? {} : { order }),
       });
     } catch (cause) {
-      if (cause instanceof ClaudeDocPushError) return fail(cause.code, cause.message);
+      if (cause instanceof ClaudeDocPushError)
+        return fail(cause.code, cause.message);
       throw cause;
     }
   },
@@ -1645,9 +2063,16 @@ const handlers: Record<ToolName, (args: Args, ctx: ToolContext) => Promise<objec
   },
 };
 
-export function callTool(name: string, args: Args, ctx: ToolContext): Promise<object> {
+export function callTool(
+  name: string,
+  args: Args,
+  ctx: ToolContext,
+): Promise<object> {
   if (!Object.hasOwn(handlers, name)) {
-    throw new McpToolError({ error: "unknown_tool", message: `Unknown tool: ${name}` }, true);
+    throw new McpToolError(
+      { error: "unknown_tool", message: `Unknown tool: ${name}` },
+      true,
+    );
   }
   return handlers[name as ToolName](args, ctx);
 }
