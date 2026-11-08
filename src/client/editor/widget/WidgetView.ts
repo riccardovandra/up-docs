@@ -33,7 +33,7 @@ export interface WidgetPickDetail {
   readonly anchor: string | null;
 }
 
-const COLOUR_TOKENS = [
+export const COLOUR_TOKENS = [
   "--cds-text-primary",
   "--cds-text-secondary",
   "--cds-chart-axis",

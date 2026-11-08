@@ -32,13 +32,15 @@ export type FrameMessage =
   | { readonly type: "ready" }
   | { readonly type: "rendered"; readonly nonce: number }
   | { readonly type: "error"; readonly nonce: number; readonly message: string }
+  /** The drawn SVG, for exports that need the diagram as an image. */
+  | { readonly type: "snapshot"; readonly svg: string | null }
   | ({ readonly type: "pick" } & WidgetPick);
 
 export function readFrameMessage(data: unknown): FrameMessage | null {
   if (typeof data !== "object" || data === null) return null;
   const message = data as { source?: unknown; type?: unknown };
   if (message.source !== WIDGET_MESSAGE_SOURCE) return null;
-  return ["ready", "rendered", "error", "pick"].includes(String(message.type))
+  return ["ready", "rendered", "error", "pick", "snapshot"].includes(String(message.type))
     ? (data as FrameMessage)
     : null;
 }
@@ -109,6 +111,15 @@ const RUNTIME = String.raw`
       script.textContent = "window.__widgetRun(function (__widget_h, __widget_fragment) {\n\"use strict\";\nlet __widget_drawing;\n" + data.code + "\n;return __widget_drawing;\n});";
       document.head.appendChild(script);
       script.remove();
+    } else if (data.type === "snapshot") {
+      const svg = document.querySelector("svg");
+      let markup = null;
+      if (svg) {
+        const copy = svg.cloneNode(true);
+        copy.setAttribute("font-family", getComputedStyle(svg).fontFamily);
+        markup = new XMLSerializer().serializeToString(copy);
+      }
+      send({ type: "snapshot", svg: markup });
     } else if (data.type === "hide") {
       for (const element of document.querySelectorAll("[data-widget-hidden]")) element.removeAttribute("data-widget-hidden");
       if (data.textId) {
