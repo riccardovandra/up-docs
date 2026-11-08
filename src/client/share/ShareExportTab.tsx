@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 
+import { displayName } from "../../shared/access.ts";
 import type { EmbedParentMessage } from "../../shared/embed.ts";
+import { api } from "../api.ts";
 import { copyMarkdown, download } from "../doc/ExportMenu.tsx";
 import { readyWidgetsForPrint } from "../editor/widget/WidgetView.ts";
 import {
@@ -12,6 +14,7 @@ import {
   useEmbedFeatures,
 } from "../embedBridge.ts";
 import { docPath } from "../router.ts";
+import { scribeAvailable, sendToScribe, subscribeScribe } from "../scribe/scribeBridge.ts";
 
 type Scope = "doc" | "tab";
 
@@ -117,6 +120,7 @@ export function ShareExportTab(props: {
   const { docId, tabId, flush } = props;
   const inT3Code = useSyncExternalStore(subscribeEmbedParent, hasEmbedParent);
   const canSendTo = useEmbedFeatures()?.includes("send-to") ?? false;
+  const canSendToScribe = useSyncExternalStore(subscribeScribe, scribeAvailable, () => false);
   const [scope, setScope] = useState<Scope>("doc");
   const [status, setStatus] = useState<Status | null>(null);
   const [sending, setSending] = useState(false);
@@ -173,6 +177,47 @@ export function ShareExportTab(props: {
         setStatus({ kind: "error", text: "Could not save the latest edits. Try again." });
       },
     );
+  };
+
+  const sendToKindle = () => {
+    if (sending) return;
+    setSending(true);
+    setStatus({ kind: "info", text: "Preparing the book…" });
+    const send = async () => {
+      // The book is built from the server's copy, so pending edits go first.
+      await flush();
+      const [view, book, assets] = await Promise.all([
+        api.doc(docId),
+        import("../scribe/scribeBook.ts"),
+        import("../scribe/scribeAssets.ts"),
+      ]);
+      const tab = scope === "tab" && tabId ? view.tabs.find((each) => each.id === tabId) : null;
+      const origin = window.location.origin;
+      const draft = book.draftScribeBook({
+        title: tab?.title ?? view.doc.title,
+        author: view.owner ? displayName(view.owner) : "UP Docs",
+        tabs: tab ? [tab] : view.tabs,
+        origin,
+        tabUrl: (id) => `${origin}${docPath(docId, id)}`,
+      });
+      const images = await assets.gatherAssets(draft);
+      setStatus({ kind: "info", text: "Sending to Scribe…" });
+      await sendToScribe({ ...draft.book, images });
+    };
+    send()
+      .then(
+        () =>
+          setStatus({
+            kind: "info",
+            text: "Sent to Scribe. It reaches the Kindle in a few minutes.",
+          }),
+        (failure: unknown) =>
+          setStatus({
+            kind: "error",
+            text: failure instanceof Error ? failure.message : "Send to Scribe failed.",
+          }),
+      )
+      .finally(() => setSending(false));
   };
 
   return (
@@ -263,19 +308,35 @@ export function ShareExportTab(props: {
         />
       </ul>
 
-      {inT3Code ? (
+      {inT3Code || canSendToScribe ? (
         <>
           <h3 className="share-section-label">Send to</h3>
           <ul className="share-export-list">
-            <Row
-              badge={<Badge label="G" />}
-              title="Google Docs"
-              description="Coming soon"
-              action={<OpenIcon />}
-              disabled
-              onClick={() => undefined}
-            />
-            {canSendTo ? (
+            {canSendToScribe ? (
+              <Row
+                badge={<Badge label="K" />}
+                title="Kindle Scribe"
+                description={
+                  scope === "tab" && tabId
+                    ? "This tab as an ebook, through Send to Scribe"
+                    : "The doc as an ebook, one chapter per tab"
+                }
+                action={<OpenIcon />}
+                disabled={sending}
+                onClick={sendToKindle}
+              />
+            ) : null}
+            {inT3Code ? (
+              <Row
+                badge={<Badge label="G" />}
+                title="Google Docs"
+                description="Coming soon"
+                action={<OpenIcon />}
+                disabled
+                onClick={() => undefined}
+              />
+            ) : null}
+            {inT3Code && canSendTo ? (
               <Row
                 badge={<Badge label="N" />}
                 title="Notion"
@@ -285,7 +346,7 @@ export function ShareExportTab(props: {
                 onClick={sendToNotion}
               />
             ) : null}
-            {isNativeEmbed() ? null : (
+            {!inT3Code || isNativeEmbed() ? null : (
               <Row
                 badge={<Badge label="C" />}
                 title="Claude Docs"
