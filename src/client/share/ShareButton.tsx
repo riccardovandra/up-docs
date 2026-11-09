@@ -43,6 +43,7 @@ export function ShareButton(props: {
         ref={button}
         type="button"
         className="share-button"
+        aria-label="Share"
         aria-haspopup="dialog"
         aria-expanded={open}
         onClick={() => setOpen((value) => !value)}
@@ -57,7 +58,7 @@ export function ShareButton(props: {
             strokeLinecap="round"
           />
         </svg>
-        Share
+        <span className="share-button-label">Share</span>
       </button>
       {open ? (
         <ShareDialog

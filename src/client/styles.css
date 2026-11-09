@@ -1883,3 +1883,56 @@ span.tab-row-toggle {
     display: none;
   }
 }
+
+/* Phone: one toolbar row that fits, a smaller title, menus kept on screen. */
+@media (max-width: 600px) {
+  .toolbar-shortcut,
+  .toolbar-width {
+    display: none;
+  }
+
+  .doc-toolbar-tools > .popover:first-child {
+    min-width: 0;
+  }
+
+  .doc-toolbar-tools > .popover:last-child .popover-panel {
+    left: auto;
+    right: 0;
+  }
+
+  .popover-panel {
+    max-width: calc(100vw - 2rem);
+  }
+
+  .doc-head-title {
+    font-size: 2rem;
+  }
+
+  .doc-header {
+    gap: 0.5rem;
+    padding: 0 0.75rem 0 1rem;
+  }
+
+  .doc-toolbar {
+    padding: 0 0.75rem 0 1rem;
+  }
+
+  /* Columns wide enough that short notes do not wrap word by word; the table scrolls. */
+  .tab-editor .ProseMirror th,
+  .tab-editor .ProseMirror td {
+    min-width: 6.5rem;
+  }
+
+  /* Keep the section toggle inside the page padding. */
+  .fold-toggle {
+    left: -1.2rem;
+    width: 1.1rem;
+  }
+}
+
+/* Small phones: the Share button keeps its icon, so the doc title has room. */
+@media (max-width: 420px) {
+  .doc-header-actions .share-button-label {
+    display: none;
+  }
+}

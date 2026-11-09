@@ -1,4 +1,12 @@
-import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import {
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type ReactNode,
+} from "react";
 
 import { CheckIcon } from "./icons.tsx";
 
@@ -21,6 +29,24 @@ export function Menu(props: {
   const button = useRef<HTMLButtonElement>(null);
   const menu = useRef<HTMLDivElement>(null);
   const menuId = useId();
+
+  // On a narrow screen the menu can hang past the window edge; shift it back inside.
+  useLayoutEffect(() => {
+    const element = menu.current;
+    if (!open || !element) return;
+    const margin = 8;
+    const width = document.documentElement.clientWidth;
+    const rect = element.getBoundingClientRect();
+    const shift =
+      rect.right > width - margin
+        ? width - margin - rect.right
+        : rect.left < margin
+          ? margin - rect.left
+          : 0;
+    if (shift === 0) return;
+    element.style.left = `${element.offsetLeft + shift}px`;
+    element.style.right = "auto";
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;

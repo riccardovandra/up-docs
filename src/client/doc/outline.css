@@ -110,7 +110,8 @@
   }
 }
 
-/* Narrow: the shared layout hides the right rail; show it as a floating toggle. */
+/* Narrow: the shared layout hides the right rail; show it as a floating toggle.
+   It sits bottom left, so it never covers the comment markers in the right margin. */
 @media (max-width: 960px) {
   .doc-layout .doc-rail-right {
     display: block;
@@ -118,7 +119,7 @@
   }
   .outline-rail {
     position: fixed;
-    right: 1rem;
+    left: 1rem;
     bottom: 1rem;
     top: auto;
     z-index: 20;
@@ -126,7 +127,7 @@
     overflow: visible;
     display: flex;
     flex-direction: column-reverse;
-    align-items: flex-end;
+    align-items: flex-start;
     gap: 0.5rem;
   }
   .outline-toggle {

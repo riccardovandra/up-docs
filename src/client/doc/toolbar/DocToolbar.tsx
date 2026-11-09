@@ -32,7 +32,9 @@ function chooseFile(accept: ReadonlyArray<string>, onFile: (file: File) => void)
 /**
  * The row under the header: tab switcher, then (for editors) Draw, Width,
  * Table, Image, Checklist and the "+" insert menu. It re-renders when tabs or
- * the editor change, not on keystrokes.
+ * the editor change, not on keystrokes. On a phone only the tab switcher and
+ * the insert menu stay: the menu holds every shortcut, and the column is
+ * already full width.
  */
 export const DocToolbar = memo(function DocToolbar(
   props: TabActions & {
@@ -65,7 +67,7 @@ export const DocToolbar = memo(function DocToolbar(
   const tool = (id: string, label: string, icon: ReactNode) => (
     <button
       type="button"
-      className="toolbar-button"
+      className="toolbar-button toolbar-shortcut"
       aria-label={label}
       disabled={!editor}
       // Keep the editor's selection, so the insert lands at the caret.
@@ -96,14 +98,14 @@ export const DocToolbar = memo(function DocToolbar(
           {tool("diagram", "Draw a diagram", <DrawIcon />)}
           <button
             type="button"
-            className="toolbar-button"
+            className="toolbar-button toolbar-width"
             aria-label={props.width === "wide" ? "Narrow column" : "Wide column"}
             aria-pressed={props.width === "wide"}
             onClick={props.onToggleWidth}
           >
             <WidthIcon />
           </button>
-          <span className="toolbar-separator" aria-hidden="true" />
+          <span className="toolbar-separator toolbar-shortcut" aria-hidden="true" />
           {tool("table", "Table", <TableIcon />)}
           {tool("image", "Image", <ImageIcon />)}
           {tool("checklist", "Checklist", <ChecklistIcon />)}
@@ -127,7 +129,7 @@ export const DocToolbar = memo(function DocToolbar(
       ) : (
         <button
           type="button"
-          className="toolbar-button"
+          className="toolbar-button toolbar-width"
           aria-label={props.width === "wide" ? "Narrow column" : "Wide column"}
           aria-pressed={props.width === "wide"}
           onClick={props.onToggleWidth}
