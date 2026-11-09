@@ -467,3 +467,17 @@
 .share-foot .button {
   flex: none;
 }
+
+/* Phone: the panel spans the screen under the header instead of hanging off its left edge. */
+@media (max-width: 600px) {
+  .share-panel {
+    position: fixed;
+    top: calc(var(--open-tabs-height, 0px) + 4rem);
+    left: 1rem;
+    right: 1rem;
+    width: auto;
+    max-width: none;
+    max-height: calc(100dvh - var(--open-tabs-height, 0px) - 5rem);
+    overflow-y: auto;
+  }
+}

@@ -263,7 +263,7 @@
   z-index: 30;
   top: calc(100% + 0.35rem);
   min-width: 13rem;
-  max-width: 20rem;
+  max-width: min(20rem, calc(100vw - 1rem));
   padding: 0.3rem;
   background: var(--popover);
   border: 1px solid var(--border);
@@ -574,6 +574,13 @@
   opacity: 1;
 }
 
+/* Touch screens have no hover, so the menu button always shows. */
+@media (hover: none) {
+  .doc-card-menu .home-icon-button {
+    opacity: 1;
+  }
+}
+
 /* The grid's first tile, sized and styled like a doc card. */
 .doc-card-new {
   display: block;
@@ -785,9 +792,41 @@
     width: 12rem;
   }
 
-  .doc-table th:nth-child(n + 3):not(:last-child),
-  .doc-table td:nth-child(n + 3):not(:last-child) {
+  /* Shorter cards, so a phone shows more than one doc at a time. */
+  .doc-grid {
+    gap: 1rem;
+    margin-top: 1.5rem;
+  }
+
+  .doc-card-paper {
+    height: 8rem;
+  }
+
+  .doc-card {
+    contain-intrinsic-size: auto 13.5rem;
+  }
+
+  .doc-card-footer {
+    padding: 0.9rem 1rem;
+  }
+
+  .doc-card-icon {
+    width: 2.5rem;
+    height: 2.5rem;
+  }
+
+  .doc-table {
+    margin-top: 1.5rem;
+  }
+
+  /* The list keeps the title and its menu; the title takes the width. */
+  .doc-table th:nth-child(n + 2):not(:last-child),
+  .doc-table td:nth-child(n + 2):not(:last-child) {
     display: none;
+  }
+
+  .doc-row-title {
+    width: auto;
   }
 }
 
