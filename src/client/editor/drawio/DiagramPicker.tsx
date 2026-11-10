@@ -16,7 +16,7 @@ const plural = (count: number, word: string) => `${count} ${word}${count === 1 ?
 const linkedDocs = (diagram: DiagramListItem) => new Set(diagram.uses.map((use) => use.docId)).size;
 
 /**
- * "Insert a diagram": the diagrams of the doc's project first, every project
+ * "Insert a Draw.io diagram": the diagrams of the doc's project first, every project
  * one click away (unless the frame is locked to its project), and "New
  * diagram" always on offer. It lists the diagrams the person manages, which
  * are the ones the library shows them.
@@ -73,14 +73,14 @@ export function DiagramPicker(props: {
     <dialog
       ref={dialog}
       className="drawio-picker"
-      aria-label="Insert a diagram"
+      aria-label="Insert a Draw.io diagram"
       onClose={props.onClose}
       onClick={(event) => {
         if (event.target === dialog.current) dialog.current?.close();
       }}
     >
       <div className="drawio-picker-head">
-        <h2>Insert a diagram</h2>
+        <h2>Insert a Draw.io diagram</h2>
         <button
           type="button"
           className="home-icon-button"

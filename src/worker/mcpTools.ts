@@ -332,8 +332,7 @@ function checkMediaBlocks(markdown: string, previous?: string): void {
 
 /**
  * Rejects markdown that links a Draw.io diagram the tab did not link before,
- * unless the token user can see that diagram: a doc that links one shows its
- * picture to everyone on the doc.
+ * unless the token user can see that diagram.
  */
 async function checkDrawioLinks(
   ctx: ToolContext,
@@ -919,32 +918,38 @@ function drawioWritten(ctx: ToolContext, diagram: Diagram, model: DrawioModel) {
   };
 }
 
-/** One linked Draw.io diagram as read_doc describes it. */
+/**
+ * One linked Draw.io diagram as read_doc describes it. A link alone does not
+ * show a diagram, so one the token user cannot see reads as one that is gone.
+ */
 async function describeLinkedDrawio(ctx: ToolContext, diagramId: string) {
-  let diagram: Diagram;
+  let found: Awaited<ReturnType<typeof Diagrams.requireDiagram>>;
   try {
-    diagram = await Diagrams.getDiagram(ctx.deps.db, diagramId);
+    found = await Diagrams.requireDiagram(ctx.deps.db, {
+      diagramId,
+      userId: ctx.principal.userId,
+      need: "view",
+    });
   } catch (cause) {
     if (!(cause instanceof Docs.NotFoundError)) throw cause;
     return {
       diagramId,
       missing:
-        "No diagram has this id any more, so its block shows as missing. Remove the block or link another diagram.",
+        "No diagram with this id that you can see, so its block shows as missing. Remove the block or link another diagram.",
     };
   }
   return {
     diagramId,
-    title: diagram.title,
+    title: found.diagram.title,
     url: drawioUrl(ctx, diagramId),
-    canEdit: Diagrams.canEditDiagram(diagram, ctx.principal.userId),
-    ...describeDrawio(await readDrawio(diagram.xml), BRIEF_DRAWIO),
+    canEdit: found.canEdit,
+    ...describeDrawio(await readDrawio(found.diagram.xml), BRIEF_DRAWIO),
   };
 }
 
 /**
  * The Draw.io diagrams that `tabs` link, described for read_doc so the agent
- * needs no second call. The caller reads the doc, and a doc that links a
- * diagram is what lets its readers see it, so access is not checked again.
+ * needs no second call.
  */
 async function linkedDrawio(ctx: ToolContext, tabs: ReadonlyArray<Tab>) {
   const ids = [

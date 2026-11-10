@@ -366,7 +366,7 @@ describe("a new diagram drawn from a doc", () => {
   });
 });
 
-describe("the Insert diagram picker", () => {
+describe("the Draw.io diagram picker", () => {
   const diagrams = [
     { id: "a", projectId: "other" },
     { id: "b", projectId: "mine" },

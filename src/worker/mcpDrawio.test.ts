@@ -5,7 +5,7 @@ import { readDrawio } from "../shared/drawioModel.ts";
 import * as Diagrams from "./diagrams.ts";
 import * as Docs from "./docs.ts";
 import { DRAWIO_EXAMPLE } from "./mcpGuide.ts";
-import { ORIGIN } from "./testing/apiHarness.ts";
+import { ORIGIN, OWNER } from "./testing/apiHarness.ts";
 import { makeMcpHarness } from "./testing/mcpHarness.ts";
 
 const model = (cells: string) =>
@@ -442,11 +442,66 @@ describe("Draw.io diagrams in docs over MCP", () => {
     await Diagrams.deleteDiagram(mcp.api.db, mcp.api.deps.images, diagramId);
     const after = await mcp.tool("read_doc", { docId: doc.docId, tabId: tab.tabId });
     expect(after.body.drawioDiagrams).toEqual([
-      { diagramId, missing: expect.stringContaining("No diagram has this id any more") },
+      { diagramId, missing: expect.stringContaining("No diagram with this id that you can see") },
     ]);
     const plain = await mcp.tool("create_doc", { title: "No diagrams", markdown: "Text" });
     const read = await mcp.tool("read_doc", { docId: plain.body.doc.docId });
     expect(read.body).not.toHaveProperty("drawioDiagrams");
+  });
+
+  it("describes a linked diagram only where its creator can edit the doc", async () => {
+    const { mcp, doc, diagramId } = await setup();
+    // A doc the admin, who drew the diagram, is not on. MCP writes refuse the
+    // link, so its editor puts the id in through the app's API.
+    const editor = await agentOf(mcp, "editor@example.com", doc.docId);
+    const theirs = (await editor("create_doc", { title: "Theirs", markdown: "Start" })).body;
+    const docId = theirs.doc.docId as string;
+    const tabId = theirs.tab.tabId as string;
+    const cookie = await mcp.api.signIn("editor@example.com");
+    const written = await mcp.api.call("PATCH", `/api/tabs/${tabId}`, {
+      body: { baseVersion: theirs.tab.version, markdown: `Start\n\n${drawioBlock(diagramId)}\n` },
+      headers: { Cookie: cookie },
+    });
+    expect(written.status).toBe(200);
+    const invite = { docId, email: "member@example.com", role: "viewer" };
+    expect((await editor("share_doc", invite)).isError).toBe(false);
+    const member = await mcp.asUser("member@example.com");
+
+    const hidden = async () => {
+      for (const agent of [editor, member]) {
+        expect((await agent("read_drawio", { diagramId })).body.error).toBe("not_found");
+        const read = await agent("read_doc", { docId });
+        expect(read.body.drawioDiagrams).toEqual([
+          { diagramId, missing: expect.stringContaining("that you can see") },
+        ]);
+        expect(JSON.stringify(read.body)).not.toContain("Sales flow");
+        expect(JSON.stringify(read.body)).not.toContain("Discovery call");
+      }
+      // The link the app let through does not make the diagram one they may link elsewhere.
+      const again = await editor("create_tab", {
+        docId,
+        title: "More",
+        markdown: drawioBlock(diagramId),
+      });
+      expect(again).toMatchObject({ isError: true, body: { error: "drawio_not_found" } });
+    };
+    await hidden();
+    // The creator on the doc without the right to edit it does not count.
+    for (const role of ["viewer", "commenter"]) {
+      expect((await editor("share_doc", { docId, email: OWNER, role })).isError).toBe(false);
+      await hidden();
+    }
+
+    const asEditor = { docId, email: OWNER, role: "editor" };
+    expect((await editor("share_doc", asEditor)).isError).toBe(false);
+    const seen = await member("read_doc", { docId });
+    expect(seen.body.drawioDiagrams).toEqual([
+      expect.objectContaining({ diagramId, title: "Sales flow", canEdit: false }),
+    ]);
+    expect((await member("read_drawio", { diagramId })).body.shapes).toEqual([
+      "Discovery call",
+      "Proposal",
+    ]);
   });
 
   it("keeps read_doc short when a doc links many diagrams or a large one", async () => {

@@ -42,7 +42,7 @@ Tools:
 - Connections read "A -> B", or "A -[label]-> B" with a label. "<->" has an arrowhead at both ends, "<-" only at the start, "--" none. "(loose end)" is an end attached to no shape.
 - create_drawio {projectKey or projectId, title, xml} returns the id, the link and the block to paste into a doc.
 - To change a diagram: read_drawio {diagramId, includeXml: true}, edit that XML keeping the ids of the cells you keep, and send the whole XML with update_drawio {diagramId, xml, baseVersion: the version you read}; a new title goes the same way. A stale baseVersion is refused because someone saved in between: read again and redo the change. Only the diagram's creator and the workspace admin get the XML or may change it.
-Linking: a doc shows a diagram through this block, whose first line is the diagram id and whose optional second line is a caption, nothing else. read_doc describes every linked diagram in drawioDiagrams, so you rarely need read_drawio for them.
+Linking: a doc shows a diagram through this block, whose first line is the diagram id and whose optional second line is a caption, nothing else. read_doc describes every linked diagram in drawioDiagrams, so you rarely need read_drawio for them. The block shows the diagram to the others on a doc only when the diagram's creator can edit that doc; to anyone else it reads as missing.
 \`\`\`t3-drawio
 <diagram id>
 Optional caption

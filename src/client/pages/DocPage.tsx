@@ -675,7 +675,7 @@ export function DocPage(props: {
     },
   );
 
-  // Linked Draw.io diagrams: the Insert diagram picker and the editor overlay.
+  // Linked Draw.io diagrams: the Draw.io diagram picker and the editor overlay.
   const diagrams = useDocDiagrams({
     docId: props.docId,
     projectId: doc?.projectId ?? null,

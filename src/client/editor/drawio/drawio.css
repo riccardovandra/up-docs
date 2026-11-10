@@ -1,4 +1,4 @@
-/* A linked Draw.io diagram in a doc, and the Insert diagram picker. */
+/* A linked Draw.io diagram in a doc, and the Draw.io diagram picker. */
 
 .drawio-block {
   position: relative;
@@ -220,7 +220,7 @@
   }
 }
 
-/* Insert a diagram */
+/* Insert a Draw.io diagram */
 
 .drawio-picker {
   width: min(44rem, calc(100vw - 2rem));

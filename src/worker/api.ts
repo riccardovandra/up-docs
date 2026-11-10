@@ -731,7 +731,7 @@ export async function handleApi(
     if (resource === "docs" && id && sub === "export.md" && method === "GET") {
       await need(id, "viewer");
       const doc = await Docs.getDoc(deps.db, id);
-      const diagrams = await linkedDiagrams(deps.db, doc.tabs);
+      const diagrams = await linkedDiagrams(deps.db, doc.tabs, principal.userId);
       return Export.markdownResponse(
         Export.docMarkdown(doc, deps.publicOrigin, diagrams),
         doc.doc.title,
@@ -750,7 +750,7 @@ export async function handleApi(
         title: doc.doc.title,
         markdown: Export.docSourceMarkdown(doc),
         docUrl: `${deps.publicOrigin}/d/${id}`,
-        diagrams: await linkedDiagrams(deps.db, doc.tabs),
+        diagrams: await linkedDiagrams(deps.db, doc.tabs, principal.userId),
       });
     }
 
@@ -787,7 +787,7 @@ export async function handleApi(
     if (resource === "tabs" && id && sub === "export.md" && method === "GET") {
       const tab = await Docs.getTab(deps.db, id);
       await need(tab.docId, "viewer");
-      const diagrams = await linkedDiagrams(deps.db, [tab]);
+      const diagrams = await linkedDiagrams(deps.db, [tab], principal.userId);
       return Export.markdownResponse(
         Export.tabMarkdown(tab, deps.publicOrigin, diagrams),
         tab.title,
@@ -806,7 +806,7 @@ export async function handleApi(
         title: tab.title,
         markdown: Export.tabSourceMarkdown(tab),
         docUrl: `${deps.publicOrigin}/d/${tab.docId}/${tab.id}`,
-        diagrams: await linkedDiagrams(deps.db, [tab]),
+        diagrams: await linkedDiagrams(deps.db, [tab], principal.userId),
       });
     }
 
@@ -937,9 +937,9 @@ const versionConflict = (conflict: { readonly version: number }) =>
 
 /**
  * Draw.io diagrams, under `/api/diagrams`. Their creator and the admin list
- * and change them. Anyone who reads a doc that links one may fetch its picture
- * and the diagram without its source. Returns null when the path is not one
- * of these routes.
+ * and change them. Someone on a doc that shows one (`Diagrams.canViewDiagram`)
+ * may fetch its picture and the diagram without its source. Returns null when
+ * the path is not one of these routes.
  */
 async function handleDiagrams(
   request: Request,

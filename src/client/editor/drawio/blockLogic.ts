@@ -156,7 +156,7 @@ export interface PickerLists<A> {
 }
 
 /**
- * What the Insert diagram picker lists. It opens on the doc's project (or "no
+ * What the Draw.io diagram picker lists. It opens on the doc's project (or "no
  * project"); "All projects" lists that project's diagrams first, then the rest
  * in the order given. A frame locked to its project offers no other project.
  */
