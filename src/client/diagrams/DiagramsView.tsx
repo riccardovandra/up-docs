@@ -21,15 +21,16 @@ import {
 } from "../home/icons.tsx";
 import { NoProjectBadge, ProjectBadge } from "../home/ProjectSwitcher.tsx";
 import { navigate } from "../router.ts";
+import { SheetIcon } from "../sheets/SheetIcon.tsx";
 import { DiagramEditor, type DiagramEditorTarget } from "./DiagramEditor.tsx";
 import { DiagramPicture } from "./DiagramPicture.tsx";
 import { subscribeRefresh } from "./diagramRefresh.ts";
 import { diagramsApi } from "./diagramsApi.ts";
 import "./diagrams.css";
 
-export type LibraryKind = "docs" | "diagrams";
+export type LibraryKind = "docs" | "diagrams" | "sheets";
 
-/** The switch in the library's title row: the docs, or the diagrams. */
+/** The switch in the library's title row: the docs, the diagrams or the sheets. */
 export function LibraryKindSwitch(props: { readonly kind: LibraryKind }) {
   const option = (kind: LibraryKind, path: string, label: string, icon: ReactNode) => (
     <button
@@ -46,6 +47,7 @@ export function LibraryKindSwitch(props: { readonly kind: LibraryKind }) {
     <div className="library-kind" role="group" aria-label="Show">
       {option("docs", "/", "Docs", <DocIcon size={16} />)}
       {option("diagrams", "/diagrams", "Diagrams", <DiagramIcon size={16} />)}
+      {option("sheets", "/sheets", "Sheets", <SheetIcon size={16} />)}
     </div>
   );
 }

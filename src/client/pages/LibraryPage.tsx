@@ -66,6 +66,7 @@ import { useMe } from "../me.ts";
 import { docPath, navigate } from "../router.ts";
 import { canonicalDocUrl } from "../share/ShareDialog.tsx";
 import { DiagramsView, LibraryKindSwitch, type LibraryKind } from "../diagrams/DiagramsView.tsx";
+import { SheetsView } from "../sheets/SheetsView.tsx";
 import "../home/home.css";
 
 const SEARCH_DEBOUNCE_MS = 250;
@@ -362,6 +363,21 @@ export function LibraryPage(props: { readonly kind?: LibraryKind }) {
       <AccountMenu />
     </div>
   );
+
+  if (kind === "sheets") {
+    return (
+      <main className="home">
+        {titleRow}
+        <SheetsView
+          scope={scope}
+          scopeLabel={scope.kind === "all" ? null : scopeLabel}
+          projects={library.projects}
+          createIn={scopeProject || createsProject ? scopeLabel : "No project"}
+          resolveProjectId={createInProject}
+        />
+      </main>
+    );
+  }
 
   if (kind === "diagrams") {
     return (
