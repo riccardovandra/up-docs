@@ -52,6 +52,12 @@ describe("locateAnchor", () => {
 });
 
 describe("markdownToText", () => {
+  it("leaves out a linked Draw.io diagram's id and caption, as the editor does", () => {
+    const markdown =
+      "Before\n\n```t3-drawio\n0b6f3a52-6a3e-4b0c-9a55-2b1d1f4f2a10\nThe flow\n```\n\nAfter";
+    expect(markdownToText(markdown)).toBe("Before\nAfter");
+  });
+
   it("matches the editor's visible text", () => {
     const markdown = [
       "# Plan",

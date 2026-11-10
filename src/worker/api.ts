@@ -29,6 +29,7 @@ import * as Docs from "./docs.ts";
 import type { DocInvite } from "./email.ts";
 import * as Export from "./export.ts";
 import { docxResponse } from "./export/docx.ts";
+import { linkedDiagrams } from "./export/linkedDiagrams.ts";
 import * as Home from "./home.ts";
 import * as Images from "./images.ts";
 import * as ImageImport from "./imageImport.ts";
@@ -730,8 +731,9 @@ export async function handleApi(
     if (resource === "docs" && id && sub === "export.md" && method === "GET") {
       await need(id, "viewer");
       const doc = await Docs.getDoc(deps.db, id);
+      const diagrams = await linkedDiagrams(deps.db, doc.tabs);
       return Export.markdownResponse(
-        Export.docMarkdown(doc, deps.publicOrigin),
+        Export.docMarkdown(doc, deps.publicOrigin, diagrams),
         doc.doc.title,
       );
     }
@@ -748,6 +750,7 @@ export async function handleApi(
         title: doc.doc.title,
         markdown: Export.docSourceMarkdown(doc),
         docUrl: `${deps.publicOrigin}/d/${id}`,
+        diagrams: await linkedDiagrams(deps.db, doc.tabs),
       });
     }
 
@@ -784,8 +787,9 @@ export async function handleApi(
     if (resource === "tabs" && id && sub === "export.md" && method === "GET") {
       const tab = await Docs.getTab(deps.db, id);
       await need(tab.docId, "viewer");
+      const diagrams = await linkedDiagrams(deps.db, [tab]);
       return Export.markdownResponse(
-        Export.tabMarkdown(tab, deps.publicOrigin),
+        Export.tabMarkdown(tab, deps.publicOrigin, diagrams),
         tab.title,
       );
     }
@@ -802,6 +806,7 @@ export async function handleApi(
         title: tab.title,
         markdown: Export.tabSourceMarkdown(tab),
         docUrl: `${deps.publicOrigin}/d/${tab.docId}/${tab.id}`,
+        diagrams: await linkedDiagrams(deps.db, [tab]),
       });
     }
 

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { drawioBlock } from "../shared/drawio.ts";
 import type { DocWithTabs, Tab } from "../shared/protocol.ts";
 import { docMarkdown, slugify, tabMarkdown } from "./export.ts";
 import { makeApiHarness } from "./testing/apiHarness.ts";
@@ -50,6 +51,25 @@ describe("markdown assembly", () => {
     const markdown = tabMarkdown(tab("a", null, 0, "One", body), "https://docs.test");
     expect(markdown).toContain("[First post](https://x.com/jack/status/20)");
     expect(markdown).not.toContain("t3-embed");
+  });
+
+  it("shows linked Draw.io diagrams as their pictures, with the caption", () => {
+    const diagrams = new Map([
+      ["g1", { id: "g1", title: "Onboarding", pictureVersion: 1, hasSource: true }],
+    ]);
+    const body = `Intro\n\n${drawioBlock("g1", "How a client starts")}`;
+    const expected =
+      "![Onboarding](https://docs.test/api/diagrams/g1/picture.svg)\n\nHow a client starts";
+    const one = tabMarkdown(tab("a", null, 0, "One", body), "https://docs.test", diagrams);
+    expect(one).toBe(`# One\n\nIntro\n\n${expected}\n`);
+    const whole = docMarkdown(doc([tab("a", null, 0, "One", body)]), "https://docs.test", diagrams);
+    expect(whole).toContain(expected);
+    expect(whole).not.toContain("t3-drawio");
+  });
+
+  it("leaves a linked diagram's block alone when the caller has no diagrams to show", () => {
+    const body = drawioBlock("g1");
+    expect(tabMarkdown(tab("a", null, 0, "One", body), "https://docs.test")).toContain(body);
   });
 
   it("writes tabs depth-first with heading levels that follow depth", () => {
@@ -197,5 +217,66 @@ describe("export routes", () => {
       headers: { Cookie: cookie },
     });
     expect(missingTab.status).toBe(404);
+  });
+
+  it("exports a linked diagram as its picture, a note when there is none, and says when it is gone", async () => {
+    const api = makeApiHarness();
+    const cookie = await api.signIn();
+    const headers = { Cookie: cookie };
+    const { docId } = await seed(api, cookie);
+    const create = async (title: string, xml = "<mxGraphModel/>") =>
+      (
+        (await (
+          await api.call("POST", "/api/diagrams", { body: { title, xml }, headers })
+        ).json()) as { diagram: { id: string } }
+      ).diagram.id;
+    const drawn = await create("Drawn");
+    const undrawn = await create("Undrawn");
+    const empty = await create("Empty", "");
+    const gone = await create("Gone");
+    await api.call("PUT", `/api/diagrams/${drawn}/picture`, {
+      body: { version: 1, svg: '<svg xmlns="http://www.w3.org/2000/svg"><rect/></svg>', png: null },
+      headers,
+    });
+    const added = await api.call("POST", `/api/docs/${docId}/tabs`, {
+      body: {
+        title: "Flows",
+        markdown: [
+          drawioBlock(drawn, "Step by step"),
+          drawioBlock(undrawn),
+          drawioBlock(empty),
+          drawioBlock(gone, "Old flow"),
+        ].join("\n\n"),
+      },
+      headers,
+    });
+    const { tab: flows } = (await added.json()) as { tab: Tab };
+    expect((await api.call("DELETE", `/api/diagrams/${gone}`, { headers })).status).toBe(200);
+
+    const expected = [
+      `![Drawn](https://docs.test/api/diagrams/${drawn}/picture.svg)`,
+      "Step by step",
+      `[Undrawn](https://docs.test/diagrams/${undrawn}) (Diagram: its picture has not been drawn yet.)`,
+      `[Empty](https://docs.test/diagrams/${empty}) (Diagram: nothing has been drawn in it yet.)`,
+      "*Diagram not found.*",
+      "Old flow",
+    ].join("\n\n");
+    const one = await api.call("GET", `/api/tabs/${flows.id}/export.md`, { headers });
+    expect(one.status).toBe(200);
+    expect(await one.text()).toBe(`# Flows\n\n${expected}\n`);
+    const whole = await (await api.call("GET", `/api/docs/${docId}/export.md`, { headers })).text();
+    expect(whole).toContain(expected);
+    expect(whole).not.toContain("t3-drawio");
+
+    // The picture the export points at is one a reader of the doc can load.
+    await api.call("POST", `/api/docs/${docId}/members`, {
+      body: { email: "reader@example.com", role: "viewer" },
+      headers,
+    });
+    const reader = await api.signIn("reader@example.com");
+    const asReader = { headers: { Cookie: reader } };
+    expect((await api.call("GET", `/api/tabs/${flows.id}/export.md`, asReader)).status).toBe(200);
+    const picture = await api.call("GET", `/api/diagrams/${drawn}/picture.svg`, asReader);
+    expect(picture.status).toBe(200);
   });
 });

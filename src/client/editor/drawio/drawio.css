@@ -1,0 +1,343 @@
+/* A linked Draw.io diagram in a doc, and the Insert diagram picker. */
+
+.drawio-block {
+  position: relative;
+  margin: 1em 0;
+}
+
+.tab-editor .ProseMirror .drawio-block pre.drawio-source {
+  display: none;
+  margin: 0 0 0.5rem;
+}
+
+/* The source (the diagram's id, then a caption) shows while the caret is in it, and until it parses. */
+.tab-editor
+  .ProseMirror
+  .drawio-block:is([data-editing], [data-state="invalid"])
+  pre.drawio-source {
+  display: block;
+}
+
+.drawio-message {
+  margin: 0;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--muted);
+}
+
+.drawio-figure {
+  position: relative;
+  overflow: hidden;
+  margin: 0;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+}
+
+.drawio-tag {
+  position: absolute;
+  top: 0.6rem;
+  left: 0.6rem;
+  z-index: 1;
+}
+
+/* On the white card the chip keeps its light-mode colours, whatever the app's theme. */
+.drawio-figure .drawio-tag.diagram-chip.linked {
+  --linked: #b45309;
+  background: color-mix(in srgb, var(--linked) 12%, #fff);
+}
+
+.drawio-actions {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  z-index: 1;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.3rem;
+  max-width: calc(100% - 1rem);
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+
+.drawio-block:hover .drawio-actions,
+.drawio-actions:focus-within {
+  opacity: 1;
+}
+
+/* No hover on a touch screen: the actions sit in a row under the picture, always there. */
+@media (hover: none) {
+  .drawio-figure {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .drawio-stage {
+    order: 1;
+  }
+
+  .drawio-actions {
+    position: static;
+    order: 2;
+    justify-content: flex-start;
+    max-width: none;
+    padding: 0.5rem 0.6rem;
+    border-top: 1px solid var(--border);
+    opacity: 1;
+  }
+
+  .drawio-caption {
+    order: 3;
+  }
+}
+
+/* The editor colours and underlines every link in a tab; this one is a button. */
+.drawio-action,
+.tab-editor .ProseMirror a.drawio-action {
+  padding: 0.2rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--popover);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.85rem;
+  line-height: 1.4;
+  text-decoration: none;
+  white-space: nowrap;
+  box-shadow: 0 1px 4px rgb(0 0 0 / 0.12);
+  cursor: pointer;
+}
+
+.drawio-action:hover {
+  border-color: var(--input);
+}
+
+.drawio-action:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 1px;
+}
+
+.drawio-action[aria-disabled="true"] {
+  color: var(--muted);
+  cursor: not-allowed;
+}
+
+/* The picture stays on white in dark mode: Draw.io draws for a light page. */
+.drawio-stage {
+  display: grid;
+  place-items: center;
+  gap: 0.2rem;
+  width: 100%;
+  min-height: 9rem;
+  padding: 2.6rem 1.25rem 1.25rem;
+  border: 0;
+  background: #fff;
+  color: #71717b;
+  font: inherit;
+  font-size: 0.9rem;
+  text-align: center;
+  color-scheme: only light;
+}
+
+.drawio-stage strong {
+  align-self: end;
+  color: #27272a;
+  font-weight: 600;
+}
+
+.drawio-stage strong + span {
+  align-self: start;
+}
+
+.drawio-stage-button {
+  cursor: pointer;
+}
+
+.drawio-stage-button:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+}
+
+.drawio-picture {
+  width: 100%;
+  min-height: 5rem;
+}
+
+/* At its own size, down to the column's width: a tall diagram is not squeezed into a box. */
+.drawio-stage .drawio-picture img {
+  height: auto;
+  max-height: none;
+}
+
+.drawio-caption {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.9rem;
+  border-top: 1px solid var(--border);
+  color: var(--muted);
+  font-family: var(--font-sans);
+  font-size: 0.88rem;
+}
+
+.drawio-caption svg {
+  flex: none;
+}
+
+.drawio-caption-text {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.drawio-usage {
+  flex: none;
+  white-space: nowrap;
+}
+
+/* While the caret is in the source, the actions stay out of the way. */
+.drawio-block[data-editing] .drawio-actions {
+  display: none;
+}
+
+@media print {
+  .drawio-tag,
+  .drawio-actions,
+  .drawio-usage,
+  .tab-editor .ProseMirror .drawio-block pre.drawio-source {
+    display: none !important;
+  }
+
+  .drawio-figure {
+    break-inside: avoid;
+  }
+
+  .drawio-stage {
+    min-height: 0;
+    padding: 0.75rem;
+  }
+}
+
+/* Insert a diagram */
+
+.drawio-picker {
+  width: min(44rem, calc(100vw - 2rem));
+  max-height: calc(100vh - 4rem);
+  padding: 1.1rem 1.25rem 1.25rem;
+  overflow: auto;
+  color: var(--text);
+  background: var(--popover);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: 0 20px 60px rgb(0 0 0 / 0.3);
+}
+
+.drawio-picker::backdrop {
+  background: rgb(0 0 0 / 0.4);
+}
+
+.drawio-picker-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.drawio-picker-head h2 {
+  margin: 0;
+  font-size: 1.25rem;
+}
+
+.drawio-picker p {
+  margin: 0.2rem 0 0;
+}
+
+.drawio-picker-tabs {
+  flex-wrap: wrap;
+  margin-top: 0.8rem;
+}
+
+.drawio-picker-project {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.drawio-picker-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(12rem, 1fr));
+  gap: 0.8rem;
+  margin-top: 1rem;
+}
+
+.drawio-pick {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.drawio-pick:hover {
+  border-color: var(--accent);
+}
+
+.drawio-pick:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+.drawio-pick-preview {
+  flex: none;
+  width: 100%;
+  height: 6.5rem;
+  padding: 0.5rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.drawio-pick-new {
+  display: grid;
+  place-items: center;
+  background: #fff;
+  color: #8a929a;
+}
+
+.drawio-pick-preview .diagram-picture-note {
+  font-size: 0.75rem;
+  text-align: center;
+}
+
+.drawio-pick-text {
+  display: block;
+  padding: 0.5rem 0.7rem;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+
+.drawio-pick-text span {
+  display: block;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.drawio-picker .drawio-picker-note {
+  margin-top: 0.9rem;
+}
+
+@media (max-width: 640px) {
+  .drawio-picker-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .drawio-pick-preview {
+    height: 5rem;
+  }
+}

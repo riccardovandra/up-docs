@@ -8,6 +8,7 @@ import {
   useRef,
 } from "react";
 
+import type { DrawioContext } from "./drawio/drawioSupport.ts";
 import type { EmbedLoader } from "./embed/embedSupport.ts";
 import { createEditorExtensions } from "./extensions.ts";
 
@@ -29,6 +30,8 @@ interface TabEditorProps {
   readonly onVideoFile: (file: File, at: number | null) => void;
   /** The doc's saved copies of embedded posts; absent where there are none (project files). */
   readonly loadEmbed?: EmbedLoader;
+  /** What linked Draw.io diagrams need from a doc page; absent where there is none (project files). */
+  readonly drawio?: DrawioContext;
 }
 
 /** Shown when a tab's markdown cannot be opened. It never writes, so the stored text stays safe. */
@@ -104,6 +107,7 @@ function MarkdownEditor(props: TabEditorProps) {
   const canImportLinks = useRef(props.importImageLink !== undefined).current;
   const onVideoFile = useRef(props.onVideoFile);
   const loadEmbed = useRef(props.loadEmbed);
+  const drawio = useRef(props.drawio);
   useLayoutEffect(() => {
     images.current = {
       upload: props.uploadImage,
@@ -112,6 +116,7 @@ function MarkdownEditor(props: TabEditorProps) {
     };
     onVideoFile.current = props.onVideoFile;
     loadEmbed.current = props.loadEmbed;
+    drawio.current = props.drawio;
   });
   // Fixed for the editor's life: whether this doc has saved copies does not change.
   const hasEmbeds = useRef(props.loadEmbed !== undefined).current;
@@ -138,6 +143,7 @@ function MarkdownEditor(props: TabEditorProps) {
               Promise.reject(new Error("no embeds"))
           : null,
       },
+      { context: () => drawio.current ?? null },
     ),
     editable: props.editable,
     content: props.markdown,
@@ -151,8 +157,11 @@ function MarkdownEditor(props: TabEditorProps) {
   });
 
   useEffect(() => {
-    if (editor.isEditable !== props.editable)
-      editor.setEditable(props.editable, false);
+    if (editor.isEditable === props.editable) return;
+    editor.setEditable(props.editable, false);
+    // That is silent, so nothing is saved. Blocks that offer actions only to
+    // editors still have to hear of it: an empty transaction tells them.
+    editor.view.dispatch(editor.state.tr);
   }, [editor, props.editable]);
 
   const { onEditor } = props;

@@ -4,6 +4,7 @@
 // the result there; this module only computes it and never talks to Claude Docs.
 
 import { sha256Hex } from "../../worker/crypto.ts";
+import { diagramPath, DRAWIO_LANGUAGE, parseDrawioBlock } from "../drawio.ts";
 import { embedsToLinks, EMBED_LANGUAGE } from "../embeds.ts";
 import { splitImageAlt } from "../images.ts";
 import { findFences, parseTable, tableToGfm, TABLE_LANGUAGE, type Fence } from "../table.ts";
@@ -69,6 +70,7 @@ export type WarningKind =
   | "table-invalid"
   | "video-as-link"
   | "embed-as-link"
+  | "drawio-as-link"
   | "mermaid-as-code"
   | "image-dropped"
   | "claude-token-in-text";
@@ -253,6 +255,17 @@ export function convertMarkdown(markdown: string, origin: string): Converted {
         const link = embedsToLinks(source);
         if (link !== source) {
           warnings.push({ kind: "embed-as-link", detail: link });
+          block(fence, link);
+        }
+        break;
+      }
+      case DRAWIO_LANGUAGE: {
+        // Claude Docs cannot load the picture, so the block becomes a link to the diagram.
+        const linked = parseDrawioBlock(fence.body);
+        if (linked) {
+          const label = (linked.caption ?? "Draw.io diagram").replace(/([\\[\]])/g, "\\$1");
+          const link = `[${label}](${origin}${diagramPath(linked.diagramId)})`;
+          warnings.push({ kind: "drawio-as-link", detail: link });
           block(fence, link);
         }
         break;

@@ -111,6 +111,17 @@ describe("home library", () => {
     expect((await libraryDocs(owner))[0]).toMatchObject({ memberCount: 2, openedAt: 2_000_000 });
   });
 
+  it("shows a linked Draw.io diagram on a card as its caption, never as its id", async () => {
+    const { owner, createDoc, libraryDocs } = await setup();
+    const id = "0b6f3a52-6a3e-4b0c-9a55-2b1d1f4f2a10";
+    await createDoc(
+      "Plan",
+      `Intro\n\n\`\`\`t3-drawio\n${id}\nThe flow\n\`\`\`\n\n\`\`\`t3-drawio\n${id}\n\`\`\`\n\nEnd`,
+    );
+    const [doc] = await libraryDocs(owner);
+    expect(doc!.preview).toBe("Intro\nThe flow\nEnd");
+  });
+
   it("tracks opens per person, and a newer open replaces the old one", async () => {
     const { api, owner, as, createDoc, libraryDocs } = await setup();
     const docId = await createDoc("Plan", "Body");

@@ -50,6 +50,16 @@ describe("visibleText", () => {
     expect(richBlockText("t3-embed", "https://x.com/jack/status/20")).toEqual([]);
   });
 
+  it("reads a linked Draw.io diagram as its caption, never its id", () => {
+    expect(
+      visibleText(
+        "Intro\n\n```t3-drawio\n0b6f3a52-6a3e-4b0c-9a55-2b1d1f4f2a10\nThe flow\n```\n\nEnd",
+      ),
+    ).toBe("Intro\nThe flow\nEnd");
+    expect(richBlockText("t3-drawio", "0b6f3a52-6a3e-4b0c-9a55-2b1d1f4f2a10")).toEqual([]);
+    expect(richBlockText("t3-drawio", "not an id!\nCaption")).toEqual([]);
+  });
+
   it("reads a video as its title, never its URL", () => {
     const text = visibleText(
       "Intro\n\n```t3-video\nhttps://youtu.be/dQw4w9WgXcQ\nThe walkthrough\n```\n\nEnd",

@@ -5,6 +5,7 @@
 import { orderTabs } from "../client/doc/tabTree.ts";
 import type { DocWithTabs, Tab } from "../shared/protocol.ts";
 import { richTablesToGfm } from "../shared/table.ts";
+import { drawioToMarkdown, type ExportDiagrams } from "../shared/drawioExport.ts";
 import { embedsToLinks } from "../shared/embeds.ts";
 import { videosToLinks } from "../shared/video.ts";
 
@@ -19,26 +20,46 @@ function startsWithTitle(body: string, title: string): boolean {
   return match !== null && normalizeTitle(match[1] ?? "") === normalizeTitle(title);
 }
 
-function section(tab: Tab, depth: number, origin: string | null): string {
+function section(
+  tab: Tab,
+  depth: number,
+  origin: string | null,
+  diagrams: ExportDiagrams | null = null,
+): string {
   const level = Math.min(depth + 1, MAX_HEADING_LEVEL);
   const heading = `${"#".repeat(level)} ${tab.title}`;
-  // Downloads are for reading, so rich tables become GFM tables and videos and embeds become links.
-  const body = (
+  // Downloads are for reading, so rich tables become GFM tables, videos and embeds become
+  // links, and linked Draw.io diagrams become their pictures.
+  const readable =
     origin === null
       ? tab.markdown
-      : embedsToLinks(videosToLinks(richTablesToGfm(tab.markdown), origin))
+      : embedsToLinks(videosToLinks(richTablesToGfm(tab.markdown), origin));
+  const body = (
+    origin === null || diagrams === null ? readable : drawioToMarkdown(readable, origin, diagrams)
   ).trim();
   if (body && startsWithTitle(body, tab.title)) return `${body}\n`;
   return body ? `${heading}\n\n${body}\n` : `${heading}\n`;
 }
 
-/** `origin` makes links to uploaded videos absolute. */
-export const tabMarkdown = (tab: Tab, origin = ""): string => section(tab, 0, origin);
+/**
+ * `origin` makes links to uploaded videos and diagram pictures absolute. `diagrams`
+ * are the Draw.io diagrams the tab links (see `linkedDiagrams`); without them a
+ * linked diagram's block is left as it is.
+ */
+export const tabMarkdown = (
+  tab: Tab,
+  origin = "",
+  diagrams: ExportDiagrams | null = null,
+): string => section(tab, 0, origin, diagrams);
 
 /** Every tab as a section whose heading level follows its depth in the tree. */
-export const docMarkdown = (doc: DocWithTabs, origin = ""): string =>
+export const docMarkdown = (
+  doc: DocWithTabs,
+  origin = "",
+  diagrams: ExportDiagrams | null = null,
+): string =>
   orderTabs(doc.tabs)
-    .map(({ tab, depth }) => section(tab, depth, origin))
+    .map(({ tab, depth }) => section(tab, depth, origin, diagrams))
     .join("\n");
 
 /**

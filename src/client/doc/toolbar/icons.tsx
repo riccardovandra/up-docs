@@ -33,6 +33,16 @@ export const DrawIcon = () => (
   </Icon>
 );
 
+/** Boxes joined by lines: a Draw.io diagram from the library. */
+export const LinkedDiagramIcon = () => (
+  <Icon>
+    <rect x="1.5" y="2.5" width="5" height="4" rx="1" />
+    <rect x="9.5" y="2.5" width="5" height="4" rx="1" />
+    <rect x="9.5" y="9.5" width="5" height="4" rx="1" />
+    <path d="M6.5 4.5h3M12 6.5v3" />
+  </Icon>
+);
+
 export const WidthIcon = () => (
   <Icon>
     <path d="M2 8h12M4.5 5.5L2 8l2.5 2.5M11.5 5.5L14 8l-2.5 2.5" />

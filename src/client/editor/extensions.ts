@@ -4,6 +4,7 @@ import { Markdown } from "@tiptap/markdown";
 import StarterKit from "@tiptap/starter-kit";
 
 import { DocsCodeBlock } from "./codeBlock.ts";
+import { DrawioSupport, type DrawioSupportOptions } from "./drawio/drawioSupport.ts";
 import { EmbedSupport, type EmbedSupportOptions } from "./embed/embedSupport.ts";
 import { HeadingFold } from "./headingFold.ts";
 import { DocImage, type DocImageOptions, DocParagraph } from "./image.ts";
@@ -21,6 +22,7 @@ export const createEditorExtensions = (
   images: DocImageOptions = { upload: null, onUploadError: () => undefined },
   videos: VideoDropOptions = { onFiles: null },
   embeds: EmbedSupportOptions = { load: null },
+  drawio: DrawioSupportOptions = { context: () => null },
 ) => [
   StarterKit.configure({ link: { openOnClick: false }, codeBlock: false, paragraph: false }),
   DocParagraph,
@@ -31,6 +33,7 @@ export const createEditorExtensions = (
   DocImage.configure(images),
   VideoDrop.configure(videos),
   EmbedSupport.configure(embeds),
+  DrawioSupport.configure(drawio),
   HeadingFold,
   LinkClick,
   LinkPaste,
