@@ -1,6 +1,6 @@
 import { type Editor, Extension } from "@tiptap/core";
 import type { Node as ProseMirrorNode } from "@tiptap/pm/model";
-import type { EditorState, Transaction } from "@tiptap/pm/state";
+import { Selection, TextSelection, type EditorState, type Transaction } from "@tiptap/pm/state";
 
 import { drawioBlockBody, isDrawioLanguage, parseDrawioBlock } from "../../../shared/drawio.ts";
 import { type BlockDiagram, drawioNode } from "./blockLogic.ts";
@@ -53,8 +53,36 @@ export const DrawioSupport = Extension.create<DrawioSupportOptions, DrawioSuppor
 const changeable = (editor: Editor) => !editor.isDestroyed && editor.isEditable;
 
 /**
- * Links a diagram at the caret. A line follows the block, so the caret stays
- * out of it and the picture shows.
+ * Puts the caret after the block the last step inserted for `diagramId`, outside
+ * it, so its picture shows and not its source. Where text already follows, the
+ * caret goes there and nothing is added. Where nothing follows, or only a code
+ * block (whose own source the caret would open), one empty line goes in for it.
+ */
+function caretAfterInserted(tr: Transaction, diagramId: string): boolean {
+  const body = drawioBlockBody(diagramId, null);
+  let end = -1;
+  tr.mapping.maps.at(-1)?.forEach((_from, _to, newFrom, newTo) => {
+    tr.doc.nodesBetween(newFrom, newTo, (node, pos) => {
+      if (end === -1 && pos >= newFrom && blockAt(tr.doc, pos) && node.textContent === body) {
+        end = pos + node.nodeSize;
+      }
+      return end === -1;
+    });
+  });
+  if (end === -1) return false;
+  const next = Selection.findFrom(tr.doc.resolve(end), 1, true);
+  const paragraph = tr.doc.type.schema.nodes.paragraph;
+  if (next && !next.$from.parent.type.spec.code) tr.setSelection(next);
+  else if (paragraph) {
+    tr.insert(end, paragraph.create());
+    tr.setSelection(TextSelection.create(tr.doc, end + 1));
+  }
+  return true;
+}
+
+/**
+ * Links a diagram at the caret, and leaves the caret after the block: see
+ * `caretAfterInserted` for when a line is added under it.
  *
  * `focus: false` leaves the keyboard where it is: the block of a new diagram
  * goes in while the Draw.io editor is still open over the page, and the keys
@@ -63,7 +91,8 @@ const changeable = (editor: Editor) => !editor.isDestroyed && editor.isEditable;
 export function linkDiagramAtCaret(editor: Editor, diagramId: string, focus: boolean): boolean {
   const chain = focus ? editor.chain().focus() : editor.chain();
   return chain
-    .insertContent([drawioNode(diagramId), { type: "paragraph" }])
+    .insertContent(drawioNode(diagramId))
+    .command(({ tr }) => caretAfterInserted(tr, diagramId))
     .scrollIntoView()
     .run();
 }

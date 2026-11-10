@@ -23,6 +23,7 @@ import { NoProjectBadge, ProjectBadge } from "../home/ProjectSwitcher.tsx";
 import { navigate } from "../router.ts";
 import { DiagramEditor, type DiagramEditorTarget } from "./DiagramEditor.tsx";
 import { DiagramPicture } from "./DiagramPicture.tsx";
+import { subscribeRefresh } from "./diagramRefresh.ts";
 import { diagramsApi } from "./diagramsApi.ts";
 import "./diagrams.css";
 
@@ -129,6 +130,9 @@ export function DiagramsView(props: {
 
   useEffect(() => {
     void reload();
+    // Then with every re-read of the page: an agent or another tab may have added, changed
+    // or deleted a diagram. The list carries no source, so it is its own cheap check.
+    return subscribeRefresh(() => void reload());
   }, [reload]);
 
   const shown = useMemo(

@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 
 import {
   drawioBlock,
+  MAX_DIAGRAM_REFRESH_IDS,
   MAX_DIAGRAM_XML_BYTES,
   type DiagramListItem,
+  type DiagramRefresh,
   type DiagramSummary,
   type DiagramUsage,
   type DiagramView,
@@ -545,6 +547,101 @@ describe("where a diagram is used", () => {
     const reader = { id: diagram.id, createdBy: diagram.createdBy };
     expect(await Diagrams.canViewDiagram(api.db, reader, "owner")).toBe(true);
     expect(await Diagrams.canViewDiagram(api.db, reader, "nobody")).toBe(false);
+  });
+});
+
+describe("re-reading diagrams by id", () => {
+  type Refreshed = { diagrams: Array<DiagramRefresh>; error?: string };
+
+  it("gives someone who manages them the current versions and where they are linked", async () => {
+    const { creator, doc, create, link, upload, send } = await setup();
+    const diagram = await create(creator, { title: "Onboarding", xml: XML });
+    const other = await create(creator, { title: "Billing" });
+    await upload(creator, diagram.id, 1);
+    await link(doc, diagram.id);
+    const path = `/api/diagrams?ids=${diagram.id},${other.id}`;
+
+    const first = await send<Refreshed>(creator, "GET", path);
+    expect(first.status).toBe(200);
+    const byId = new Map(first.body.diagrams.map((item) => [item.id, item]));
+    expect(byId.get(diagram.id)).toMatchObject({
+      title: "Onboarding",
+      version: 1,
+      pictureVersion: 1,
+      hasSource: true,
+      canEdit: true,
+      usage: { uses: [{ docId: doc.doc.id, docTitle: "Playbook" }], otherDocs: 0 },
+    });
+    expect(byId.get(other.id)).toMatchObject({
+      canEdit: true,
+      hasSource: false,
+      usage: { uses: [], otherDocs: 0 },
+    });
+    // Never the source, which can be a megabyte.
+    expect(JSON.stringify(first.body)).not.toContain("mxGraphModel");
+    expect(first.body.diagrams[0]).not.toHaveProperty("xml");
+
+    // A save made elsewhere: the next re-read says the version moved on, the picture is behind.
+    await send(creator, "PATCH", `/api/diagrams/${diagram.id}`, { xml: XML2, baseVersion: 1 });
+    const second = await send<Refreshed>(creator, "GET", path);
+    expect(second.body.diagrams.find((item) => item.id === diagram.id)).toMatchObject({
+      version: 2,
+      pictureVersion: 1,
+    });
+  });
+
+  it("leaves out a diagram the caller cannot see, and one that is gone", async () => {
+    const { creator, doc, otherDoc, person, create, link, send } = await setup();
+    const shown = await create(creator, { title: "Shown", xml: XML });
+    const hidden = await create(creator, { title: "Hidden", xml: XML });
+    const deleted = await create(creator, { title: "Deleted", xml: XML });
+    await link(doc, shown.id);
+    await send(creator, "DELETE", `/api/diagrams/${deleted.id}`);
+    const reader = await person("reader@example.com", doc.doc.id);
+    const stranger = await person("stranger@example.com", otherDoc.doc.id);
+    const path = `/api/diagrams?ids=${shown.id},${hidden.id},${deleted.id}`;
+
+    // A reader of a doc that links one: that one, without its source or where else it is linked.
+    const forReader = await send<Refreshed>(reader, "GET", path);
+    expect(forReader.body.diagrams).toEqual([
+      expect.objectContaining({ id: shown.id, canEdit: false, usage: null }),
+    ]);
+    expect(JSON.stringify(forReader.body)).not.toContain("mxGraphModel");
+    // The same answer the single read gives each of them.
+    for (const [id, status] of [
+      [shown.id, 200],
+      [hidden.id, 404],
+      [deleted.id, 404],
+    ] as const) {
+      expect((await send(reader, "GET", `/api/diagrams/${id}`)).status).toBe(status);
+    }
+
+    expect((await send<Refreshed>(stranger, "GET", path)).body.diagrams).toEqual([]);
+    const forCreator = await send<Refreshed>(creator, "GET", path);
+    expect(forCreator.body.diagrams.map((item) => item.title).toSorted()).toEqual([
+      "Hidden",
+      "Shown",
+    ]);
+  });
+
+  it("answers an empty list with nothing, and refuses a bad id or too many", async () => {
+    const { api, creator, create, send } = await setup();
+    const diagram = await create(creator, { xml: XML });
+    expect((await send<Refreshed>(creator, "GET", "/api/diagrams?ids=")).body).toEqual({
+      diagrams: [],
+    });
+    // Asked twice, answered once.
+    const read = (ids: ReadonlyArray<string>) =>
+      send<Refreshed>(creator, "GET", `/api/diagrams?ids=${ids.join(",")}`);
+    // Asked twice, answered once.
+    expect((await read([diagram.id, diagram.id])).body.diagrams).toHaveLength(1);
+
+    const bad = await read([diagram.id, "not%20an%20id"]);
+    expect([bad.status, bad.body.error]).toEqual([400, "invalid_ids"]);
+    const many = Array.from({ length: MAX_DIAGRAM_REFRESH_IDS + 1 }, (_, at) => `id-${at}`);
+    expect((await read(many)).status).toBe(400);
+    expect((await read(many.slice(1))).status).toBe(200);
+    expect((await api.call("GET", `/api/diagrams?ids=${diagram.id}`)).status).toBe(401);
   });
 });
 

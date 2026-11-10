@@ -49,6 +49,7 @@ import {
   DEFAULT_DIAGRAM_TITLE,
   isDiagramId,
   isDiagramPictureFormat,
+  MAX_DIAGRAM_REFRESH_IDS,
   MAX_DIAGRAM_TITLE_LENGTH,
 } from "../shared/drawio.ts";
 
@@ -938,8 +939,8 @@ const versionConflict = (conflict: { readonly version: number }) =>
 /**
  * Draw.io diagrams, under `/api/diagrams`. Their creator and the admin list
  * and change them. Someone on a doc that shows one (`Diagrams.canViewDiagram`)
- * may fetch its picture and the diagram without its source. Returns null when
- * the path is not one of these routes.
+ * may fetch its picture and the diagram without its source, one at a time or
+ * several by id. Returns null when the path is not one of these routes.
  */
 async function handleDiagrams(
   request: Request,
@@ -957,6 +958,14 @@ async function handleDiagrams(
   const now = deps.now();
 
   if (!id && method === "GET") {
+    // `?ids=<id>,<id>`: an open page re-reading the diagrams it shows. Never their source.
+    const ids = url.searchParams.get("ids");
+    if (ids !== null) {
+      const diagramIds = ids === "" ? [] : ids.split(",");
+      if (diagramIds.length > MAX_DIAGRAM_REFRESH_IDS || !diagramIds.every(isDiagramId))
+        return error(400, "invalid_ids");
+      return json({ diagrams: await Diagrams.refreshDiagrams(deps.db, { diagramIds, userId }) });
+    }
     // `?projectId=<id>` for one project, `?projectId=none` for diagrams in no project.
     const param = url.searchParams.get("projectId");
     const projectId = param === null ? undefined : param === "none" ? null : param;

@@ -11,6 +11,7 @@ import { useLockedProject } from "../lockedProject.ts";
 import { docPath, navigate } from "../router.ts";
 import { DiagramEditor } from "./DiagramEditor.tsx";
 import { DiagramPicture } from "./DiagramPicture.tsx";
+import { subscribeRefresh, watchDiagram } from "./diagramRefresh.ts";
 import { diagramErrorMessage, diagramsApi, subscribeDiagram } from "./diagramsApi.ts";
 import "../home/home.css";
 import "./diagrams.css";
@@ -62,14 +63,22 @@ export function DiagramPage(props: { readonly diagramId: string }) {
     );
   }, [reload]);
 
-  // A save or a redraw on this page: keep the title and versions in step.
-  useEffect(
-    () =>
-      subscribeDiagram(diagramId, (next) =>
-        setDiagram((current) => (current && next ? { ...current, ...next } : current)),
-      ),
-    [diagramId],
-  );
+  // A save or a redraw on this page, or a change made elsewhere that a re-read of the page
+  // found: keep the title, the versions and the docs that link it in step.
+  useEffect(() => {
+    const stops = [
+      watchDiagram(diagramId),
+      subscribeDiagram(diagramId, (next) => {
+        if (next === null) setMissing(true);
+        else setDiagram((current) => (current ? { ...current, ...next } : current));
+      }),
+      subscribeRefresh((seen) => {
+        const next = seen.get(diagramId)?.usage;
+        if (next) setUsage(next);
+      }),
+    ];
+    return () => stops.forEach((stop) => stop());
+  }, [diagramId]);
 
   const back = (label: string) => (
     <button type="button" className="button secondary" onClick={() => navigate(DIAGRAMS_PATH)}>

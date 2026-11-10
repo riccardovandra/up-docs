@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 
 import { DEFAULT_DIAGRAM_TITLE, type DiagramSummary } from "../../shared/drawio.ts";
 import { LinkIcon } from "../home/icons.tsx";
+import { refreshDiagrams } from "./diagramRefresh.ts";
 import { diagramsApi } from "./diagramsApi.ts";
 import { drawioEditorUrl, mountDrawioFrame } from "./drawioFrame.ts";
 import {
@@ -76,6 +77,8 @@ export function DiagramEditor(props: {
       frame.remove();
       session.current = null;
       document.body.style.overflow = overflow;
+      // However the overlay closed, the page under it shows what the server now has.
+      void refreshDiagrams();
     };
   }, [target]);
 

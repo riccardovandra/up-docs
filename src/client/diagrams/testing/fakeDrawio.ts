@@ -1,4 +1,9 @@
-import type { DiagramSummary, DiagramView } from "../../../shared/drawio.ts";
+import type {
+  DiagramRefresh,
+  DiagramSummary,
+  DiagramUsage,
+  DiagramView,
+} from "../../../shared/drawio.ts";
 import { ApiError } from "../../api.ts";
 import type { DiagramPictureUpload } from "../diagramsApi.ts";
 import type { DrawioAction, DrawioEvent, DrawioFrame } from "../drawioFrame.ts";
@@ -78,8 +83,12 @@ export const conflictError = (current: DiagramSummary) =>
 /** An in-memory stand-in for the diagrams API, holding diagrams by id and logging the writes. */
 export function fakeApi(initial: ReadonlyArray<DiagramView> = []) {
   const diagrams = new Map(initial.map((diagram) => [diagram.id, diagram]));
+  /** Where each diagram is linked, as the server would tell someone who manages it. */
+  const usage = new Map<string, DiagramUsage>();
   const calls: Array<readonly [string, ...Array<unknown>]> = [];
-  const fail: { update?: unknown; create?: unknown; upload?: unknown } = {};
+  /** The ids each re-read asked about: reads, so kept apart from the writes in `calls`. */
+  const reads: Array<ReadonlyArray<string>> = [];
+  const fail: { update?: unknown; create?: unknown; upload?: unknown; summaries?: unknown } = {};
   const take = (key: keyof typeof fail) => {
     const cause = fail[key];
     delete fail[key];
@@ -87,8 +96,23 @@ export function fakeApi(initial: ReadonlyArray<DiagramView> = []) {
   };
   return {
     diagrams,
+    usage,
     calls,
+    reads,
     fail,
+    summaries: async (
+      diagramIds: ReadonlyArray<string>,
+    ): Promise<ReadonlyArray<DiagramRefresh>> => {
+      reads.push([...diagramIds]);
+      take("summaries");
+      return diagramIds.flatMap((diagramId) => {
+        const diagram = diagrams.get(diagramId);
+        if (!diagram) return [];
+        const { xml: _xml, ...rest } = diagram;
+        const linked = usage.get(diagramId) ?? { uses: [], otherDocs: 0 };
+        return [{ ...rest, usage: diagram.canEdit ? linked : null }];
+      });
+    },
     get: async (diagramId: string): Promise<DiagramView> => {
       const diagram = diagrams.get(diagramId);
       if (!diagram) throw new ApiError(404, { error: "not_found" });
