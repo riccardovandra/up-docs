@@ -1,7 +1,14 @@
-import { memo, useState } from "react";
+import { type DragEvent, memo, useState } from "react";
 
 import type { Tab } from "../../../shared/protocol.ts";
-import { countDescendants, moveTarget, orderTabs, type TabMove } from "../tabTree.ts";
+import {
+  countDescendants,
+  dropTarget,
+  moveTarget,
+  orderTabs,
+  type TabDrop,
+  type TabMove,
+} from "../tabTree.ts";
 import { ChevronDown } from "./icons.tsx";
 import { InlineRename, MenuItem, MenuSeparator, Popover } from "./Popover.tsx";
 
@@ -22,7 +29,8 @@ export interface TabActions {
 
 /**
  * "Tab 1 ▾": the active tab's title, opening the doc's tab tree with child
- * tabs, collapse, rename, reorder and delete. Without `manage`, it only switches.
+ * tabs, collapse, rename, reorder (by menu or by dragging a row) and delete.
+ * Without `manage`, it only switches.
  */
 export const TabSwitcher = memo(function TabSwitcher(
   props: TabActions & {
@@ -60,6 +68,24 @@ function TabTree(
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
   const [menuTabId, setMenuTabId] = useState<string | null>(null);
   const [renamingTabId, setRenamingTabId] = useState<string | null>(null);
+  const [draggingTabId, setDraggingTabId] = useState<string | null>(null);
+  const [dropAt, setDropAt] = useState<{
+    readonly tabId: string;
+    readonly drop: TabDrop;
+  } | null>(null);
+
+  const endDrag = () => {
+    setDraggingTabId(null);
+    setDropAt(null);
+  };
+
+  const dropFor = (event: DragEvent<HTMLElement>, targetId: string) => {
+    if (!draggingTabId) return null;
+    const box = event.currentTarget.getBoundingClientRect();
+    const drop: TabDrop = event.clientY < box.top + box.height / 2 ? "before" : "after";
+    const target = dropTarget(props.tabs, draggingTabId, targetId, drop);
+    return target ? { drop, target } : null;
+  };
 
   const ordered = orderTabs(props.tabs);
   const parentIds = new Set(props.tabs.map((tab) => tab.parentTabId));
@@ -103,8 +129,46 @@ function TabTree(
               {...(hasChildren ? { "aria-expanded": expanded } : {})}
             >
               <div
-                className={active ? "tab-row active" : "tab-row"}
+                className={[
+                  "tab-row",
+                  active ? "active" : "",
+                  draggingTabId === tab.id ? "dragging" : "",
+                  dropAt?.tabId === tab.id ? `drop-${dropAt.drop}` : "",
+                ]
+                  .filter(Boolean)
+                  .join(" ")}
                 style={{ paddingLeft: `${depth}rem` }}
+                draggable={props.manage && renamingTabId !== tab.id}
+                onDragStart={(event) => {
+                  event.dataTransfer.effectAllowed = "move";
+                  event.dataTransfer.setData("text/plain", tab.title);
+                  setDraggingTabId(tab.id);
+                  setMenuTabId(null);
+                }}
+                onDragEnd={endDrag}
+                onDragOver={(event) => {
+                  const found = dropFor(event, tab.id);
+                  if (!found) {
+                    if (dropAt?.tabId === tab.id) setDropAt(null);
+                    return;
+                  }
+                  event.preventDefault();
+                  event.dataTransfer.dropEffect = "move";
+                  if (dropAt?.tabId !== tab.id || dropAt.drop !== found.drop)
+                    setDropAt({ tabId: tab.id, drop: found.drop });
+                }}
+                onDragLeave={(event) => {
+                  if (event.currentTarget.contains(event.relatedTarget as Node | null)) return;
+                  if (dropAt?.tabId === tab.id) setDropAt(null);
+                }}
+                onDrop={(event) => {
+                  const found = dropFor(event, tab.id);
+                  const moving = draggingTabId;
+                  endDrag();
+                  if (!found || !moving) return;
+                  event.preventDefault();
+                  props.onMove(moving, found.target.parentTabId, found.target.position);
+                }}
               >
                 {hasChildren ? (
                   <button

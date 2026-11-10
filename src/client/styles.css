@@ -597,6 +597,22 @@ input:focus {
   background: var(--hover);
 }
 
+.tab-row[draggable="true"] {
+  cursor: grab;
+}
+
+.tab-row.dragging {
+  opacity: 0.5;
+}
+
+.tab-row.drop-before {
+  box-shadow: inset 0 2px 0 var(--accent);
+}
+
+.tab-row.drop-after {
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+
 .tab-row-toggle,
 .tab-row-menu-button {
   flex: none;
