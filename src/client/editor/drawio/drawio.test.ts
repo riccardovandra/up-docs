@@ -142,6 +142,25 @@ describe("linking, relinking and removing a block", () => {
   });
 });
 
+describe("a change of the right to edit", () => {
+  it("reaches the blocks through the empty transaction the tab editor sends", () => {
+    const editor = editorOn("Intro");
+    const heard: Array<boolean> = [];
+    let updates = 0;
+    editor.on("transaction", () => heard.push(editor.isEditable));
+    editor.on("update", () => (updates += 1));
+
+    // The page switches quietly, so nothing is saved; on its own that tells a block nothing.
+    editor.setEditable(false, false);
+    expect(heard).toEqual([]);
+    editor.view.dispatch(editor.state.tr);
+    expect(heard).toEqual([false]);
+    // And it is not an edit: the tab is not saved for it.
+    expect(updates).toBe(0);
+    editor.destroy();
+  });
+});
+
 describe("block actions", () => {
   const ids = (actions: ReturnType<typeof blockActions>) => actions.map((action) => action.id);
 

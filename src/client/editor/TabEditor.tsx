@@ -157,8 +157,11 @@ function MarkdownEditor(props: TabEditorProps) {
   });
 
   useEffect(() => {
-    if (editor.isEditable !== props.editable)
-      editor.setEditable(props.editable, false);
+    if (editor.isEditable === props.editable) return;
+    editor.setEditable(props.editable, false);
+    // That is silent, so nothing is saved. Blocks that offer actions only to
+    // editors still have to hear of it: an empty transaction tells them.
+    editor.view.dispatch(editor.state.tr);
   }, [editor, props.editable]);
 
   const { onEditor } = props;

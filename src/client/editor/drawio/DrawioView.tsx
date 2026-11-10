@@ -276,13 +276,11 @@ export class DrawioView implements NodeView {
     this.dom.append(pre, chrome);
     this.root = createRoot(chrome);
 
-    editor.on("selectionUpdate", this.sync);
+    // Every transaction, not only a moved caret: TabEditor sends an empty one when the right
+    // to edit changes, and the actions must follow it at once.
+    editor.on("transaction", this.sync);
     editor.on("focus", this.sync);
     editor.on("blur", this.sync);
-    // Nothing announces a change of the right to edit (the page turns it on and off quietly), so
-    // the block looks again whenever the pointer or the keyboard reaches it, before its actions show.
-    this.dom.addEventListener("pointerenter", this.sync);
-    this.dom.addEventListener("focusin", this.sync);
     this.sync();
   }
 
@@ -306,7 +304,7 @@ export class DrawioView implements NodeView {
 
   destroy() {
     this.destroyed = true;
-    this.editor.off("selectionUpdate", this.sync);
+    this.editor.off("transaction", this.sync);
     this.editor.off("focus", this.sync);
     this.editor.off("blur", this.sync);
     // The editor can drop a view while React is rendering; a root may not be unmounted then.
