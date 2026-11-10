@@ -84,6 +84,36 @@ export function moveTarget(
   }
 }
 
+export type TabDrop = "before" | "after";
+
+/**
+ * The `moveTab` arguments for dropping `tabId` just before or after `targetId`
+ * among the target's siblings, or null when the drop would not move it or
+ * would put a tab inside its own subtree.
+ */
+export function dropTarget(
+  tabs: ReadonlyArray<Tab>,
+  tabId: string,
+  targetId: string,
+  drop: TabDrop,
+): { readonly parentTabId: string | null; readonly position: number } | null {
+  const tab = tabs.find((candidate) => candidate.id === tabId);
+  const target = tabs.find((candidate) => candidate.id === targetId);
+  if (!tab || !target || tab.id === target.id) return null;
+  for (let parentId = target.parentTabId; parentId !== null;) {
+    if (parentId === tab.id) return null;
+    parentId = tabs.find((candidate) => candidate.id === parentId)?.parentTabId ?? null;
+  }
+  const others = siblingsOf(tabs, target.parentTabId).filter((sibling) => sibling.id !== tab.id);
+  const position =
+    others.findIndex((sibling) => sibling.id === target.id) + (drop === "after" ? 1 : 0);
+  if (tab.parentTabId === target.parentTabId) {
+    const current = siblingsOf(tabs, tab.parentTabId).findIndex((sibling) => sibling.id === tab.id);
+    if (current === position) return null;
+  }
+  return { parentTabId: target.parentTabId, position };
+}
+
 export function countDescendants(tabs: ReadonlyArray<Tab>, tabId: string): number {
   const children = tabs.filter((tab) => tab.parentTabId === tabId);
   return children.reduce((count, child) => count + 1 + countDescendants(tabs, child.id), 0);
