@@ -13,6 +13,7 @@ import {
 } from "../../../shared/drawio.ts";
 import { ApiError } from "../../api.ts";
 import { DiagramPicture } from "../../diagrams/DiagramPicture.tsx";
+import { subscribeRefresh, watchDiagram } from "../../diagrams/diagramRefresh.ts";
 import { diagramErrorMessage, diagramsApi, subscribeDiagram } from "../../diagrams/diagramsApi.ts";
 import { DiagramIcon, LinkIcon } from "../../home/icons.tsx";
 import { navigate } from "../../router.ts";
@@ -38,7 +39,10 @@ type Loaded = BlockDiagram | "missing" | "failed" | null;
 const isKnown = (loaded: Loaded): loaded is BlockDiagram =>
   loaded !== null && typeof loaded === "object";
 
-/** Follows one diagram: what this editor last saw, then the server's answer, then every save. */
+/**
+ * Follows one diagram: what this editor last saw, then the server's answer,
+ * then every save made on this page and every re-read of the page.
+ */
 function useBlockDiagram(diagramId: string, known: Map<string, BlockDiagram> | undefined): Loaded {
   const [loaded, setLoaded] = useState<Loaded>(() => known?.get(diagramId) ?? null);
 
@@ -60,9 +64,11 @@ function useBlockDiagram(diagramId: string, known: Map<string, BlockDiagram> | u
         next === null ? "missing" : mergeDiagram(isKnown(current) ? current : null, next),
       ),
     );
+    const unwatch = watchDiagram(diagramId);
     return () => {
       live = false;
       stop();
+      unwatch();
     };
   }, [diagramId]);
 
@@ -103,8 +109,14 @@ function LinkedFigure(props: {
       },
       () => undefined,
     );
+    // Then with every re-read of the page: it may have been linked elsewhere since.
+    const stop = subscribeRefresh((seen) => {
+      const next = seen.get(diagramId)?.usage;
+      if (next) setUsage(next);
+    });
     return () => {
       live = false;
+      stop();
     };
   }, [manages, diagramId, docId]);
 

@@ -77,6 +77,21 @@ export interface DiagramView extends DiagramSummary {
   readonly xml: string | null;
 }
 
+/**
+ * How many diagrams one `GET /api/diagrams?ids=` may ask about. Each costs a
+ * query or two, and a Worker on the free plan may make 50 per request.
+ */
+export const MAX_DIAGRAM_REFRESH_IDS = 20;
+
+/**
+ * `GET /api/diagrams?ids=<id>,<id>`: a diagram as an open page re-reads it,
+ * never with its source. `usage` is null for someone who only views it.
+ */
+export interface DiagramRefresh extends DiagramSummary {
+  readonly canEdit: boolean;
+  readonly usage: DiagramUsage | null;
+}
+
 export type DiagramPictureFormat = "svg" | "png";
 
 export const DIAGRAM_PICTURE_TYPES: Readonly<Record<DiagramPictureFormat, string>> = {

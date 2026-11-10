@@ -1,12 +1,16 @@
 // The client's calls to /api/diagrams, and a small notice board: every call
 // that changes a diagram tells the pictures on the page, so they follow a save
-// made anywhere (the editor overlay, a redraw, another component).
+// made anywhere (the editor overlay, a redraw, another component). A change
+// made elsewhere reaches the board when the page re-reads (`rereadDiagrams`).
 
-import type {
-  DiagramListItem,
-  DiagramSummary,
-  DiagramUsage,
-  DiagramView,
+import {
+  isDiagramId,
+  MAX_DIAGRAM_REFRESH_IDS,
+  type DiagramListItem,
+  type DiagramRefresh,
+  type DiagramSummary,
+  type DiagramUsage,
+  type DiagramView,
 } from "../../shared/drawio.ts";
 import { ApiError, request } from "../api.ts";
 
@@ -14,7 +18,10 @@ type DiagramListener = (diagram: DiagramSummary | null) => void;
 
 const listeners = new Map<string, Set<DiagramListener>>();
 
-/** Hears every change this page makes to the diagram; null when it is deleted. */
+/**
+ * Hears every change this page makes to the diagram, and what each re-read
+ * finds; null when it is deleted, or no longer shared with this person.
+ */
 export function subscribeDiagram(diagramId: string, listener: DiagramListener): () => void {
   const set = listeners.get(diagramId) ?? new Set();
   set.add(listener);
@@ -29,10 +36,22 @@ function announce(diagramId: string, diagram: DiagramSummary | null): void {
   for (const listener of [...(listeners.get(diagramId) ?? [])]) listener(diagram);
 }
 
+/** How many changes this page has made, for `rereadDiagrams` to notice one crossing it. */
+let changes = 0;
+
 const told = <A extends DiagramSummary>(diagram: A): A => {
+  changes += 1;
   announce(diagram.id, diagram);
   return diagram;
 };
+
+/**
+ * Tells the page a diagram as the server just gave it. For a fetch the rest of
+ * the page must follow, such as the editor loading someone else's version.
+ */
+export function announceDiagram(diagram: DiagramSummary): void {
+  announce(diagram.id, diagram);
+}
 
 /** A save refused because the source changed since `baseVersion`. */
 export interface DiagramConflict {
@@ -80,6 +99,25 @@ export const diagramsApi = {
   /** The diagram as the caller may see it: `xml` is null unless they manage it. */
   get: async (diagramId: string): Promise<DiagramView> =>
     (await request<{ diagram: DiagramView }>("GET", `/api/diagrams/${diagramId}`)).diagram,
+  /**
+   * The diagrams among `diagramIds` the caller may see, as they are now and
+   * without their source. One that is gone or not shared is left out.
+   */
+  summaries: async (
+    diagramIds: ReadonlyArray<string>,
+  ): Promise<ReadonlyArray<DiagramRefresh>> => {
+    const ids = diagramIds.filter(isDiagramId);
+    const found: Array<DiagramRefresh> = [];
+    for (let at = 0; at < ids.length; at += MAX_DIAGRAM_REFRESH_IDS) {
+      const asked = ids.slice(at, at + MAX_DIAGRAM_REFRESH_IDS).join(",");
+      const { diagrams } = await request<{ diagrams: Array<DiagramRefresh> }>(
+        "GET",
+        `/api/diagrams?ids=${asked}`,
+      );
+      found.push(...diagrams);
+    }
+    return found;
+  },
   create: async (input: {
     readonly projectId: string | null;
     readonly title?: string;
@@ -105,6 +143,7 @@ export const diagramsApi = {
     ),
   remove: async (diagramId: string): Promise<void> => {
     await request<{ ok: true }>("DELETE", `/api/diagrams/${diagramId}`);
+    changes += 1;
     announce(diagramId, null);
   },
   /** The docs and tabs that link the diagram. Only for someone who manages it. */
@@ -126,3 +165,31 @@ export const diagramsApi = {
 };
 
 export type DiagramsApi = typeof diagramsApi;
+
+/**
+ * Re-reads `diagramIds` and tells the page what the server now says of each:
+ * the diagram, or null for one that is gone or no longer shared. Resolves with
+ * what it found, by id. When a change made on this page crossed the read, the
+ * answer may be the older of the two: nothing is told, and it resolves with
+ * null. The next re-read settles it.
+ */
+export async function rereadDiagrams(
+  api: Pick<DiagramsApi, "summaries">,
+  diagramIds: ReadonlyArray<string>,
+): Promise<ReadonlyMap<string, DiagramRefresh> | null> {
+  const before = changes;
+  const found = diagramIds.length > 0 ? await api.summaries(diagramIds) : [];
+  if (changes !== before) return null;
+  const seen = new Map(found.map((diagram) => [diagram.id, diagram]));
+  for (const diagramId of diagramIds) {
+    const diagram = seen.get(diagramId);
+    if (!diagram) {
+      announce(diagramId, null);
+      continue;
+    }
+    // Where it is linked is not the board's to carry: `subscribeRefresh` hands that out.
+    const { usage: _usage, ...summary } = diagram;
+    announce(diagramId, summary);
+  }
+  return seen;
+}

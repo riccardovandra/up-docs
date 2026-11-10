@@ -50,8 +50,9 @@ const later = (a: DiagramPictureInfo, b: DiagramPictureInfo) =>
 
 /**
  * Follows one diagram's picture: fetches the diagram unless `known` is given,
- * hears every save this page makes to it, and has the picture drawn when it is
- * missing or behind and the person manages the diagram.
+ * hears every save this page makes to it and every re-read of the page, and
+ * has the picture drawn when it is missing or behind and the person manages
+ * the diagram.
  */
 export function useDiagramPicture(
   diagramId: string,

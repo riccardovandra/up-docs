@@ -91,12 +91,79 @@ describe("linking, relinking and removing a block", () => {
     return tr !== null;
   };
 
-  it("inserts the block at the caret with a line after it", () => {
-    const editor = editorOn("Intro");
+  /** A headless editor on an empty tab: one empty line. */
+  const emptyTab = () =>
+    new Editor({
+      element: null,
+      extensions: createEditorExtensions(),
+      content: { type: "doc", content: [{ type: "paragraph" }] },
+    });
+  /** The tab's blocks in order, each as its kind and text. */
+  const blocks = (editor: Editor) => {
+    const found: Array<string> = [];
+    editor.state.doc.forEach((node) =>
+      found.push(node.type.name === "codeBlock" ? "diagram" : `p:${node.textContent}`),
+    );
+    return found;
+  };
+  /** Where the caret is: the text of its line, and how far into it. */
+  const caret = (editor: Editor) => {
+    const { $from, empty } = editor.state.selection;
+    return { empty, line: $from.parent.textContent, offset: $from.parentOffset };
+  };
+
+  it("adds no line on an empty line in the middle of a tab, and moves the caret below", () => {
+    const editor = editorOn("Before\n\n&nbsp;\n\nAfter");
+    expect(blocks(editor)).toEqual(["p:Before", "p:", "p:After"]);
+    editor.commands.setTextSelection(9);
     expect(linkDiagramAtCaret(editor, ID, false)).toBe(true);
-    expect(editor.getMarkdown()).toContain(drawioBlock(ID));
-    // The caret is left outside the block, so the picture shows and not its source.
-    expect(editor.state.selection.$from.parent.type.name).toBe("paragraph");
+    expect(blocks(editor)).toEqual(["p:Before", "diagram", "p:After"]);
+    expect(editor.getMarkdown()).toBe(`Before\n\n${drawioBlock(ID)}\n\nAfter`);
+    // Outside the block, so the picture shows and not its source.
+    expect(caret(editor)).toEqual({ empty: true, line: "After", offset: 0 });
+    editor.destroy();
+  });
+
+  it("leaves exactly one empty line for the caret when the block ends the tab", () => {
+    for (const source of ["Intro", "Intro\n\n&nbsp;"]) {
+      const editor = editorOn(source);
+      editor.commands.setTextSelection(editor.state.doc.content.size - 1);
+      expect(linkDiagramAtCaret(editor, ID, false)).toBe(true);
+      expect(blocks(editor)).toEqual(["p:Intro", "diagram", "p:"]);
+      expect(caret(editor)).toEqual({ empty: true, line: "", offset: 0 });
+      expect(editor.state.selection.$from.parent).toBe(editor.state.doc.lastChild);
+      // Saved as the block and that one line, never two.
+      expect(editor.getMarkdown()).toBe(`Intro\n\n${drawioBlock(ID)}\n\n`);
+      editor.destroy();
+    }
+  });
+
+  it("splits a line of text around the block without a line between", () => {
+    const editor = editorOn("HelloWorld");
+    editor.commands.setTextSelection(6);
+    expect(linkDiagramAtCaret(editor, ID, false)).toBe(true);
+    expect(blocks(editor)).toEqual(["p:Hello", "diagram", "p:World"]);
+    expect(editor.getMarkdown()).toBe(`Hello\n\n${drawioBlock(ID)}\n\nWorld`);
+    expect(caret(editor)).toEqual({ empty: true, line: "World", offset: 0 });
+    editor.destroy();
+  });
+
+  it("turns an empty tab into the block and one empty line", () => {
+    const editor = emptyTab();
+    expect(linkDiagramAtCaret(editor, ID, false)).toBe(true);
+    expect(blocks(editor)).toEqual(["diagram", "p:"]);
+    expect(caret(editor)).toEqual({ empty: true, line: "", offset: 0 });
+    expect(editor.getMarkdown()).toBe(`${drawioBlock(ID)}\n\n`);
+    editor.destroy();
+  });
+
+  it("keeps the caret out of a block that follows, with a line between the two", () => {
+    const editor = editorOn(`Intro\n\n${drawioBlock(OTHER)}`);
+    editor.commands.setTextSelection(6);
+    expect(linkDiagramAtCaret(editor, ID, false)).toBe(true);
+    // Text is the only place the caret can rest without opening a block's source.
+    expect(blocks(editor)).toEqual(["p:Intro", "diagram", "p:", "diagram"]);
+    expect(caret(editor)).toEqual({ empty: true, line: "", offset: 0 });
     editor.destroy();
   });
 

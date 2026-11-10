@@ -13,6 +13,7 @@ import {
   parseDrawioBlock,
   type Diagram,
   type DiagramPictureFormat,
+  type DiagramRefresh,
   type DiagramSourceProblem,
   type DiagramSummary,
   type DiagramUsage,
@@ -259,6 +260,39 @@ export async function requireDiagram(
   }
   if (input.need === "edit" && !canEdit) throw new DiagramForbiddenError();
   return { diagram, canEdit };
+}
+
+/**
+ * The diagrams among `diagramIds` that `userId` may see, as they are now and
+ * without their source, for an open page to re-read. The rule is
+ * `requireDiagram`'s: one the person cannot see is left out, like one that is
+ * gone. Someone who manages a diagram is also told where it is linked.
+ */
+export async function refreshDiagrams(
+  db: D1Database,
+  input: { readonly diagramIds: ReadonlyArray<string>; readonly userId: string },
+): Promise<ReadonlyArray<DiagramRefresh>> {
+  const { userId } = input;
+  const ids = [...new Set(input.diagramIds)];
+  if (ids.length === 0) return [];
+  const { results } = await db
+    .prepare(
+      `SELECT ${SUMMARY_COLUMNS} FROM diagrams WHERE id IN (${ids.map(() => "?").join(", ")})`,
+    )
+    .bind(...ids)
+    .all<SummaryRow>();
+  const seen = await Promise.all(
+    results.map(toSummary).map(async (diagram): Promise<DiagramRefresh | null> => {
+      if (canEditDiagram(diagram, userId)) {
+        const usage = await diagramUsage(db, { diagramId: diagram.id, userId });
+        return { ...diagram, canEdit: true, usage };
+      }
+      return (await canViewDiagram(db, diagram, userId))
+        ? { ...diagram, canEdit: false, usage: null }
+        : null;
+    }),
+  );
+  return seen.filter((diagram) => diagram !== null);
 }
 
 /**

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { DiagramSummary } from "../../shared/drawio.ts";
 import { ApiError } from "../api.ts";
+import { subscribeDiagram } from "./diagramsApi.ts";
 import {
   startEditorSession,
   type DiagramEditorTarget,
@@ -205,6 +206,39 @@ describe("a stale save", () => {
     await settle();
     expect(api.calls.at(-2)).toEqual(["update", "g1", { xml: NEW_XML, baseVersion: 2 }]);
     expect(closed).toHaveLength(1);
+  });
+});
+
+describe("the page under the overlay", () => {
+  /** A block of the diagram on the page, as the notice board reaches it. */
+  function block() {
+    const heard: Array<DiagramSummary | null> = [];
+    const stop = subscribeDiagram("g1", (diagram) => heard.push(diagram));
+    return { heard, stop };
+  }
+
+  it("shows their version after Reload theirs and then Exit", async () => {
+    const { heard, stop } = block();
+    const opened = open(existing, [view({ id: "g1", version: 1, pictureVersion: 1 })]);
+    opened.drawio.emit({ event: "init" });
+    await settle();
+    // An agent saves version 2 and a browser draws its picture, before this editor saves.
+    opened.api.diagrams.set("g1", view({ id: "g1", version: 2, pictureVersion: 2 }));
+    opened.drawio.emit({ event: "save", xml: NEW_XML, exit: true });
+    await settle();
+    expect(opened.phase()).toBe("conflict");
+    expect(heard).toEqual([]);
+
+    opened.session.resolveConflict("reload");
+    await settle();
+    // The editor took their version, and so did the page.
+    expect(heard).toEqual([expect.objectContaining({ id: "g1", version: 2, pictureVersion: 2 })]);
+
+    opened.drawio.emit({ event: "exit" });
+    // Nothing was saved here, so the close reports nothing: the reload already told the page.
+    expect(opened.closed).toEqual([null]);
+    expect(heard.at(-1)).toMatchObject({ version: 2, pictureVersion: 2 });
+    stop();
   });
 });
 

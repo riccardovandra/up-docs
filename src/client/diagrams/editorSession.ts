@@ -7,6 +7,7 @@
 import { DEFAULT_DIAGRAM_TITLE, type DiagramSummary } from "../../shared/drawio.ts";
 import { ApiError } from "../api.ts";
 import {
+  announceDiagram,
   diagramConflict,
   diagramErrorMessage,
   type DiagramConflict,
@@ -159,6 +160,8 @@ export function startEditorSession(options: {
     set({ phase: "opening", message: null });
     try {
       const latest = await api.get(diagramId);
+      // The page under the overlay still shows the version from before theirs.
+      announceDiagram(latest);
       baseVersion = latest.version;
       set({ title: latest.title });
       frame.post({ action: "load", xml: latest.xml ?? "", title: latest.title });
