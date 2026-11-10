@@ -32,6 +32,18 @@ describe("review regressions", () => {
     expect(valueAt(wb, "Sheet1", "C1")).toBe(10);
   });
 
+  it("sizes a SUMIF target from the criteria sheet, without false cycles", () => {
+    let wb = apply(fresh(), [
+      { kind: "addSheet", name: "Data" },
+      { kind: "writeCells", sheet: "Data", topLeft: "A1", rows: [["x"]] },
+      { kind: "writeCells", sheet: "Sheet1", topLeft: "B1", rows: [[7]] },
+      { kind: "writeCells", sheet: "Sheet1", topLeft: "B1001", rows: [['=SUMIF(Data!A:A,"x",B1)']] },
+    ]).workbook;
+    expect(valueAt(wb, "Sheet1", "B1001")).toBe(7);
+    wb = write(wb, "Sheet1", "B1", [[8]]);
+    expect(valueAt(wb, "Sheet1", "B1001")).toBe(8);
+  });
+
   it("refreshes TODAY on metadata-only edit lists", () => {
     let now = Date.UTC(2026, 2, 15);
     let wb = write(fresh({ now: () => now }), "Sheet1", "A1", [["=TODAY()"]]);

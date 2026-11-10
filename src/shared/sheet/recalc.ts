@@ -9,10 +9,12 @@ import { areaContains, type Area, type AreaRef } from "./address.ts";
 import { msToSerial } from "./dates.ts";
 import {
   collectRefs,
+  collectResized,
   evaluateCell,
   impliedPattern,
   isVolatile,
   type EvalContext,
+  type ResizedTarget,
 } from "./formula/evaluate.ts";
 import { FormulaParseError, parseFormula, type Node } from "./formula/parser.ts";
 import { err, isError } from "./formula/values.ts";
@@ -33,6 +35,8 @@ export interface CompiledFormula {
   /** null when the text does not parse (the cell shows #ERROR!). */
   readonly ast: Node | null;
   readonly refs: ReadonlyArray<AreaRef>;
+  /** SUMIF/AVERAGEIF targets that read more than they name; see `Work.refsOf`. */
+  readonly resized: ReadonlyArray<ResizedTarget>;
   readonly volatile: boolean;
 }
 
@@ -44,10 +48,10 @@ export function compileFormula(formula: string): CompiledFormula {
   if (c) return c;
   try {
     const ast = parseFormula(formula);
-    c = { ast, refs: collectRefs(ast), volatile: isVolatile(ast) };
+    c = { ast, refs: collectRefs(ast), resized: collectResized(ast), volatile: isVolatile(ast) };
   } catch (e) {
     if (!(e instanceof FormulaParseError)) throw e;
-    c = { ast: null, refs: [], volatile: false };
+    c = { ast: null, refs: [], resized: [], volatile: false };
   }
   if (compileCache.size > 20_000) compileCache.clear();
   compileCache.set(formula, c);
@@ -175,6 +179,28 @@ class Work {
     return ctx;
   }
 
+  /**
+   * References a formula reads, with SUMIF/AVERAGEIF targets resized to the
+   * criteria range's concrete shape (open ends resolved against its sheet).
+   */
+  refsOf(n: FormulaNode): ReadonlyArray<AreaRef> {
+    if (n.compiled.resized.length === 0) return n.compiled.refs;
+    const out = [...n.compiled.refs];
+    for (const { shape, target } of n.compiled.resized) {
+      const shapeSheet = this.resolveSheet(shape, n.sheetId);
+      if (shapeSheet === null) continue;
+      const s = this.byId.get(shapeSheet);
+      const r1 = shape.startRow ?? 0;
+      const c1 = shape.startCol ?? 0;
+      const rows = Math.max(r1, shape.endRow ?? (s?.rowCount ?? 1) - 1) - r1;
+      const cols = Math.max(c1, shape.endCol ?? (s?.columnCount ?? 1) - 1) - c1;
+      const tr = target.startRow ?? 0;
+      const tc = target.startCol ?? 0;
+      out.push({ ...target, single: false, startRow: tr, startCol: tc, endRow: tr + rows, endCol: tc + cols });
+    }
+    return out;
+  }
+
   resolveSheet(ref: AreaRef, owner: SheetId): SheetId | null {
     return ref.sheet === null ? owner : (this.byName.get(ref.sheet.toLowerCase()) ?? null);
   }
@@ -220,7 +246,7 @@ class Work {
     }
     const precedents = (n: FormulaNode): FormulaNode[] => {
       const out: FormulaNode[] = [];
-      for (const ref of n.compiled.refs) {
+      for (const ref of this.refsOf(n)) {
         const target = this.resolveSheet(ref, n.sheetId);
         if (target === null) continue;
         if (ref.single) {
@@ -360,7 +386,7 @@ export function recalcChanged(
   const volatile: FormulaNode[] = [];
   for (const node of work.allFormulaNodes()) {
     if (node.compiled.volatile) volatile.push(node);
-    for (const ref of node.compiled.refs) {
+    for (const ref of work.refsOf(node)) {
       const target = work.resolveSheet(ref, node.sheetId);
       if (target === null) continue;
       if (ref.single) {
