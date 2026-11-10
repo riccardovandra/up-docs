@@ -1,0 +1,66 @@
+/* The library's Sheets view. Cards reuse the home page's doc-card styles. */
+
+.sheet-card {
+  position: relative;
+}
+
+.sheet-card-cover {
+  display: block;
+  position: relative;
+  height: 12.5rem;
+  overflow: hidden;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--tint) 6%, var(--surface));
+}
+
+/* A drawn spreadsheet: a header band and a light grid. */
+.sheet-card-grid {
+  position: absolute;
+  inset: 1.25rem 1.25rem -1px;
+  border: 1px solid color-mix(in srgb, var(--text) 14%, transparent);
+  border-bottom: none;
+  border-radius: 6px 6px 0 0;
+  background:
+    linear-gradient(color-mix(in srgb, #8ab4f8 32%, transparent), color-mix(in srgb, #8ab4f8 32%, transparent))
+      0 0 / 100% 22px no-repeat,
+    repeating-linear-gradient(
+      to bottom,
+      transparent 0 21px,
+      color-mix(in srgb, var(--text) 10%, transparent) 21px 22px
+    ),
+    repeating-linear-gradient(
+      to right,
+      transparent 0 55px,
+      color-mix(in srgb, var(--text) 10%, transparent) 55px 56px
+    ),
+    var(--surface);
+}
+
+.sheet-card-more {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  background: var(--surface);
+}
+
+.sheet-card .home-icon-button.sheet-card-more {
+  opacity: 0;
+}
+
+.sheet-card:hover .sheet-card-more,
+.sheet-card:focus-within .sheet-card-more,
+.sheet-card .sheet-card-more[aria-expanded="true"] {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .sheet-card .home-icon-button.sheet-card-more {
+    opacity: 1;
+  }
+}
+
+@media (max-width: 640px) {
+  .sheet-card-cover {
+    height: 8rem;
+  }
+}

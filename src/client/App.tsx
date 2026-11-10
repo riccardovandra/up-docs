@@ -20,6 +20,8 @@ const loadDiagramPage = () => import("./diagrams/DiagramPage.tsx");
 const DiagramPage = lazy(() =>
   loadDiagramPage().then((module) => ({ default: module.DiagramPage })),
 );
+const loadSheetPage = () => import("./sheets/SheetPage.tsx");
+const SheetPage = lazy(() => loadSheetPage().then((module) => ({ default: module.SheetPage })));
 const loadSettingsPage = () => import("./pages/SettingsPage.tsx");
 const SettingsPage = lazy(() =>
   loadSettingsPage().then((module) => ({ default: module.SettingsPage })),
@@ -36,10 +38,11 @@ export function App() {
   useEffect(() => {
     // The first page's data and code load beside the sign-in check, not after it.
     const first = parseRoute(window.location.pathname).name;
-    // The Diagrams view is the library page too.
-    if (first === "library" || first === "diagrams") api.prefetchLibrary();
+    // The Diagrams and Sheets views are the library page too.
+    if (first === "library" || first === "diagrams" || first === "sheets") api.prefetchLibrary();
     if (first === "doc") void loadDocPage();
     if (first === "diagram") void loadDiagramPage();
+    if (first === "sheet") void loadSheetPage();
     if (first === "local") void loadLocalDocPage();
     if (first === "settings") void loadSettingsPage();
     api
@@ -48,7 +51,7 @@ export function App() {
       .finally(() => {
         // Only a home page mounting now may use it; a later one would show stale docs.
         const now = parseRoute(window.location.pathname).name;
-        if (now !== "library" && now !== "diagrams") api.dropLibraryPrefetch();
+        if (now !== "library" && now !== "diagrams" && now !== "sheets") api.dropLibraryPrefetch();
         setLoaded(true);
       });
   }, []);
@@ -65,8 +68,10 @@ export function App() {
         </div>
       ) : null}
       {openTabs.length > 0 ? <OpenTabsStrip tabs={openTabs} route={route} /> : null}
-      {route.name === "library" || route.name === "diagrams" ? (
-        <LibraryPage kind={route.name === "diagrams" ? "diagrams" : "docs"} />
+      {route.name === "library" || route.name === "diagrams" || route.name === "sheets" ? (
+        <LibraryPage
+          kind={route.name === "diagrams" ? "diagrams" : route.name === "sheets" ? "sheets" : "docs"}
+        />
       ) : null}
       <Suspense fallback={null}>
         {route.name === "settings" ? <SettingsPage /> : null}
@@ -76,6 +81,9 @@ export function App() {
         {route.name === "local" ? <LocalDocPage key={route.path} path={route.path} /> : null}
         {route.name === "diagram" ? (
           <DiagramPage key={route.diagramId} diagramId={route.diagramId} />
+        ) : null}
+        {route.name === "sheet" ? (
+          <SheetPage key={route.sheetId} sheetId={route.sheetId} tabId={route.tabId} />
         ) : null}
       </Suspense>
     </div>

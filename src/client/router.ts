@@ -7,6 +7,10 @@ export type Route =
   | { readonly name: "diagrams" }
   /** One Draw.io diagram's own page. */
   | { readonly name: "diagram"; readonly diagramId: string }
+  /** The library's Sheets view. */
+  | { readonly name: "sheets" }
+  /** One sheet's own page, optionally on one tab. */
+  | { readonly name: "sheet"; readonly sheetId: string; readonly tabId: string | null }
   | { readonly name: "doc"; readonly docId: string; readonly tabId: string | null }
   | { readonly name: "settings" }
   /** A T3 Code project file, by its workspace-relative path (`/local/docs/plan.md`). */
@@ -18,6 +22,11 @@ export function parseRoute(pathname: string): Route {
   if (first === "settings") return { name: "settings" };
   if (first === "diagrams") {
     return docId ? { name: "diagram", diagramId: docId } : { name: "diagrams" };
+  }
+  if (first === "sheets") {
+    return docId
+      ? { name: "sheet", sheetId: docId, tabId: tabId ? decodeURIComponent(tabId) : null }
+      : { name: "sheets" };
   }
   const localPath = localDocPathFromAppPath(pathname);
   if (localPath !== null) return { name: "local", path: localPath };
