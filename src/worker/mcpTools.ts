@@ -46,6 +46,25 @@ import {
   prepareClaudeDocPush,
   type WidgetLink,
 } from "../shared/claudeDocs/toClaudeDoc.ts";
+import {
+  checkDiagramXml,
+  checkDrawioIn,
+  diagramPath,
+  drawioBlock,
+  drawioDiagramIds,
+  isDiagramId,
+  isPictureCurrent,
+  MAX_DIAGRAM_TITLE_LENGTH,
+  type Diagram,
+  type DiagramSummary,
+  type DiagramUse,
+} from "../shared/drawio.ts";
+import {
+  describeDrawio,
+  drawioWarnings,
+  readDrawio,
+  type DrawioModel,
+} from "../shared/drawioModel.ts";
 import { IMAGE_TYPES, MAX_IMAGE_BYTES } from "../shared/images.ts";
 import { groupThreads } from "../shared/threads.ts";
 import { describeWidgetProblems } from "../shared/widget/check.ts";
@@ -56,6 +75,7 @@ import * as Access from "./access.ts";
 import { importDeps, inviteByEmail, type ApiDeps } from "./api.ts";
 import type { Principal } from "./auth.ts";
 import * as Comments from "./comments.ts";
+import * as Diagrams from "./diagrams.ts";
 import * as DocThreads from "./docThreads.ts";
 import * as Docs from "./docs.ts";
 import * as ImageImport from "./imageImport.ts";
@@ -74,6 +94,33 @@ import * as Facts from "./projectFacts.ts";
 const MAX_MARKDOWN_LENGTH = 1_000_000;
 /** edit_tab re-applies against the latest version this many times before giving up. */
 const EDIT_ATTEMPTS = 5;
+
+/** read_doc describes this many linked Draw.io diagrams; the rest are listed by id. */
+const DOC_DRAWIO_LIMIT = 12;
+/** What one diagram may list inside read_doc and a write's result, and in read_drawio. */
+const BRIEF_DRAWIO = { shapes: 30, connections: 40 };
+const FULL_DRAWIO = { shapes: 300, connections: 400 };
+/** One write may link this many diagrams the tab did not link before. */
+const MAX_NEW_DRAWIO_LINKS = 20;
+/** A larger picture is not attached: clients refuse images of several megabytes. */
+const MAX_ATTACHED_PICTURE_BYTES = 3 * 1024 * 1024;
+
+/** A picture handed to the agent beside a tool's JSON; `data` is base64. */
+export interface ToolImage {
+  readonly data: string;
+  readonly mimeType: string;
+}
+
+/** A tool result that carries pictures: `body` is the JSON, the images follow it. */
+export class ToolResultWithImages {
+  readonly body: object;
+  readonly images: ReadonlyArray<ToolImage>;
+
+  constructor(body: object, images: ReadonlyArray<ToolImage>) {
+    this.body = body;
+    this.images = images;
+  }
+}
 
 export class McpToolError extends Error {
   readonly detail: Record<string, unknown>;
@@ -256,8 +303,8 @@ function checkTables(markdown: string, previous?: string): void {
 }
 
 /**
- * Rejects markdown that adds or changes an invalid ```t3-video or ```t3-embed
- * block, before anything is written.
+ * Rejects markdown that adds or changes an invalid ```t3-video, ```t3-embed or
+ * ```t3-drawio block, before anything is written.
  */
 function checkMediaBlocks(markdown: string, previous?: string): void {
   const problem = checkVideosIn(markdown, previous);
@@ -273,6 +320,49 @@ function checkMediaBlocks(markdown: string, previous?: string): void {
       format:
         "```t3-embed\n<https link to a LinkedIn post, X post or X article>\nOptional caption\n```",
     });
+  }
+  const drawioProblem = checkDrawioIn(markdown, previous);
+  if (drawioProblem) {
+    fail("drawio_invalid", `${drawioProblem} Nothing was written.`, {
+      format:
+        "```t3-drawio\n<diagram id from list_drawio or create_drawio>\nOptional caption\n```",
+    });
+  }
+}
+
+/**
+ * Rejects markdown that links a Draw.io diagram the tab did not link before,
+ * unless the token user can see that diagram: a doc that links one shows its
+ * picture to everyone on the doc.
+ */
+async function checkDrawioLinks(
+  ctx: ToolContext,
+  markdown: string,
+  previous = "",
+): Promise<void> {
+  const linked = new Set(drawioDiagramIds(previous));
+  const added = drawioDiagramIds(markdown).filter((id) => !linked.has(id));
+  if (added.length > MAX_NEW_DRAWIO_LINKS) {
+    fail(
+      "too_many_diagrams",
+      `One write can link at most ${MAX_NEW_DRAWIO_LINKS} new Draw.io diagrams. Nothing was written; add them over several writes.`,
+    );
+  }
+  for (const diagramId of added) {
+    try {
+      await Diagrams.requireDiagram(ctx.deps.db, {
+        diagramId,
+        userId: ctx.principal.userId,
+        need: "view",
+      });
+    } catch (cause) {
+      if (!(cause instanceof Docs.NotFoundError)) throw cause;
+      fail(
+        "drawio_not_found",
+        `The t3-drawio block links diagram "${diagramId}", which does not exist or is not one you can see. Nothing was written. The block's first line must be a diagram id from list_drawio or create_drawio.`,
+        { diagramId },
+      );
+    }
   }
 }
 
@@ -659,11 +749,232 @@ function findDiagram(ctx: ToolContext, tab: Tab, diagramId: string) {
   return matches[0]!;
 }
 
+const DRAWIO_GUIDE = {
+  guide:
+    'format_guide {topic: "drawio"} has the XML skeleton and a valid example.',
+};
+
+const PICTURE_PENDING =
+  "No current picture: Draw.io draws it the first time a person who manages the diagram opens it or a doc that links it.";
+
+const drawioUrl = (ctx: ToolContext, diagramId: string) =>
+  `${ctx.origin}${diagramPath(diagramId)}`;
+
+/** The `diagramId` argument: a diagram's id, or a link to its page or picture. */
+function drawioIdArg(args: Args): string {
+  const value = requireString(args, "diagramId", 2000);
+  if (isDiagramId(value)) return value;
+  const linked = /\/diagrams\/([A-Za-z0-9_-]{1,64})(?:[/?#]|$)/.exec(
+    value,
+  )?.[1];
+  return (
+    linked ??
+    fail(
+      "invalid_argument",
+      '"diagramId" must be a Draw.io diagram\'s id, or its link (<origin>/diagrams/<id>).',
+    )
+  );
+}
+
+/** A Draw.io diagram the token user may view or, with "edit", change. */
+async function drawioWith(
+  ctx: ToolContext,
+  diagramId: string,
+  need: "view" | "edit",
+) {
+  try {
+    return await Diagrams.requireDiagram(ctx.deps.db, {
+      diagramId,
+      userId: ctx.principal.userId,
+      need,
+    });
+  } catch (cause) {
+    if (cause instanceof Docs.NotFoundError) {
+      return fail(
+        "not_found",
+        "No Draw.io diagram with that id that you can see. list_drawio lists the ones you manage.",
+      );
+    }
+    if (cause instanceof Diagrams.DiagramForbiddenError) {
+      return fail(
+        "forbidden",
+        "Only the diagram's creator and the workspace admin can change it. read_drawio still describes it, and create_drawio draws one of your own.",
+      );
+    }
+    throw cause;
+  }
+}
+
+/** The `xml` argument: Draw.io XML that the store accepts and the editor can open. */
+async function drawioXmlArg(
+  args: Args,
+): Promise<{ readonly xml: string; readonly model: DrawioModel }> {
+  const xml = args.xml;
+  if (typeof xml !== "string" || xml.trim() === "") {
+    return fail(
+      "invalid_argument",
+      '"xml" must be Draw.io XML: an <mxGraphModel> document.',
+      DRAWIO_GUIDE,
+    );
+  }
+  const problem = checkDiagramXml(xml);
+  if (problem) {
+    fail(problem.code, `${problem.message} Nothing was saved.`, DRAWIO_GUIDE);
+  }
+  const model = await readDrawio(xml);
+  if (!model.ok) {
+    fail(
+      "invalid_xml",
+      `The Draw.io XML is not well-formed, so the editor could not open it (${model.error}). Nothing was saved.`,
+      DRAWIO_GUIDE,
+    );
+  }
+  return { xml, model };
+}
+
+const drawioSummary = (ctx: ToolContext, diagram: DiagramSummary) => ({
+  diagramId: diagram.id,
+  title: diagram.title,
+  projectId: diagram.projectId,
+  version: diagram.version,
+  updatedAt: new Date(diagram.updatedAt).toISOString(),
+  url: drawioUrl(ctx, diagram.id),
+});
+
+const drawioUse = (ctx: ToolContext, use: DiagramUse) => ({
+  docId: use.docId,
+  docTitle: use.docTitle,
+  tabId: use.tabId,
+  tabTitle: use.tabTitle,
+  url: tabUrl(ctx, { docId: use.docId, id: use.tabId }),
+});
+
+/** The diagram's project, named only for someone who can see that project. */
+async function drawioProject(ctx: ToolContext, projectId: string | null) {
+  const { db } = ctx.deps;
+  if (
+    projectId === null ||
+    !(await Access.canSeeProject(db, projectId, ctx.principal.userId))
+  ) {
+    return null;
+  }
+  const project = await load(Docs.getProject(db, projectId), "project");
+  return { projectId, key: project.key, name: project.name };
+}
+
+function toBase64(bytes: Uint8Array): string {
+  let binary = "";
+  for (let at = 0; at < bytes.length; at += 0x8000) {
+    binary += String.fromCharCode(...bytes.subarray(at, at + 0x8000));
+  }
+  return btoa(binary);
+}
+
+/** The PNG of the diagram's current picture for the agent to look at, or one line saying why not. */
+async function drawioPicture(
+  ctx: ToolContext,
+  diagram: DiagramSummary,
+): Promise<{ readonly note: string; readonly image: ToolImage | null }> {
+  if (!diagram.hasSource) {
+    return { note: "None: nothing is drawn in this diagram yet.", image: null };
+  }
+  if (!isPictureCurrent(diagram)) return { note: PICTURE_PENDING, image: null };
+  const picture = await Diagrams.diagramPicture(
+    ctx.deps.images,
+    diagram,
+    "png",
+  );
+  if (!picture) {
+    return {
+      note: "No PNG of the current picture is stored: go by the shapes and connections.",
+      image: null,
+    };
+  }
+  const bytes = new Uint8Array(await new Response(picture.body).arrayBuffer());
+  if (bytes.byteLength > MAX_ATTACHED_PICTURE_BYTES) {
+    return {
+      note: "The picture is too large to attach: go by the shapes and connections.",
+      image: null,
+    };
+  }
+  return {
+    note: "Attached after this text as a PNG image.",
+    image: { data: toBase64(bytes), mimeType: picture.contentType },
+  };
+}
+
+/** What create_drawio and update_drawio return: the diagram, its block and what was read back. */
+function drawioWritten(ctx: ToolContext, diagram: Diagram, model: DrawioModel) {
+  const warnings = drawioWarnings(model);
+  return {
+    ...drawioSummary(ctx, diagram),
+    block: drawioBlock(diagram.id),
+    ...describeDrawio(model, BRIEF_DRAWIO),
+    ...(warnings.length > 0 ? { warnings } : {}),
+    picture:
+      diagram.hasSource && isPictureCurrent(diagram)
+        ? "Unchanged: the stored picture shows this version."
+        : PICTURE_PENDING,
+    next: "Paste `block` into a tab with edit_tab or write_tab to show the diagram in a doc. A second line inside the block is its caption.",
+  };
+}
+
+/** One linked Draw.io diagram as read_doc describes it. */
+async function describeLinkedDrawio(ctx: ToolContext, diagramId: string) {
+  let diagram: Diagram;
+  try {
+    diagram = await Diagrams.getDiagram(ctx.deps.db, diagramId);
+  } catch (cause) {
+    if (!(cause instanceof Docs.NotFoundError)) throw cause;
+    return {
+      diagramId,
+      missing:
+        "No diagram has this id any more, so its block shows as missing. Remove the block or link another diagram.",
+    };
+  }
+  return {
+    diagramId,
+    title: diagram.title,
+    url: drawioUrl(ctx, diagramId),
+    canEdit: Diagrams.canEditDiagram(diagram, ctx.principal.userId),
+    ...describeDrawio(await readDrawio(diagram.xml), BRIEF_DRAWIO),
+  };
+}
+
+/**
+ * The Draw.io diagrams that `tabs` link, described for read_doc so the agent
+ * needs no second call. The caller reads the doc, and a doc that links a
+ * diagram is what lets its readers see it, so access is not checked again.
+ */
+async function linkedDrawio(ctx: ToolContext, tabs: ReadonlyArray<Tab>) {
+  const ids = [
+    ...new Set(tabs.flatMap((tab) => drawioDiagramIds(tab.markdown))),
+  ];
+  if (ids.length === 0) return {};
+  const drawioDiagrams: Array<object> = [];
+  // One at a time: a source can be a megabyte, and only its description is kept.
+  for (const diagramId of ids.slice(0, DOC_DRAWIO_LIMIT)) {
+    drawioDiagrams.push(await describeLinkedDrawio(ctx, diagramId));
+  }
+  const rest = ids.slice(DOC_DRAWIO_LIMIT);
+  return {
+    drawioDiagrams,
+    ...(rest.length === 0
+      ? {}
+      : {
+          moreDrawioDiagrams: {
+            diagramIds: rest,
+            note: "Linked too, and left out to keep this short: read_drawio {diagramId} describes one.",
+          },
+        }),
+  };
+}
+
 export const TOOLS = [
   {
     name: "format_guide",
     description:
-      "The full spec of one doc format, with an example: diagram (t3-widget), table (t3-table), video (t3-video), embed (t3-embed), comments (anchors on passages, table cells and diagram labels), sharing, or claude_push. Call it before you first write that format in a session.",
+      "The full spec of one doc format, with an example: diagram (t3-widget), drawio (Draw.io diagrams from the library, t3-drawio), table (t3-table), video (t3-video), embed (t3-embed), comments (anchors on passages, table cells and diagram labels), sharing, or claude_push. Call it before you first write that format in a session.",
     inputSchema: {
       type: "object",
       properties: { topic: { type: "string", enum: FORMAT_TOPICS } },
@@ -804,7 +1115,7 @@ export const TOOLS = [
   {
     name: "read_doc",
     description:
-      "Read a doc: its tab tree (ids, versions, urls), each tab's markdown and the project's facts (follow them). Pass tabId to read only that tab; a doc link /d/<docId>/<tabId> gives both.",
+      "Read a doc: its tab tree (ids, versions, urls), each tab's markdown and the project's facts (follow them). Pass tabId to read only that tab; a doc link /d/<docId>/<tabId> gives both. drawioDiagrams describes each Draw.io diagram the tabs link with a ```t3-drawio block (title, shapes, connections), by the id on the block's first line.",
     inputSchema: {
       type: "object",
       properties: { docId: { type: "string" }, tabId: { type: "string" } },
@@ -1082,6 +1393,76 @@ export const TOOLS = [
     },
   },
   {
+    name: "list_drawio",
+    description:
+      "List the Draw.io diagrams you manage (the ones you created; every diagram for the workspace admin), most recently changed first, each with the docs that link it. These are library items a person draws in the Draw.io editor, not the ```t3-widget diagrams read_diagram reads. Narrow to one project with projectId or projectKey, or pass noProject: true.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        projectId: { type: "string" },
+        projectKey: { type: "string" },
+        noProject: { type: "boolean" },
+      },
+    },
+  },
+  {
+    name: "read_drawio",
+    description:
+      'Read one Draw.io diagram from the library, by its id (the first line of a ```t3-drawio block) or its link (<origin>/diagrams/<id>): title, project, the docs that use it, its shapes and its connections ("A -> B", "A -[label]-> B"), per page when the file has several, and its version. The current picture comes attached as a PNG image when there is one. Pass includeXml: true for the Draw.io XML, which only the diagram\'s creator and the workspace admin get; you need it to change the diagram with update_drawio.',
+    inputSchema: {
+      type: "object",
+      properties: {
+        diagramId: {
+          type: "string",
+          description: "The diagram's id, or its link.",
+        },
+        includeXml: { type: "boolean" },
+      },
+      required: ["diagramId"],
+    },
+  },
+  {
+    name: "create_drawio",
+    description:
+      'Draw a new Draw.io diagram into the library from Draw.io XML (format_guide {topic: "drawio"} first). File it like create_doc: projectKey (with projectName if the project is new) or projectId; omit both for no project. Returns the id, the link and `block`, the exact ```t3-drawio block to paste into a doc tab. It opens in the same editor as a hand-drawn diagram. Its picture appears the first time a person who manages the diagram opens it.',
+    inputSchema: {
+      type: "object",
+      properties: {
+        projectKey: { type: "string" },
+        projectName: { type: "string" },
+        projectId: { type: "string" },
+        title: { type: "string", maxLength: MAX_DIAGRAM_TITLE_LENGTH },
+        xml: {
+          type: "string",
+          description:
+            "The whole diagram as uncompressed Draw.io XML: one <mxGraphModel>.",
+        },
+      },
+      required: ["title", "xml"],
+    },
+  },
+  {
+    name: "update_drawio",
+    description:
+      "Change a Draw.io diagram you manage: its XML, its title, or both. Pass the version you read as baseVersion. xml replaces the whole source, so start from read_drawio {includeXml: true}. If someone saved since then nothing is written and the current version is returned: read again and redo your change. Every doc that links the diagram shows the change.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        diagramId: {
+          type: "string",
+          description: "The diagram's id, or its link.",
+        },
+        xml: { type: "string" },
+        title: { type: "string", maxLength: MAX_DIAGRAM_TITLE_LENGTH },
+        baseVersion: {
+          type: "integer",
+          description: "The version read_drawio returned.",
+        },
+      },
+      required: ["diagramId", "baseVersion"],
+    },
+  },
+  {
     name: "prepare_claude_doc_push",
     description:
       'Convert a tab for a push into a Claude Doc (claude.ai) as a tab. Returns the prose markdown with a <?claude block wN?> token per diagram, the embed blocks, each diagram\'s module code, conversion warnings, and the Claude Docs members to send: `batch` (mode "new", for batch(container={"kind":"project","id":claudeDocId})) or `widgetCreates` (mode "update", when the tab was pushed to that Claude Doc before). Writes nothing. Needs editor access.',
@@ -1307,6 +1688,7 @@ const handlers: Record<
     if (markdown) checkTables(markdown);
     if (markdown) checkMediaBlocks(markdown);
     if (markdown) assertWidgets(markdown);
+    if (markdown) await checkDrawioLinks(ctx, markdown);
     const created = await load(
       Docs.createDoc(ctx.deps.db, {
         projectId,
@@ -1386,6 +1768,7 @@ const handlers: Record<
         doc: { ...docSummary(ctx, doc, ordered[0]?.tab.id), role },
         projectFacts: await projectFactsFor(ctx, doc.projectId),
         tab: { ...tabSummary(ctx, tab), markdown: tab.markdown },
+        ...(await linkedDrawio(ctx, [tab])),
       };
     }
     const threads = await DocThreads.listDocThreads(ctx.deps.db, docId);
@@ -1403,6 +1786,7 @@ const handlers: Record<
         depth,
         markdown: tab.markdown,
       })),
+      ...(await linkedDrawio(ctx, tabs)),
     };
   },
 
@@ -1415,6 +1799,7 @@ const handlers: Record<
     checkTables(markdown);
     checkMediaBlocks(markdown);
     assertWidgets(markdown);
+    await checkDrawioLinks(ctx, markdown);
     if (parentTabId !== null) {
       const parent = await load(
         Docs.getTab(ctx.deps.db, parentTabId),
@@ -1475,6 +1860,7 @@ const handlers: Record<
       checkTables(markdown, tab.markdown);
       checkMediaBlocks(markdown, tab.markdown);
       assertWidgets(markdown, tab.markdown);
+      await checkDrawioLinks(ctx, markdown, tab.markdown);
       const result = await ctx.deps.rooms.writeTab(tab.docId, {
         tabId,
         baseVersion: tab.version,
@@ -1503,6 +1889,7 @@ const handlers: Record<
     checkTables(markdown, current.markdown);
     checkMediaBlocks(markdown, current.markdown);
     assertWidgets(markdown, current.markdown);
+    await checkDrawioLinks(ctx, markdown, current.markdown);
     const imported = await withImportedImages(ctx, current.docId, markdown);
     const result = await ctx.deps.rooms.writeTab(current.docId, {
       tabId,
@@ -2021,6 +2408,123 @@ const handlers: Record<
       },
     );
   },
+
+  list_drawio: async (args, ctx) => {
+    const { db } = ctx.deps;
+    const { userId } = ctx.principal;
+    const projectId =
+      args.noProject === true
+        ? null
+        : args.projectId != null || args.projectKey != null
+          ? (await existingProject(ctx, args)).id
+          : undefined;
+    const [diagrams, uses] = await Promise.all([
+      Diagrams.listDiagrams(db, { userId, projectId }),
+      Diagrams.diagramUsesById(db, userId),
+    ]);
+    return {
+      diagrams: diagrams.map((diagram) => ({
+        ...drawioSummary(ctx, diagram),
+        usedIn: (uses.get(diagram.id) ?? []).map((use) => drawioUse(ctx, use)),
+      })),
+    };
+  },
+
+  read_drawio: async (args, ctx) => {
+    const diagramId = drawioIdArg(args);
+    const { diagram, canEdit } = await drawioWith(ctx, diagramId, "view");
+    if (args.includeXml === true && !canEdit) {
+      fail(
+        "forbidden",
+        "Only the diagram's creator and the workspace admin get its Draw.io XML. Call read_drawio without includeXml for its shapes, connections and picture.",
+      );
+    }
+    const [project, usage, picture, model] = await Promise.all([
+      drawioProject(ctx, diagram.projectId),
+      Diagrams.diagramUsage(ctx.deps.db, {
+        diagramId,
+        userId: ctx.principal.userId,
+      }),
+      drawioPicture(ctx, diagram),
+      readDrawio(diagram.xml),
+    ]);
+    const body = {
+      ...drawioSummary(ctx, diagram),
+      project,
+      canEdit,
+      usedIn: usage.uses.map((use) => drawioUse(ctx, use)),
+      // How many docs the person is not on is for those who manage the diagram.
+      ...(canEdit && usage.otherDocs > 0
+        ? { usedInOtherDocs: usage.otherDocs }
+        : {}),
+      ...describeDrawio(model, FULL_DRAWIO),
+      picture: picture.note,
+      ...(args.includeXml === true ? { xml: diagram.xml } : {}),
+    };
+    return picture.image
+      ? new ToolResultWithImages(body, [picture.image])
+      : body;
+  },
+
+  create_drawio: async (args, ctx) => {
+    const title = requireString(args, "title", MAX_DIAGRAM_TITLE_LENGTH);
+    const { xml, model } = await drawioXmlArg(args);
+    const projectId = await targetProject(ctx, args);
+    const diagram = await load(
+      Diagrams.createDiagram(ctx.deps.db, {
+        projectId,
+        title,
+        xml,
+        createdBy: ctx.principal.userId,
+        now: ctx.deps.now(),
+      }),
+      "project",
+    );
+    return drawioWritten(ctx, diagram, model);
+  },
+
+  update_drawio: async (args, ctx) => {
+    const diagramId = drawioIdArg(args);
+    const title = optionalString(args, "title", MAX_DIAGRAM_TITLE_LENGTH);
+    const { baseVersion } = args;
+    if (typeof baseVersion !== "number" || !Number.isInteger(baseVersion)) {
+      fail(
+        "invalid_argument",
+        '"baseVersion" is required: pass the integer version read_drawio returned, so a newer save is not overwritten.',
+      );
+    }
+    if (args.xml == null && title === undefined) {
+      fail("invalid_argument", 'Pass "xml", "title" or both.');
+    }
+    await drawioWith(ctx, diagramId, "edit");
+    const written = args.xml == null ? null : await drawioXmlArg(args);
+    const result = await load(
+      Diagrams.updateDiagram(ctx.deps.db, {
+        diagramId,
+        title,
+        xml: written?.xml,
+        baseVersion,
+        now: ctx.deps.now(),
+      }),
+      "Draw.io diagram",
+    );
+    if (!result.ok) {
+      return fail(
+        "version_conflict",
+        "The diagram changed since you read it. Nothing was written; read it again with read_drawio {includeXml: true} and redo your change.",
+        {
+          currentVersion: result.conflict.version,
+          url: drawioUrl(ctx, diagramId),
+        },
+      );
+    }
+    return drawioWritten(
+      ctx,
+      result.diagram,
+      written?.model ?? (await readDrawio(result.diagram.xml)),
+    );
+  },
+
   prepare_claude_doc_push: async (args, ctx) => {
     const tab = await tabWith(ctx, requireString(args, "tabId"), "editor");
     const claudeDocId = requireString(args, "claudeDocId");
