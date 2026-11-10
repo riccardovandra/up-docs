@@ -1,6 +1,11 @@
 import type { ApiDeps } from "./api.ts";
 import * as Auth from "./auth.ts";
-import { callTool, McpToolError, TOOLS } from "./mcpTools.ts";
+import {
+  callTool,
+  McpToolError,
+  ToolResultWithImages,
+  TOOLS,
+} from "./mcpTools.ts";
 
 /**
  * Agent MCP endpoint at `/mcp`: Streamable HTTP in its stateless JSON form.
@@ -42,6 +47,7 @@ How to write (what the user keeps asking for):
 - Draw to explain: every process, loop, system, data model or comparison of options gets a diagram beside the text it explains. One idea per diagram, its title says what to take from it. Actions: input, system, output. Roadmaps: a cascade. Data models: before and after. Options: side by side. Keep each label line under about 24 characters.
 Formats: call format_guide {topic} before you first write one. Writes with a malformed block are refused with the reason.
 - Diagrams: \`\`\`t3-widget id=<slug> blocks (topic "diagram"). Existing \`\`\`mermaid blocks keep working; edit them in place, never convert them.
+- Draw.io diagrams the user reworks by hand: list_drawio, read_drawio, create_drawio, update_drawio (topic "drawio").
 - Rich tables with status chips, links and per-cell comments: \`\`\`t3-table (topic "table"). Plain markdown tables are fine for static data.
 - Images: ![alt](https://...) links are copied into the doc on write; a file on your machine goes up with prepare_image_upload (topic "image").
 - Videos: \`\`\`t3-video (topic "video"). LinkedIn and X posts: \`\`\`t3-embed (topic "embed").
@@ -191,8 +197,19 @@ export async function handleMcp(
           agentName: clientNameFrom(request) ?? principal.tokenName,
           principal,
         });
+        const withImages = result instanceof ToolResultWithImages;
         return rpcResult(body.id, {
-          content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify(withImages ? result.body : result, null, 2),
+            },
+            // Pictures follow the JSON as MCP image content, so the agent can look at them.
+            ...(withImages ? result.images : []).map((image) => ({
+              type: "image",
+              ...image,
+            })),
+          ],
         });
       } catch (cause) {
         if (cause instanceof McpToolError) {
