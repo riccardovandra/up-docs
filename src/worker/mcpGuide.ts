@@ -34,7 +34,7 @@ export default () => { const W = 156, H = 48, rowA = 110, rowB = 230, c1 = 102, 
 \`\`\`t3-table
 {"id":"requests","columns":[{"id":"req","name":"Request","type":"text"},{"id":"status","name":"Status","type":"select","options":[{"value":"Not started","color":"gray"},{"value":"Done","color":"green"}]},{"id":"ticket","name":"Ticket","type":"link"}],"rows":[{"id":"r1","cells":{"req":"Fix Zebra MCP","status":"Not started","ticket":{"text":"TASK-5575","url":"https://example.atlassian.net/browse/TASK-5575"}}}]}
 \`\`\`
-Change one cell with update_table_cell and add rows with add_table_row rather than rewriting the block. Plain markdown tables still work for static data.`,
+Change one cell with update_table_cell and add rows with add_table_row rather than rewriting the block. Plain markdown tables still work for static data. A \`<!-- col-widths: 120 240 0 -->\` line directly above a plain table holds the column widths the user dragged; keep it with the table when you edit it.`,
   drawio: `Draw.io diagrams are library items of their own: each is stored once, in a project or in none, opens in the real Draw.io editor, and shows in every doc that links it, so one save updates them all.
 When to use which: draw a Draw.io diagram when the user asks for Draw.io, wants to rework the drawing by hand, or wants one diagram in several docs. Use a code-drawn \`\`\`t3-widget diagram (topic "diagram") for a figure that belongs to one doc and that you keep in step with its text. Never turn one kind into the other unasked.
 Tools:

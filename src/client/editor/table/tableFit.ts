@@ -34,3 +34,20 @@ export function breakoutFor(input: {
   if (left === column.left && right === column.right) return null;
   return { offset: left - column.left, width: right - left };
 }
+
+/**
+ * How wide a plain table's frame grows. Its columns have set widths adding up
+ * to `required`. A table that fits stays in the column; a wider one keeps the
+ * column's left edge and grows right, up to the page edge, then scrolls. It
+ * stays in the column when a comment sits beside it.
+ */
+export function growRight(input: {
+  readonly required: number;
+  readonly column: Span;
+  readonly page: Span;
+  readonly commentBeside: boolean;
+}): number | null {
+  const { required, column, page, commentBeside } = input;
+  if (commentBeside || required <= column.right - column.left) return null;
+  return Math.min(required, Math.max(page.right, column.right) - column.left);
+}

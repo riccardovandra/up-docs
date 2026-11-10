@@ -10,6 +10,8 @@ import { HeadingFold } from "./headingFold.ts";
 import { DocImage, type DocImageOptions, DocParagraph } from "./image.ts";
 import { LinkClick } from "./linkClick.ts";
 import { LinkPaste } from "./linkPaste.ts";
+import { TableBreakout } from "./table/plainTableBreakout.ts";
+import { DocTable, MIN_COLUMN_WIDTH, TableWidths } from "./table/plainTableMarkdown.ts";
 import { TabLinks } from "./tabLinks.ts";
 import { VideoDrop, type VideoDropOptions } from "./video/videoDrop.ts";
 
@@ -29,7 +31,10 @@ export const createEditorExtensions = (
   DocsCodeBlock,
   TaskList,
   TaskItem.configure({ nested: true }),
-  TableKit.configure({ table: { resizable: false } }),
+  TableKit.configure({ table: false }),
+  DocTable.configure({ resizable: true, cellMinWidth: MIN_COLUMN_WIDTH }),
+  TableWidths,
+  TableBreakout,
   DocImage.configure(images),
   VideoDrop.configure(videos),
   EmbedSupport.configure(embeds),
