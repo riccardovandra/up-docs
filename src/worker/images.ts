@@ -14,6 +14,8 @@ declare global {
 export interface ImageStore {
   put(key: string, body: ArrayBuffer, contentType: string): Promise<void>;
   get(key: string): Promise<{ readonly body: ReadableStream | ArrayBuffer } | null>;
+  /** Removes one object; a missing key is not an error. */
+  delete(key: string): Promise<void>;
   /** Removes every object under `prefix`. */
   deletePrefix(prefix: string): Promise<void>;
 }
@@ -101,6 +103,9 @@ export function r2ImageStore(bucket: R2Bucket): ImageStore {
       const object = await bucket.get(key);
       return object ? { body: object.body } : null;
     },
+    delete: async (key) => {
+      await bucket.delete(key);
+    },
     deletePrefix: async (prefix) => {
       let cursor: string | undefined;
       do {
@@ -187,6 +192,14 @@ export function d1ImageStore(db: D1Database): ImageStore {
       // Chunks are a multiple of 3 bytes, so only the last one carries padding.
       const bytes = Uint8Array.fromBase64(results.map((row) => row.data).join(""));
       return { body: bytes.buffer as ArrayBuffer };
+    },
+    delete: async (key) => {
+      const [, docId, file] = keyParts(key);
+      const { table, owner } = chunkTable(key);
+      await db
+        .prepare(`DELETE FROM ${table} WHERE ${owner} = ?1 AND file = ?2`)
+        .bind(docId, file)
+        .run();
     },
     deletePrefix: async (prefix) => {
       const [, docId] = keyParts(prefix);

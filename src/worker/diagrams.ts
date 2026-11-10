@@ -363,8 +363,16 @@ export async function moveProjectDiagrams(
 }
 
 export const diagramPicturesPrefix = (diagramId: string) => `diagrams/${diagramId}/`;
-export const diagramPictureKey = (diagramId: string, format: DiagramPictureFormat) =>
-  `${diagramPicturesPrefix(diagramId)}picture.${format}`;
+/**
+ * Each picture is kept under the version it was drawn from, so an upload for an
+ * older version can never overwrite the one `picture_version` points to, and a
+ * version uploaded without a PNG has none.
+ */
+export const diagramPictureKey = (
+  diagramId: string,
+  version: number,
+  format: DiagramPictureFormat,
+) => `${diagramPicturesPrefix(diagramId)}${version}.${format}`;
 
 /**
  * Deletes the diagram and its pictures. Docs that link it keep their block, which shows as missing.
@@ -424,14 +432,16 @@ export async function saveDiagramPicture(
   }
   const current = await getDiagram(db, input.diagramId);
   if (current.version !== input.version) return { ok: false, conflict: diagramSummary(current) };
+  const key = (format: DiagramPictureFormat) =>
+    diagramPictureKey(input.diagramId, input.version, format);
   await images.put(
-    diagramPictureKey(input.diagramId, "svg"),
+    key("svg"),
     svg.buffer.slice(svg.byteOffset, svg.byteOffset + svg.byteLength) as ArrayBuffer,
     DIAGRAM_PICTURE_TYPES.svg,
   );
-  if (png) {
-    await images.put(diagramPictureKey(input.diagramId, "png"), png, DIAGRAM_PICTURE_TYPES.png);
-  }
+  if (png) await images.put(key("png"), png, DIAGRAM_PICTURE_TYPES.png);
+  // A repeat upload for this version may come without the PNG the first one had.
+  else await images.delete(key("png"));
   const row = await db
     .prepare(
       `UPDATE diagrams SET picture_version = ?1 WHERE id = ?2 AND version = ?1
@@ -439,8 +449,17 @@ export async function saveDiagramPicture(
     )
     .bind(input.version, input.diagramId)
     .first<SummaryRow>();
-  if (row) return { ok: true, diagram: toSummary(row) };
-  return { ok: false, conflict: diagramSummary(await getDiagram(db, input.diagramId)) };
+  if (!row) return { ok: false, conflict: diagramSummary(await getDiagram(db, input.diagramId)) };
+  // The picture this one replaces is no longer served.
+  const previous = current.pictureVersion;
+  if (previous !== null && previous !== input.version) {
+    await Promise.all(
+      (["svg", "png"] as const).map((format) =>
+        images.delete(diagramPictureKey(input.diagramId, previous, format)),
+      ),
+    );
+  }
+  return { ok: true, diagram: toSummary(row) };
 }
 
 /**
@@ -449,10 +468,11 @@ export async function saveDiagramPicture(
  */
 export async function diagramPicture(
   images: ImageStore,
-  diagramId: string,
+  diagram: Pick<DiagramSummary, "id" | "pictureVersion">,
   format: DiagramPictureFormat,
 ): Promise<{ readonly body: ReadableStream | ArrayBuffer; readonly contentType: string } | null> {
-  const object = await images.get(diagramPictureKey(diagramId, format));
+  if (diagram.pictureVersion === null) return null;
+  const object = await images.get(diagramPictureKey(diagram.id, diagram.pictureVersion, format));
   return object ? { body: object.body, contentType: DIAGRAM_PICTURE_TYPES[format] } : null;
 }
 
@@ -494,6 +514,6 @@ export async function diagramPictureResponse(
   if (request.headers.get("If-None-Match") === etag) {
     return new Response(null, { status: 304, headers });
   }
-  const picture = await diagramPicture(images, diagram.id, format);
+  const picture = await diagramPicture(images, diagram, format);
   return picture ? new Response(picture.body, { headers }) : null;
 }

@@ -296,8 +296,8 @@ describe("diagram pictures", () => {
     expect(uploaded.status).toBe(200);
     expect(uploaded.body.diagram).toMatchObject({ version: 1, pictureVersion: 1 });
     expect([...api.images.keys()].toSorted()).toEqual([
-      `diagrams/${diagram.id}/picture.png`,
-      `diagrams/${diagram.id}/picture.svg`,
+      `diagrams/${diagram.id}/1.png`,
+      `diagrams/${diagram.id}/1.svg`,
     ]);
 
     const svg = await api.call("GET", `/api/diagrams/${diagram.id}/picture.svg`, as(creator));
@@ -349,6 +349,52 @@ describe("diagram pictures", () => {
     expect(png.status).toBe(404);
   });
 
+  it("serves no PNG for a version uploaded without one, and drops the replaced picture", async () => {
+    const { api, creator, create, upload, send, as } = await setup();
+    const diagram = await create(creator, { xml: XML });
+    await upload(creator, diagram.id, 1, PNG_BASE64);
+    await send(creator, "PATCH", `/api/diagrams/${diagram.id}`, { xml: XML2, baseVersion: 1 });
+    expect((await upload(creator, diagram.id, 2)).status).toBe(200);
+
+    const png = await api.call("GET", `/api/diagrams/${diagram.id}/picture.png`, as(creator));
+    expect(png.status).toBe(404);
+    expect([...api.images.keys()]).toEqual([`diagrams/${diagram.id}/2.svg`]);
+  });
+
+  it("keeps the current picture when an upload for an older version lands late", async () => {
+    const { api, creator, create, send, as } = await setup();
+    const diagram = await create(creator, { xml: XML });
+    // The version 1 upload passes its version check, then stalls before storing its bytes.
+    let release = () => {};
+    const stalled = new Promise<void>((resolve) => (release = resolve));
+    const images = {
+      ...api.deps.images,
+      put: async (key: string, body: ArrayBuffer, type: string) => {
+        if (key.endsWith("/1.svg")) await stalled;
+        await api.deps.images.put(key, body, type);
+      },
+    };
+    const late = Diagrams.saveDiagramPicture(api.db, images, {
+      diagramId: diagram.id,
+      version: 1,
+      svg: SVG.replace("<rect/>", "<rect id='old'/>"),
+      png: null,
+    });
+    await send(creator, "PATCH", `/api/diagrams/${diagram.id}`, { xml: XML2, baseVersion: 1 });
+    const current = await Diagrams.saveDiagramPicture(api.db, api.deps.images, {
+      diagramId: diagram.id,
+      version: 2,
+      svg: SVG,
+      png: null,
+    });
+    expect(current.ok).toBe(true);
+    release();
+    expect((await late).ok).toBe(false);
+
+    const served = await api.call("GET", `/api/diagrams/${diagram.id}/picture.svg`, as(creator));
+    expect(await served.text()).toBe(SVG);
+  });
+
   it("refuses bytes that are not an SVG or a PNG", async () => {
     const { creator, create, send } = await setup();
     const diagram = await create(creator, { xml: XML });
@@ -375,7 +421,7 @@ describe("diagram pictures", () => {
     await upload(creator, diagram.id, 1, PNG_BASE64);
     await upload(creator, kept.id, 1);
     await send(creator, "DELETE", `/api/diagrams/${diagram.id}`);
-    expect([...api.images.keys()]).toEqual([`diagrams/${kept.id}/picture.svg`]);
+    expect([...api.images.keys()]).toEqual([`diagrams/${kept.id}/1.svg`]);
   });
 });
 
@@ -477,9 +523,10 @@ describe("diagram pictures in D1", () => {
     });
     expect(saved.ok).toBe(true);
 
-    const svg = await Diagrams.diagramPicture(images, diagram.id, "svg");
+    const current = { id: diagram.id, pictureVersion: 1 };
+    const svg = await Diagrams.diagramPicture(images, current, "svg");
     expect(new TextDecoder().decode(svg!.body as ArrayBuffer)).toBe(SVG);
-    const png = await Diagrams.diagramPicture(images, diagram.id, "png");
+    const png = await Diagrams.diagramPicture(images, current, "png");
     expect(new Uint8Array(png!.body as ArrayBuffer)).toEqual(PNG);
     const count = async (table: string) =>
       (await db.prepare(`SELECT count(*) AS n FROM ${table}`).first<{ n: number }>())?.n;
@@ -488,6 +535,6 @@ describe("diagram pictures in D1", () => {
 
     await Diagrams.deleteDiagram(db, images, diagram.id);
     expect(await count("diagram_chunks")).toBe(0);
-    expect(await Diagrams.diagramPicture(images, diagram.id, "svg")).toBeNull();
+    expect(await Diagrams.diagramPicture(images, current, "svg")).toBeNull();
   });
 });
