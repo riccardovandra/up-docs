@@ -468,7 +468,15 @@ export function Grid(props: GridProps) {
       out.push(
         <div
           key={`overlay-${overlay.key}`}
-          className="sheet-overlay"
+          // On the first row there is no room above (the header is there): the tag goes
+          // below a one-row outline, inside the top of a taller one.
+          className={
+            overlay.rect.r1 !== 0
+              ? "sheet-overlay"
+              : overlay.rect.r2 === 0
+                ? "sheet-overlay sheet-overlay-below"
+                : "sheet-overlay sheet-overlay-inside"
+          }
           style={{ ...boxStyle(overlay.rect, pane), borderColor: overlay.color }}
         >
           {overlay.label ? (
