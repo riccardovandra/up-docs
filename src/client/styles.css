@@ -1002,10 +1002,28 @@ span.tab-row-toggle {
 
 .tab-editor .ProseMirror th,
 .tab-editor .ProseMirror td {
+  position: relative;
   border: 1px solid var(--border);
   padding: 0.4rem 0.65rem;
   text-align: left;
   vertical-align: top;
+  overflow-wrap: break-word;
+}
+
+/* Column resizing: drag a cell's right border. A table dragged wider than the text grows right (plainTableBreakout.ts). */
+.tab-editor .ProseMirror .column-resize-handle {
+  position: absolute;
+  top: 0;
+  right: -2px;
+  bottom: -1px;
+  width: 3px;
+  background: var(--accent);
+  pointer-events: none;
+  z-index: 2;
+}
+
+.tab-editor .ProseMirror.resize-cursor {
+  cursor: col-resize;
 }
 
 .tab-editor .ProseMirror th {
@@ -1495,6 +1513,7 @@ span.tab-row-toggle {
 
   .tab-editor .ProseMirror .tableWrapper {
     overflow: visible;
+    width: auto !important;
   }
 
   .tab-editor .ProseMirror :is(h1, h2, h3, h4, h5, h6) {
