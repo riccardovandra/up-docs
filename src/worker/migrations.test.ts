@@ -90,3 +90,40 @@ describe("0007_doc_opens", () => {
     expect(sqlite.prepare("SELECT count(*) AS n FROM doc_opens").get()).toEqual({ n: 0 });
   });
 });
+
+describe("0015_diagrams", () => {
+  it("applies on top of seeded data, and a diagram outlives its project and its creator", () => {
+    const sqlite = new NodeSqlite.DatabaseSync(":memory:");
+    sqlite.exec("PRAGMA foreign_keys = ON");
+    const index = files.indexOf("0015_diagrams.sql");
+    expect(index).toBeGreaterThan(0);
+    for (const file of files.slice(0, index)) apply(sqlite, file);
+    sqlite.exec(`
+      INSERT INTO projects (id, key, name, created_at) VALUES ('p1', 'title:work', 'Work', 1);
+      INSERT INTO users (id, email, name, created_at) VALUES ('u1', 'guest@x.test', '', 1);
+    `);
+    for (const file of files.slice(index)) apply(sqlite, file);
+
+    sqlite.exec(`
+      INSERT INTO diagrams (id, project_id, title, created_by, created_at, updated_at)
+        VALUES ('g1', 'p1', 'Flow', 'u1', 1, 1);
+      INSERT INTO diagram_chunks VALUES ('g1', 'picture.svg', 0, 1, 'PHN2Zy8+');
+    `);
+    expect(sqlite.prepare("SELECT xml, version, picture_version FROM diagrams").get()).toEqual({
+      xml: "",
+      version: 1,
+      picture_version: null,
+    });
+    expect(() =>
+      sqlite.exec("INSERT INTO diagram_chunks VALUES ('missing', 'picture.svg', 0, 1, '')"),
+    ).toThrow();
+
+    sqlite.exec("DELETE FROM projects WHERE id = 'p1'");
+    sqlite.exec("DELETE FROM users WHERE id = 'u1'");
+    expect(sqlite.prepare("SELECT id, project_id, created_by FROM diagrams").all()).toEqual([
+      { id: "g1", project_id: null, created_by: null },
+    ]);
+    sqlite.exec("DELETE FROM diagrams WHERE id = 'g1'");
+    expect(sqlite.prepare("SELECT count(*) AS n FROM diagram_chunks").get()).toEqual({ n: 0 });
+  });
+});

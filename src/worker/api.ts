@@ -43,6 +43,13 @@ import {
 import * as Videos from "./videos.ts";
 import * as Embeds from "./embeds.ts";
 import { matchEmbed } from "../shared/embeds.ts";
+import * as Diagrams from "./diagrams.ts";
+import {
+  DEFAULT_DIAGRAM_TITLE,
+  isDiagramId,
+  isDiagramPictureFormat,
+  MAX_DIAGRAM_TITLE_LENGTH,
+} from "../shared/drawio.ts";
 
 /** The ordered write path for a doc; production routes it to the doc's DocRoom. */
 export interface DocRooms {
@@ -289,8 +296,8 @@ async function handleImageUploadLink(
 
 /**
  * `PATCH /api/projects/:id` renames, `POST /api/projects/:id/move-docs` moves
- * every doc to `projectId` (null for no project), and `DELETE` removes an
- * empty project. A project with docs is never deleted with them.
+ * every doc and diagram to `projectId` (null for no project), and `DELETE`
+ * removes an empty project. A project with docs is never deleted with them.
  */
 async function handleProject(
   request: Request,
@@ -322,6 +329,7 @@ async function handleProject(
     // Through each DocRoom, so pages open on a moved doc hear about it.
     for (const docId of docIds)
       await deps.rooms.setDocProject(docId, { projectId, origin });
+    await Diagrams.moveProjectDiagrams(deps.db, { from: id, to: projectId });
     return json({ moved: docIds.length });
   }
   if (!sub && method === "DELETE") {
@@ -872,6 +880,15 @@ export async function handleApi(
       return json({ tabIds });
     }
 
+    if (resource === "diagrams" && segments.length <= 3) {
+      const response = await handleDiagrams(
+        request,
+        { id, sub, method, url, principal },
+        deps,
+      );
+      if (response) return response;
+    }
+
     const response = await handleComments(
       request,
       { resource, id, sub, method, url, principal },
@@ -882,6 +899,18 @@ export async function handleApi(
     return error(404, "not_found");
   } catch (cause) {
     if (cause instanceof Docs.NotFoundError) return error(404, "not_found");
+    if (cause instanceof Diagrams.DiagramForbiddenError)
+      return error(403, "forbidden");
+    if (cause instanceof Diagrams.InvalidDiagramError) {
+      const tooLarge = cause.code === "too_large";
+      return json(
+        {
+          error: tooLarge ? "diagram_too_large" : cause.code,
+          message: cause.message,
+        },
+        tooLarge ? 413 : 400,
+      );
+    }
     if (cause instanceof Access.ForbiddenError) {
       return json({ error: "forbidden", required: cause.required }, 403);
     }
@@ -896,6 +925,171 @@ export async function handleApi(
       return error(409, "project_not_empty");
     throw cause;
   }
+}
+
+const versionConflict = (conflict: { readonly version: number }) =>
+  json({ error: "version_conflict", version: conflict.version, diagram: conflict }, 409);
+
+/**
+ * Draw.io diagrams, under `/api/diagrams`. Their creator and the admin list
+ * and change them. Anyone who reads a doc that links one may fetch its picture
+ * and the diagram without its source. Returns null when the path is not one
+ * of these routes.
+ */
+async function handleDiagrams(
+  request: Request,
+  route: {
+    readonly id: string | undefined;
+    readonly sub: string | undefined;
+    readonly method: string;
+    readonly url: URL;
+    readonly principal: Auth.Principal;
+  },
+  deps: ApiDeps,
+): Promise<Response | null> {
+  const { id, sub, method, url } = route;
+  const userId = route.principal.userId;
+  const now = deps.now();
+
+  if (!id && method === "GET") {
+    // `?projectId=<id>` for one project, `?projectId=none` for diagrams in no project.
+    const param = url.searchParams.get("projectId");
+    const projectId = param === null ? undefined : param === "none" ? null : param;
+    const [diagrams, uses] = await Promise.all([
+      Diagrams.listDiagrams(deps.db, { userId, projectId }),
+      Diagrams.diagramUsesById(deps.db, userId),
+    ]);
+    return json({
+      diagrams: diagrams.map((diagram) => ({
+        ...diagram,
+        uses: uses.get(diagram.id) ?? [],
+      })),
+    });
+  }
+
+  if (!id && method === "POST") {
+    const body = await readJson(request);
+    const projectId = projectIdArg(body.projectId);
+    const title =
+      body.title === undefined
+        ? DEFAULT_DIAGRAM_TITLE
+        : str(body.title, MAX_DIAGRAM_TITLE_LENGTH);
+    const xml = body.xml;
+    if (projectId === false || !title || (xml !== undefined && typeof xml !== "string"))
+      return error(400, "invalid_diagram");
+    if (projectId && !(await Access.canSeeProject(deps.db, projectId, userId))) {
+      return error(404, "not_found");
+    }
+    const diagram = await Diagrams.createDiagram(deps.db, {
+      projectId: projectId ?? null,
+      title,
+      xml,
+      createdBy: userId,
+      now,
+    });
+    return json({ diagram: Diagrams.diagramView(diagram, true) }, 201);
+  }
+
+  if (!id) return null;
+  if (!isDiagramId(id)) return error(404, "not_found");
+  const need = (access: "view" | "edit") =>
+    Diagrams.requireDiagram(deps.db, { diagramId: id, userId, need: access });
+
+  // `picture.svg` is what people see, `picture.png` what agents are handed.
+  const format = /^picture\.([a-z]+)$/.exec(sub ?? "")?.[1];
+  if (isDiagramPictureFormat(format) && SAFE_METHODS.has(method)) {
+    const { diagram } = await need("view");
+    return (
+      (await Diagrams.diagramPictureResponse(deps.images, {
+        diagram,
+        format,
+        request,
+      })) ?? error(404, "not_found")
+    );
+  }
+
+  // The picture Draw.io drew in the browser, for the source at `version`.
+  if (sub === "picture" && method === "PUT") {
+    const body = await readJson(request);
+    const { version, svg } = body;
+    if (typeof version !== "number" || !Number.isInteger(version))
+      return error(400, "invalid_version");
+    if (typeof svg !== "string" || (body.png != null && typeof body.png !== "string"))
+      return error(400, "invalid_picture");
+    await need("edit");
+    let png: ArrayBuffer | null = null;
+    if (typeof body.png === "string") {
+      try {
+        png = Uint8Array.fromBase64(body.png).buffer as ArrayBuffer;
+      } catch {
+        return error(400, "invalid_picture");
+      }
+    }
+    const result = await Diagrams.saveDiagramPicture(deps.db, deps.images, {
+      diagramId: id,
+      version,
+      svg,
+      png,
+    });
+    return result.ok ? json({ diagram: result.diagram }) : versionConflict(result.conflict);
+  }
+
+  if (sub === "uses" && method === "GET") {
+    await need("edit");
+    return json(await Diagrams.diagramUsage(deps.db, { diagramId: id, userId }));
+  }
+
+  if (sub) return null;
+
+  if (method === "GET") {
+    const { diagram, canEdit } = await need("view");
+    return json({ diagram: Diagrams.diagramView(diagram, canEdit) });
+  }
+
+  if (method === "PATCH") {
+    const body = await readJson(request);
+    const title =
+      body.title === undefined ? undefined : str(body.title, MAX_DIAGRAM_TITLE_LENGTH);
+    if (title === null) return error(400, "invalid_title");
+    const projectId = projectIdArg(body.projectId);
+    if (projectId === false) return error(400, "invalid_project");
+    const xml = body.xml;
+    if (xml !== undefined && typeof xml !== "string") return error(400, "invalid_xml");
+    const baseVersion = body.baseVersion;
+    // A new source always says which version it was drawn from.
+    if (
+      baseVersion === undefined
+        ? xml !== undefined
+        : typeof baseVersion !== "number" || !Number.isInteger(baseVersion)
+    ) {
+      return error(400, "invalid_base_version");
+    }
+    if (title === undefined && projectId === undefined && xml === undefined)
+      return error(400, "empty_write");
+    await need("edit");
+    if (projectId && !(await Access.canSeeProject(deps.db, projectId, userId))) {
+      return error(404, "not_found");
+    }
+    const result = await Diagrams.updateDiagram(deps.db, {
+      diagramId: id,
+      title,
+      projectId,
+      xml,
+      baseVersion: baseVersion as number | undefined,
+      now,
+    });
+    return result.ok
+      ? json({ diagram: Diagrams.diagramView(result.diagram, true) })
+      : versionConflict(result.conflict);
+  }
+
+  if (method === "DELETE") {
+    await need("edit");
+    await Diagrams.deleteDiagram(deps.db, deps.images, id);
+    return json({ ok: true });
+  }
+
+  return null;
 }
 
 function videoParts(value: unknown): ReadonlyArray<Videos.VideoPart> | null {

@@ -125,3 +125,26 @@ export const HomeIcon = (props: IconProps) => (
     <path d="M3 10.5 12 3l9 7.5M5 9.5V20h5v-6h4v6h5V9.5" />
   </Icon>
 );
+
+export const DiagramIcon = (props: IconProps) => (
+  <Icon {...props}>
+    <rect x="3" y="3" width="7" height="6" rx="1.5" />
+    <rect x="14" y="3" width="7" height="6" rx="1.5" />
+    <rect x="14" y="15" width="7" height="6" rx="1.5" />
+    <path d="M10 6h4M17.5 9v6" />
+  </Icon>
+);
+
+export const PenIcon = (props: IconProps) => (
+  <Icon {...props}>
+    <path d="m4 20 4-1L19 8l-3-3L5 16z" />
+    <path d="m14 7 3 3" />
+  </Icon>
+);
+
+export const LinkIcon = (props: IconProps) => (
+  <Icon {...props}>
+    <path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1" />
+    <path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1" />
+  </Icon>
+);

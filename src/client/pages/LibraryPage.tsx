@@ -65,6 +65,7 @@ import {
 import { useMe } from "../me.ts";
 import { docPath, navigate } from "../router.ts";
 import { canonicalDocUrl } from "../share/ShareDialog.tsx";
+import { DiagramsView, LibraryKindSwitch, type LibraryKind } from "../diagrams/DiagramsView.tsx";
 import "../home/home.css";
 
 const SEARCH_DEBOUNCE_MS = 250;
@@ -99,7 +100,8 @@ const isSort = (value: string | null): value is HomeSort =>
 /** The group picker's "every group" choice; otherwise a group's name, or null for none. */
 const ALL_GROUPS = "\u0000all";
 
-export function LibraryPage() {
+export function LibraryPage(props: { readonly kind?: LibraryKind }) {
+  const kind = props.kind ?? "docs";
   const me = useMe();
   const userId = me?.user.id ?? "";
   const admin = isAdmin(userId);
@@ -310,11 +312,16 @@ export function LibraryPage() {
     scope.kind === "project" &&
     scope.key === embedKey;
 
-  const createDoc = async (title: string) => {
-    let projectId = scopeProject?.id ?? null;
+  /** The project a new doc or diagram is filed in: the one in scope, created first if need be. */
+  const createInProject = async (): Promise<string | null> => {
     if (createsProject && embedProject && embedKey) {
-      projectId = (await api.createProject(embedProject.name, embedKey)).project.id;
+      return (await api.createProject(embedProject.name, embedKey)).project.id;
     }
+    return scopeProject?.id ?? null;
+  };
+
+  const createDoc = async (title: string) => {
+    const projectId = await createInProject();
     const group = locked && groupPick !== ALL_GROUPS ? groupPick : null;
     const created = await api.createDoc(projectId, title, group);
     navigate(docPath(created.doc.id));
@@ -347,16 +354,33 @@ export function LibraryPage() {
       : "No project";
   const startDoc = () => setCreating(true);
   const filtering = statuses.size > 0;
+  const titleRow = (
+    <div className="home-title-row">
+      <h1 className="home-title">{locked ? (embedProject?.name ?? "UP Docs") : "UP Docs"}</h1>
+      {locked ? null : <ProjectSwitcher scope={scope} projects={projects} onChange={chooseScope} />}
+      <LibraryKindSwitch kind={kind} />
+      <AccountMenu />
+    </div>
+  );
+
+  if (kind === "diagrams") {
+    return (
+      <main className="home">
+        {titleRow}
+        <DiagramsView
+          scope={scope}
+          scopeLabel={scope.kind === "all" ? null : scopeLabel}
+          projects={library.projects}
+          createIn={scopeProject || createsProject ? scopeLabel : "No project"}
+          resolveProjectId={createInProject}
+        />
+      </main>
+    );
+  }
 
   return (
     <main className="home">
-      <div className="home-title-row">
-        <h1 className="home-title">{locked ? (embedProject?.name ?? "UP Docs") : "UP Docs"}</h1>
-        {locked ? null : (
-          <ProjectSwitcher scope={scope} projects={projects} onChange={chooseScope} />
-        )}
-        <AccountMenu />
-      </div>
+      {titleRow}
 
       {notice ? (
         <div className="notice" role="status">

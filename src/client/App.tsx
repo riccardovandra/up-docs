@@ -16,6 +16,10 @@ const DocPage = lazy(() => loadDocPage().then((module) => ({ default: module.Doc
 const LocalDocPage = lazy(() =>
   loadLocalDocPage().then((module) => ({ default: module.LocalDocPage })),
 );
+const loadDiagramPage = () => import("./diagrams/DiagramPage.tsx");
+const DiagramPage = lazy(() =>
+  loadDiagramPage().then((module) => ({ default: module.DiagramPage })),
+);
 const loadSettingsPage = () => import("./pages/SettingsPage.tsx");
 const SettingsPage = lazy(() =>
   loadSettingsPage().then((module) => ({ default: module.SettingsPage })),
@@ -32,8 +36,10 @@ export function App() {
   useEffect(() => {
     // The first page's data and code load beside the sign-in check, not after it.
     const first = parseRoute(window.location.pathname).name;
-    if (first === "library") api.prefetchLibrary();
+    // The Diagrams view is the library page too.
+    if (first === "library" || first === "diagrams") api.prefetchLibrary();
     if (first === "doc") void loadDocPage();
+    if (first === "diagram") void loadDiagramPage();
     if (first === "local") void loadLocalDocPage();
     if (first === "settings") void loadSettingsPage();
     api
@@ -41,7 +47,8 @@ export function App() {
       .then(setMe, () => setMe(null))
       .finally(() => {
         // Only a home page mounting now may use it; a later one would show stale docs.
-        if (parseRoute(window.location.pathname).name !== "library") api.dropLibraryPrefetch();
+        const now = parseRoute(window.location.pathname).name;
+        if (now !== "library" && now !== "diagrams") api.dropLibraryPrefetch();
         setLoaded(true);
       });
   }, []);
@@ -58,13 +65,18 @@ export function App() {
         </div>
       ) : null}
       {openTabs.length > 0 ? <OpenTabsStrip tabs={openTabs} route={route} /> : null}
-      {route.name === "library" ? <LibraryPage /> : null}
+      {route.name === "library" || route.name === "diagrams" ? (
+        <LibraryPage kind={route.name === "diagrams" ? "diagrams" : "docs"} />
+      ) : null}
       <Suspense fallback={null}>
         {route.name === "settings" ? <SettingsPage /> : null}
         {route.name === "doc" ? (
           <DocPage key={route.docId} docId={route.docId} tabId={route.tabId} />
         ) : null}
         {route.name === "local" ? <LocalDocPage key={route.path} path={route.path} /> : null}
+        {route.name === "diagram" ? (
+          <DiagramPage key={route.diagramId} diagramId={route.diagramId} />
+        ) : null}
       </Suspense>
     </div>
   );

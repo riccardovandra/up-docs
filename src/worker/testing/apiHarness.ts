@@ -145,6 +145,9 @@ export function makeApiHarness(overrides: Partial<ApiDeps> = {}) {
         images.set(key, { body, contentType });
       },
       get: async (key) => images.get(key) ?? null,
+      delete: async (key) => {
+        images.delete(key);
+      },
       deletePrefix: async (prefix) => {
         for (const key of [...images.keys()]) if (key.startsWith(prefix)) images.delete(key);
       },
