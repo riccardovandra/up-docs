@@ -1444,7 +1444,7 @@ export const TOOLS = [
   {
     name: "update_drawio",
     description:
-      "Change a Draw.io diagram you manage: its XML, its title, or both. xml replaces the whole source, so start from read_drawio {includeXml: true} and pass the version you read as baseVersion. If someone saved since then nothing is written and the current version is returned: read again and redo your change. Every doc that links the diagram shows the change.",
+      "Change a Draw.io diagram you manage: its XML, its title, or both. Pass the version you read as baseVersion. xml replaces the whole source, so start from read_drawio {includeXml: true}. If someone saved since then nothing is written and the current version is returned: read again and redo your change. Every doc that links the diagram shows the change.",
     inputSchema: {
       type: "object",
       properties: {
@@ -1456,10 +1456,10 @@ export const TOOLS = [
         title: { type: "string", maxLength: MAX_DIAGRAM_TITLE_LENGTH },
         baseVersion: {
           type: "integer",
-          description: "The version read_drawio returned. Required with xml.",
+          description: "The version read_drawio returned.",
         },
       },
-      required: ["diagramId"],
+      required: ["diagramId", "baseVersion"],
     },
   },
   {
@@ -2486,20 +2486,11 @@ const handlers: Record<
   update_drawio: async (args, ctx) => {
     const diagramId = drawioIdArg(args);
     const title = optionalString(args, "title", MAX_DIAGRAM_TITLE_LENGTH);
-    const baseVersion = args.baseVersion ?? undefined;
-    if (
-      baseVersion !== undefined &&
-      (typeof baseVersion !== "number" || !Number.isInteger(baseVersion))
-    ) {
+    const { baseVersion } = args;
+    if (typeof baseVersion !== "number" || !Number.isInteger(baseVersion)) {
       fail(
         "invalid_argument",
-        '"baseVersion" must be the integer version read_drawio returned.',
-      );
-    }
-    if (args.xml != null && baseVersion === undefined) {
-      fail(
-        "invalid_argument",
-        '"baseVersion" is required with "xml": pass the version read_drawio returned, so a newer save is not overwritten.',
+        '"baseVersion" is required: pass the integer version read_drawio returned, so a newer save is not overwritten.',
       );
     }
     if (args.xml == null && title === undefined) {

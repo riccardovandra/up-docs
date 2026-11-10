@@ -290,16 +290,29 @@ describe("MCP Draw.io tools", () => {
     });
     expect((await Diagrams.getDiagram(mcp.api.db, diagramId)).xml).toBe(FLOW2);
 
-    const renamed = await mcp.tool("update_drawio", { diagramId, title: "Deal flow" });
+    const renamed = await mcp.tool("update_drawio", {
+      diagramId,
+      title: "Deal flow",
+      baseVersion: 2,
+    });
     expect(renamed.body).toMatchObject({ title: "Deal flow", version: 2 });
     expect(renamed.body.shapes).toEqual(["Discovery call", "Kickoff"]);
+    // A rename goes by the version read too, so it never lands on a drawing the agent has not seen.
+    const staleRename = await mcp.tool("update_drawio", {
+      diagramId,
+      title: "Old",
+      baseVersion: 1,
+    });
+    expect(staleRename.body).toMatchObject({ error: "version_conflict", currentVersion: 2 });
 
-    const unversioned = await mcp.tool("update_drawio", { diagramId, xml: FLOW });
-    expect(unversioned.body.error).toBe("invalid_argument");
-    expect(unversioned.body.message).toContain('"baseVersion" is required with "xml"');
+    for (const args of [{ xml: FLOW }, { title: "Unversioned" }]) {
+      const unversioned = await mcp.tool("update_drawio", { diagramId, ...args });
+      expect(unversioned.body.error).toBe("invalid_argument");
+      expect(unversioned.body.message).toContain('"baseVersion" is required');
+    }
     const fractional = await mcp.tool("update_drawio", { diagramId, xml: FLOW, baseVersion: 1.5 });
     expect(fractional.body.error).toBe("invalid_argument");
-    const nothing = await mcp.tool("update_drawio", { diagramId });
+    const nothing = await mcp.tool("update_drawio", { diagramId, baseVersion: 2 });
     expect(nothing.body.error).toBe("invalid_argument");
     const broken = await mcp.tool("update_drawio", { diagramId, xml: "<mxfile>", baseVersion: 2 });
     expect(broken).toMatchObject({ isError: true, body: { error: "invalid_xml" } });
@@ -346,7 +359,11 @@ describe("MCP Draw.io tools", () => {
     expect(JSON.stringify(wantsXml.body)).not.toContain("mxGraphModel");
     const write = await reader("update_drawio", { diagramId, xml: FLOW2, baseVersion: 1 });
     expect(write).toMatchObject({ isError: true, body: { error: "forbidden" } });
-    const rename = await reader("update_drawio", { diagramId, title: "Mine now" });
+    const rename = await reader("update_drawio", {
+      diagramId,
+      title: "Mine now",
+      baseVersion: 1,
+    });
     expect(rename).toMatchObject({ isError: true, body: { error: "forbidden" } });
 
     for (const [name, args] of [
