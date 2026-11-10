@@ -34,9 +34,16 @@
   // before it stop loading.
   "r2_buckets": [{ "binding": "IMAGES", "bucket_name": "up-docs-images" }],
   "durable_objects": {
-    "bindings": [{ "name": "DOC_ROOM", "class_name": "DocRoom" }],
+    "bindings": [
+      { "name": "DOC_ROOM", "class_name": "DocRoom" },
+      { "name": "SHEET_ROOM", "class_name": "SheetRoom" },
+    ],
   },
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["DocRoom"] }],
+  // Append-only, like D1 migrations: never edit or reorder an applied tag.
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["DocRoom"] },
+    { "tag": "v2", "new_sqlite_classes": ["SheetRoom"] },
+  ],
   "vars": {
     // Origins allowed to embed the app (CSP frame-ancestors): app.t3.codes (and preview),
     // local `npx t3` and Vite dev, tailnet-served T3 Code, and the desktop

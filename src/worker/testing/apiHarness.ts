@@ -7,6 +7,8 @@ import * as DocThreads from "../docThreads.ts";
 import * as Docs from "../docs.ts";
 import type { DocInvite } from "../email.ts";
 import { makeTestD1 } from "./sqliteD1.ts";
+import type { SheetRoomMessage } from "../../shared/sheets.ts";
+import { SheetEngine } from "../sheets.ts";
 import type { VideoStore } from "../videos.ts";
 
 export const ORIGIN = "https://docs.test";
@@ -18,6 +20,29 @@ export function makeApiHarness(overrides: Partial<ApiDeps> = {}) {
   const clock = { now: 1_000_000 };
   const sentCodes: Array<{ email: string; code: string }> = [];
   const broadcasts: Array<RoomMessage> = [];
+  /** What each sheet room sent, in order, and which sheets closed their sockets. */
+  const sheetBroadcasts: Array<{ sheetId: string; message: SheetRoomMessage }> = [];
+  const sheetSockets: Array<{ sheetId: string; userId: string; open: boolean }> = [];
+  /** One engine per sheet, like one SheetRoom per sheet. Delete an entry to drop the room. */
+  const sheetEngines = new Map<string, SheetEngine>();
+  const sheetEngine = (sheetId: string) => {
+    let engine = sheetEngines.get(sheetId);
+    if (!engine) {
+      engine = new SheetEngine(
+        {
+          db,
+          broadcast: (message) => sheetBroadcasts.push({ sheetId, message }),
+          closeAll: () => {
+            for (const socket of sheetSockets) if (socket.sheetId === sheetId) socket.open = false;
+          },
+          now: () => clock.now,
+        },
+        sheetId,
+      );
+      sheetEngines.set(sheetId, engine);
+    }
+    return engine;
+  };
   const invites: Array<DocInvite> = [];
   const sockets: Array<{ docId: string; userId: string; open: boolean }> = [];
   const images = new Map<string, { body: ArrayBuffer; contentType: string }>();
@@ -140,6 +165,18 @@ export function makeApiHarness(overrides: Partial<ApiDeps> = {}) {
         }
       },
     },
+    sheetRooms: {
+      applyEdits: (sheetId, input) => sheetEngine(sheetId).applyEdits(input),
+      updateMeta: (sheetId, input) => sheetEngine(sheetId).updateMeta(input),
+      deleteSheet: async (sheetId, input) => {
+        await sheetEngine(sheetId).deleteSheet(input);
+        sheetEngines.delete(sheetId);
+      },
+      openSocket: async (sheetId, _request, userId) => {
+        sheetSockets.push({ sheetId, userId, open: true });
+        return new Response(null, { status: 204 });
+      },
+    },
     images: {
       put: async (key, body, contentType) => {
         images.set(key, { body, contentType });
@@ -207,6 +244,9 @@ export function makeApiHarness(overrides: Partial<ApiDeps> = {}) {
     mail,
     sentCodes,
     broadcasts,
+    sheetBroadcasts,
+    sheetSockets,
+    sheetEngines,
     invites,
     sockets,
     images,
