@@ -40,18 +40,19 @@ Workflow:
 Doc links read <origin>/d/<docId>/<tabId>: a pasted link's tabId is the tab the user is on, so read_doc with it first. Re-read a tab (read_doc with tabId) before editing it if the user may have changed it. Move a doc with move_doc (projectId: null for no project).
 Project facts: create_doc and read_doc return the project's standing facts (tools, names, rules). Follow them over your own assumptions. When the user corrects a lasting fact, save it with add_project_fact, or with resolve_comment's lesson when it came from a comment.
 How to write (what the user keeps asking for):
-- Before drafting, know the reader, the purpose and the decision the doc should drive. If one is unclear, ask one or two short questions first.
+- Before drafting, know the reader, the purpose and the decision the doc should drive. If one is unclear, ask one or two short questions.
 - Foundation first: say what the doc is for and the end state, then the parts. A plan reads: purpose and reader; end state, with a diagram; components, each with its goal, when it is done and how it fits; order of work, easiest or first-needed first; open decisions.
-- Plain words, full depth. Define every term, acronym and ID where it first appears; no bare F1, R5, D3 or PR numbers in a doc a person reads.
+- Plain words, full depth. Define every term, acronym and ID where it first appears; no bare F1, R5, D3 or PR numbers.
 - Draft small: no filler, restating, closing summaries or invented sections. Grow a section when the user asks. Do not guess facts about the user's business: ask, or mark it as an assumption.
-- Draw to explain: every process, loop, system, data model or comparison of options gets a diagram beside the text it explains. One idea per diagram, its title says what to take from it. Actions: input, system, output. Roadmaps: a cascade. Data models: before and after. Options: side by side. Keep each label line under about 24 characters.
-Formats: call format_guide {topic} before you first write one. Writes with a malformed block are refused with the reason.
+- Draw to explain: every process, loop, system, data model or comparison of options gets a diagram beside its text. One idea per diagram, its title says what to take from it. Actions: input, system, output. Roadmaps: a cascade. Data models: before and after. Options: side by side. Keep each label line under about 24 characters.
+Formats: call format_guide {topic} before you first write one. Malformed blocks are refused with the reason.
 - Diagrams: \`\`\`t3-widget id=<slug> blocks (topic "diagram"). Existing \`\`\`mermaid blocks keep working; edit them in place, never convert them.
 - Draw.io diagrams the user reworks by hand: list_drawio, read_drawio, create_drawio, update_drawio (topic "drawio").
-- Rich tables with status chips, links and per-cell comments: \`\`\`t3-table (topic "table"). Plain markdown tables are fine for static data.
-- Images: ![alt](https://...) links are copied into the doc on write; a file on your machine goes up with prepare_image_upload (topic "image").
+- Rich tables (status chips, links, per-cell comments): \`\`\`t3-table (topic "table"). Plain markdown tables are fine for static data.
+- Images: ![alt](https://...) links are copied into the doc on write; a local file goes up with prepare_image_upload (topic "image").
 - Videos: \`\`\`t3-video (topic "video"). LinkedIn and X posts: \`\`\`t3-embed (topic "embed").
-- Comments: when asked to address comments, list_comments, make the edits, reply_comment in each thread saying what changed, and resolve_comment once handled (topic "comments" for anchors on table cells and diagram labels).
+- Comments: when asked to address comments, list_comments, make the edits, reply_comment in each thread with what changed, then resolve_comment (topic "comments": anchors on table cells and diagram labels).
+- Sheets (live shared spreadsheets): create_sheet, read_sheet, read_cells, edit_sheet (topic "sheet").
 - Sharing: share_doc, list_members and unshare_doc (topic "sharing"). Pushing a tab to a Claude Doc: topic "claude_push".`;
 
 interface JsonRpcRequest {
