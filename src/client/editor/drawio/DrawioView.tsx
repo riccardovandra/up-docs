@@ -78,6 +78,8 @@ function LinkedFigure(props: {
   readonly block: DrawioBlock;
   readonly editable: boolean;
   readonly support: DrawioSupportStorage | undefined;
+  /** Whether the person can still edit the doc, asked at the moment of an action. */
+  readonly canChange: () => boolean;
   readonly onRemove: () => boolean;
   readonly onRelink: (diagramId: string) => boolean;
 }) {
@@ -113,11 +115,13 @@ function LinkedFigure(props: {
   });
   const canEdit = actions.some((action) => action.id === "edit" && action.disabled === null);
 
-  const edit = () => support?.context()?.edit(diagramId);
+  const edit = () => {
+    if (props.canChange()) support?.context()?.edit(diagramId);
+  };
 
   const detach = async () => {
     const page = support?.context();
-    if (!page || busy) return;
+    if (!page || busy || !props.canChange()) return;
     setBusy(true);
     try {
       const copy = await detachCopy(diagramsApi, { diagramId, projectId: page.projectId });
@@ -275,6 +279,10 @@ export class DrawioView implements NodeView {
     editor.on("selectionUpdate", this.sync);
     editor.on("focus", this.sync);
     editor.on("blur", this.sync);
+    // Nothing announces a change of the right to edit (the page turns it on and off quietly), so
+    // the block looks again whenever the pointer or the keyboard reaches it, before its actions show.
+    this.dom.addEventListener("pointerenter", this.sync);
+    this.dom.addEventListener("focusin", this.sync);
     this.sync();
   }
 
@@ -316,6 +324,12 @@ export class DrawioView implements NodeView {
     return typeof pos === "number" ? pos : null;
   }
 
+  /** Looks again first, so a block that has gone read-only drops its actions on the spot. */
+  private readonly canChange = (): boolean => {
+    this.sync();
+    return !this.destroyed && this.editor.isEditable;
+  };
+
   private readonly remove = (): boolean => {
     const pos = this.position();
     return pos !== null && removeDrawioBlock(this.editor, pos);
@@ -345,6 +359,7 @@ export class DrawioView implements NodeView {
             block={block}
             editable={editable}
             support={this.support}
+            canChange={this.canChange}
             onRemove={this.remove}
             onRelink={this.relink}
           />
