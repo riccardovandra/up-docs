@@ -542,7 +542,7 @@ export function DocPage(props: {
 
   const copyLink = useStableCallback(
     () =>
-      void navigator.clipboard.writeText(canonicalDocUrl(props.docId)).then(
+      void navigator.clipboard.writeText(canonicalDocUrl(props.docId, activeTabId)).then(
         () =>
           setNotice(
             "Link copied. Only people the doc is shared with can open it.",
