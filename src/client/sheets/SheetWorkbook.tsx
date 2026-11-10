@@ -13,7 +13,7 @@ import { columnToLetters, formatArea, quoteSheetName } from "../../shared/sheet/
 import { decreaseDecimals, increaseDecimals } from "../../shared/sheet/numberFormat.ts";
 import { cellKey, type Edit, type FormatPatch, type Sheet } from "../../shared/sheet/types.ts";
 import { isRefusal, viewCell } from "../../shared/sheet/workbook.ts";
-import { formatTsv, pasteInputs, shiftInput, type GridClip } from "./clipboard.ts";
+import { clipMatches, formatTsv, pasteInputs, shiftInput, type GridClip } from "./clipboard.ts";
 import { FormulaInput } from "./FormulaInput.tsx";
 import { formulaRefSpans, putRef, refInsertion, refRect, type PointSpan } from "./formulaRefs.ts";
 import { Grid, type GridOverlay, type GridTarget, type PointerInfo } from "./Grid.tsx";
@@ -462,7 +462,7 @@ export function SheetWorkbook(props: {
       const single = rows.length === 1 && rows[0]?.length === 1;
       if (single && (rect.r1 !== rect.r2 || rect.c1 !== rect.c2) && selection.kind === "cells") {
         // One value pasted over a range fills it; a copied formula shifts per cell.
-        const own = clip.current && rows[0]?.[0] !== undefined;
+        const own = clipMatches(text, clip.current);
         const source = own ? (clip.current?.inputs[0]?.[0] ?? null) : (rows[0]?.[0] ?? null);
         rows = [];
         for (let row = rect.r1; row <= rect.r2; row++) {

@@ -23,7 +23,10 @@ const RETRY_MS = [1000, 2000, 5000, 10_000];
 
 interface Pending {
   readonly id: number;
-  readonly edits: ReadonlyArray<Edit>;
+  /** Rewritten when a tab an earlier pending list adds gets a new id on a rebase. */
+  edits: ReadonlyArray<Edit>;
+  /** Ids of the tabs it added, as last applied here. */
+  added: ReadonlyArray<string>;
   /** The base it was last sent with; null while not in flight. */
   sentBase: number | null;
   /** The revision the server applied it at, when that is known before the broadcast. */
@@ -106,7 +109,13 @@ export class SheetSync {
   apply(edits: ReadonlyArray<Edit>): Applied | Refusal {
     const applied = applyEdits(this.viewWorkbook, this.viewWorkbook.revision, edits);
     if (isRefusal(applied)) return applied;
-    this.pending.push({ id: this.nextId++, edits, sentBase: null, ackedAt: null });
+    this.pending.push({
+      id: this.nextId++,
+      edits,
+      added: addedTabs(this.viewWorkbook, applied.workbook),
+      sentBase: null,
+      ackedAt: null,
+    });
     this.viewWorkbook = applied.workbook;
     this.emit();
     this.pump();
@@ -320,7 +329,11 @@ export class SheetSync {
   /** The view again: confirmed, then each pending list. One that no longer applies is dropped. */
   private rebuild(): void {
     let workbook = this.confirmedWorkbook;
+    // New tab ids come from the revision, so a rebased addSheet can get a new
+    // one; later lists naming the old id follow it.
+    const renamed = new Map<string, string>();
     for (const item of [...this.pending]) {
+      if (renamed.size > 0) item.edits = item.edits.map((edit) => remapTabs(edit, renamed));
       const applied = applyEdits(workbook, workbook.revision, item.edits);
       if (isRefusal(applied)) {
         // Someone else's change made it impossible (its tab was deleted, say).
@@ -330,6 +343,12 @@ export class SheetSync {
         }
         continue;
       }
+      const added = addedTabs(workbook, applied.workbook);
+      item.added.forEach((was, index) => {
+        const now = added[index];
+        if (now && now !== was) renamed.set(was, now);
+      });
+      item.added = added;
       workbook = applied.workbook;
     }
     this.viewWorkbook = workbook;
@@ -339,4 +358,24 @@ export class SheetSync {
   private emit(): void {
     for (const listener of [...this.listeners]) listener();
   }
+}
+
+/** Ids of the tabs in `after` that `before` does not have, in tab order. */
+function addedTabs(before: Workbook, after: Workbook): string[] {
+  const had = new Set(before.sheets.map((sheet) => sheet.id));
+  return after.sheets.filter((sheet) => !had.has(sheet.id)).map((sheet) => sheet.id);
+}
+
+/** An edit with its tab references moved from old ids to new ones. */
+function remapTabs(edit: Edit, renamed: ReadonlyMap<string, string>): Edit {
+  const to = (ref: string) => renamed.get(ref) ?? ref;
+  if (edit.kind === "addSheet") return edit;
+  if (edit.kind === "moveSheets") {
+    return {
+      ...edit,
+      sheets: edit.sheets.map(to),
+      afterSheet: edit.afterSheet === null ? null : to(edit.afterSheet),
+    };
+  }
+  return { ...edit, sheet: to(edit.sheet) };
 }

@@ -44,6 +44,7 @@
 }
 
 .sheet-header .button.small {
+  white-space: nowrap;
   text-decoration: none;
   display: inline-flex;
   align-items: center;

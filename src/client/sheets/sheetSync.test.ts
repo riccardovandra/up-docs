@@ -236,4 +236,23 @@ describe("SheetSync", () => {
     expect(h.sync.pendingCount).toBe(0);
     expect(h.sync.confirmed.sheets[0]?.rowCount).toBe(1001);
   });
+
+  it("keeps writes to a new tab when someone else's revision lands first", async () => {
+    const h = harness();
+    const added = h.sync.apply([{ kind: "addSheet", name: "Plan" }]);
+    if (isRefusal(added)) throw new Error(added.detail);
+    const tabId = added.workbook.sheets[1]?.id as string;
+    h.sync.apply([{ kind: "writeCells", sheet: tabId, topLeft: "A1", rows: [["kept"]] }]);
+    // Ada lands first: the server gives the new tab a later revision's id.
+    h.sync.receive(h.serverApply([write("Z9", "x")], "client-ada", person));
+    expect(h.answer()).toBeNull(); // 409 for our addSheet at base 0
+    await flush();
+    h.answer(); // addSheet again at base 1
+    await flush();
+    h.answer(); // the write, now naming the tab's new id
+    await flush();
+    expect(h.sync.pendingCount).toBe(0);
+    expect(inputAt(h.server, "Plan", "A1")).toBe("kept");
+    expect(inputAt(h.sync.view, "Plan", "A1")).toBe("kept");
+  });
 });

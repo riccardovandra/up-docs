@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { formatTsv, parseTsv, pasteInputs, shiftInput, type GridClip } from "./clipboard.ts";
+import { clipMatches, formatTsv, parseTsv, pasteInputs, shiftInput, type GridClip } from "./clipboard.ts";
 
 describe("parseTsv", () => {
   it("reads rows and fields as Google Sheets and Excel write them", () => {
@@ -57,5 +57,12 @@ describe("pasting", () => {
     expect(pasteInputs("2\t4\n", clip, { row: 1, col: 1 })).toEqual([["=A2*2", "=B2*2"]]);
     expect(pasteInputs("2\t4", { ...clip, cut: true }, { row: 5, col: 5 })).toEqual([["=A1*2", "=B1*2"]]);
     expect(pasteInputs("other", clip, { row: 1, col: 1 })).toEqual([["other"]]);
+  });
+
+  it("knows when the clipboard no longer holds the grid's copy", () => {
+    const clip: GridClip = { text: "1", inputs: [["=A1"]], sheetId: "s0-0", row: 0, col: 0, cut: false };
+    expect(clipMatches("1\r\n", clip)).toBe(true);
+    expect(clipMatches("copied elsewhere", clip)).toBe(false);
+    expect(clipMatches("1", null)).toBe(false);
   });
 });

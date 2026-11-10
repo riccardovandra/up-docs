@@ -99,6 +99,12 @@ export interface GridClip {
   readonly cut: boolean;
 }
 
+/** Whether the clipboard still holds what the grid's own last copy put there. */
+export function clipMatches(text: string, clip: GridClip | null): clip is GridClip {
+  const normalise = (value: string) => value.replace(/\r\n?/g, "\n").replace(/\n$/, "");
+  return clip !== null && normalise(clip.text) === normalise(text);
+}
+
 /**
  * The inputs to write for a paste at (row, col): the grid's own copy with its
  * formulas shifted (moved as they are after a cut), or the clipboard text as typed.
@@ -108,8 +114,7 @@ export function pasteInputs(
   clip: GridClip | null,
   at: { readonly row: number; readonly col: number },
 ): string[][] {
-  const normalise = (value: string) => value.replace(/\r\n?/g, "\n").replace(/\n$/, "");
-  if (clip && normalise(clip.text) === normalise(text)) {
+  if (clipMatches(text, clip)) {
     const dRow = clip.cut ? 0 : at.row - clip.row;
     const dCol = clip.cut ? 0 : at.col - clip.col;
     return clip.inputs.map((row) => row.map((input) => shiftInput(input, dRow, dCol)));
