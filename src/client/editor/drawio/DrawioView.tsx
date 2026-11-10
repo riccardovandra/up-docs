@@ -364,7 +364,7 @@ export class DrawioView implements NodeView {
         ) : (
           <p className="drawio-message">
             {source.trim() === ""
-              ? "Use Insert diagram to link a diagram here."
+              ? "Use Draw.io diagram to link a diagram here."
               : "This is not a diagram link. Its first line must be the id of a diagram."}
           </p>
         ),

@@ -21,7 +21,7 @@ interface Sitting {
 }
 
 /**
- * Linked diagrams on a doc page: registers "Insert diagram" for the toolbar
+ * Linked diagrams on a doc page: registers "Draw.io diagram" for the toolbar
  * and the "+" menu, shows the picker, and owns the Draw.io editor overlay.
  * The overlay lives here, above the tab's editor, so a remote change that
  * rebuilds a block cannot close a drawing in progress.
@@ -40,7 +40,7 @@ export function useDocDiagrams(input: {
   readonly onNotice: (message: string) => void;
 }): { readonly context: DrawioContext; readonly element: ReactNode } {
   const { docId, projectId, editable, locked } = input;
-  /** The editor the picked diagram goes into: the one "Insert diagram" was pressed in. */
+  /** The editor the picked diagram goes into: the one "Draw.io diagram" was pressed in. */
   const [picking, setPicking] = useState<Editor | null>(null);
   const [sitting, setSitting] = useState<Sitting | null>(null);
   const sittings = useRef(0);
@@ -51,7 +51,7 @@ export function useDocDiagrams(input: {
     if (!editable) return;
     return registerInsertAction({
       id: INSERT_DRAWIO_ID,
-      label: "Insert diagram",
+      label: "Draw.io diagram",
       order: 61,
       run: ({ editor }) => setPicking(editor),
     });
@@ -77,7 +77,7 @@ export function useDocDiagrams(input: {
       insertDrawioBlock(editor, diagram.id, { focus })
         ? `Linked "${diagram.title}" into this doc.`
         : `"${diagram.title}" is in Diagrams, but this tab can no longer be edited. ` +
-            "Use Insert diagram to link it.",
+            "Use Draw.io diagram to link it.",
     );
   };
 

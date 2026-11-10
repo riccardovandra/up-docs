@@ -99,7 +99,7 @@ export const DocToolbar = memo(function DocToolbar(
           {tool("diagram", "Draw a diagram", <DrawIcon />)}
           {/* Registered by a doc page; a project file has no library diagrams to link. */}
           {menu.some((action) => action.id === "drawio")
-            ? tool("drawio", "Insert diagram", <LinkedDiagramIcon />)
+            ? tool("drawio", "Draw.io diagram", <LinkedDiagramIcon />)
             : null}
           <button
             type="button"
