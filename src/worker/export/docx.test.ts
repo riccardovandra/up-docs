@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 
+import { drawioBlock } from "../../shared/drawio.ts";
+import type { ExportDiagrams } from "../../shared/drawioExport.ts";
 import type { DocWithTabs, Tab } from "../../shared/protocol.ts";
 import { formatTable, type RichTable } from "../../shared/table.ts";
 import { makeApiHarness } from "../testing/apiHarness.ts";
@@ -48,8 +50,15 @@ function expectWellFormed(xml: string) {
 
 const DOC_URL = "https://docs.test/d/doc";
 
-function render(markdown: string) {
-  const files = unzip(markdownToDocx({ title: "T & Co", markdown, docUrl: DOC_URL }));
+function render(markdown: string, diagrams?: ExportDiagrams) {
+  const files = unzip(
+    markdownToDocx({
+      title: "T & Co",
+      markdown,
+      docUrl: DOC_URL,
+      ...(diagrams ? { diagrams } : {}),
+    }),
+  );
   for (const xml of files.values()) expectWellFormed(xml);
   return {
     files,
@@ -257,6 +266,38 @@ describe("markdown to Word", () => {
     );
   });
 
+  it("writes a linked Draw.io diagram as its title linking to the picture, then the caption", () => {
+    const diagrams: ExportDiagrams = new Map([
+      ["g1", { id: "g1", title: "Onboarding & kickoff", pictureVersion: 2, hasSource: true }],
+    ]);
+    const { document, rels } = render(drawioBlock("g1", "How a client starts"), diagrams);
+    expect(document).not.toContain("t3-drawio");
+    expect(document).not.toContain("CodeBlock");
+    // Like an image: the label in brackets is the link.
+    expect(document).toContain(">[Onboarding &amp; kickoff]</w:t>");
+    expect(rels).toContain('Target="https://docs.test/api/diagrams/g1/picture.svg"');
+    expect(document).toContain(
+      '<w:pStyle w:val="Caption"/></w:pPr><w:r><w:t xml:space="preserve">How a client starts',
+    );
+  });
+
+  it("writes the title and a note for a diagram with no picture, and says when one is gone", () => {
+    const diagrams: ExportDiagrams = new Map([
+      ["g1", { id: "g1", title: "Onboarding", pictureVersion: null, hasSource: true }],
+    ]);
+    const { document, rels } = render(
+      `${drawioBlock("g1")}\n\n${drawioBlock("gone", "Old flow")}`,
+      diagrams,
+    );
+    expect(document).toContain(">Onboarding</w:t>");
+    expect(document).toContain("(Diagram: its picture has not been drawn yet.)");
+    expect(rels).toContain('Target="https://docs.test/diagrams/g1"');
+    expect(rels).not.toContain("picture.");
+    expect(document).toContain(">Diagram not found.</w:t>");
+    expect(document).toContain(">Old flow</w:t>");
+    expect(document).not.toContain("CodeBlock");
+  });
+
   it("replaces diagrams with a captioned link to the doc", () => {
     const { document, rels } = render(
       "```mermaid\ngraph TD\n```\n\n```t3-widget\nexport default 1\n```",
@@ -347,5 +388,47 @@ describe("docx export routes", () => {
       headers: { Cookie: viewer },
     });
     expect(missing.status).toBe(404);
+  });
+
+  it("writes a linked diagram for a viewer of the doc, picture or not", async () => {
+    const { api, owner, viewer, docId } = await setup();
+    const headers = { Cookie: owner };
+    const create = async (title: string) =>
+      (
+        (await (
+          await api.call("POST", "/api/diagrams", {
+            body: { title, xml: "<mxGraphModel/>" },
+            headers,
+          })
+        ).json()) as { diagram: { id: string } }
+      ).diagram.id;
+    const drawn = await create("Drawn");
+    const undrawn = await create("Undrawn");
+    await api.call("PUT", `/api/diagrams/${drawn}/picture`, {
+      body: { version: 1, svg: '<svg xmlns="http://www.w3.org/2000/svg"><rect/></svg>', png: null },
+      headers,
+    });
+    const added = await api.call("POST", `/api/docs/${docId}/tabs`, {
+      body: {
+        title: "Flows",
+        markdown: [drawioBlock(drawn, "Step by step"), drawioBlock(undrawn)].join("\n\n"),
+      },
+      headers,
+    });
+    const { tab } = (await added.json()) as { tab: Tab };
+
+    for (const path of [`/api/docs/${docId}/export.docx`, `/api/tabs/${tab.id}/export.docx`]) {
+      const response = await api.call("GET", path, { headers: { Cookie: viewer } });
+      expect(response.status).toBe(200);
+      const files = unzip(new Uint8Array(await response.arrayBuffer()));
+      const document = files.get("word/document.xml")!;
+      const rels = files.get("word/_rels/document.xml.rels")!;
+      expect(document).toContain(">[Drawn]</w:t>");
+      expect(document).toContain(">Step by step</w:t>");
+      expect(rels).toContain(`Target="https://docs.test/api/diagrams/${drawn}/picture.svg"`);
+      expect(document).toContain(">Undrawn</w:t>");
+      expect(rels).toContain(`Target="https://docs.test/diagrams/${undrawn}"`);
+      expect(document).not.toContain("t3-drawio");
+    }
   });
 });

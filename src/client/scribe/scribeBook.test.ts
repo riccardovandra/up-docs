@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { drawioBlock } from "../../shared/drawio.ts";
 import type { Tab } from "../../shared/protocol.ts";
 import { formatTable, type RichTable } from "../../shared/table.ts";
 import { draftScribeBook, dropTitleHeading } from "./scribeBook.ts";
@@ -103,6 +104,40 @@ describe("draftScribeBook", () => {
     expect(html).toContain(`<img src="${ORIGIN}/scribe-diagram/1.svg" alt="Diagram">`);
     expect(html).toContain("const x = 1;");
     expect(html).not.toContain("flowchart");
+  });
+
+  it("sends a linked Draw.io diagram as its PNG, fetched like the doc's own images", () => {
+    const { book, sameOriginImages, diagrams } = draftScribeBook({
+      title: "Plan",
+      author: "Ada",
+      tabs: [
+        tab(
+          "a",
+          "A",
+          [drawioBlock("g1", "How a client starts"), drawioBlock("g2"), drawioBlock("gone")].join(
+            "\n\n",
+          ),
+        ),
+      ],
+      origin: ORIGIN,
+      tabUrl: (id) => `${ORIGIN}/d/doc1/${id}`,
+      diagrams: new Map([
+        ["g1", { id: "g1", title: "Onboarding", pictureVersion: 2, hasSource: true }],
+        ["g2", { id: "g2", title: "Undrawn", pictureVersion: null, hasSource: true }],
+      ]),
+    });
+    const html = book.chapters[0]!.html;
+    const picture = `${ORIGIN}/api/diagrams/g1/picture.png`;
+    expect(html).toContain(`<img src="${picture}" alt="Onboarding">`);
+    expect(html).toContain("<p>How a client starts</p>");
+    expect(sameOriginImages).toEqual([picture]);
+    // No picture yet, or gone: words, never a broken image or the block's code.
+    expect(html).toContain(`<a href="${ORIGIN}/diagrams/g2">Undrawn</a>`);
+    expect(html).toContain("its picture has not been drawn yet");
+    expect(html).toContain("<em>Diagram not found.</em>");
+    expect(html).not.toContain("t3-drawio");
+    // These are not diagrams the browser has to draw.
+    expect(diagrams).toEqual([]);
   });
 
   it("turns rich tables into plain tables", () => {

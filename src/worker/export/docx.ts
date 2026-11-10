@@ -6,6 +6,8 @@ import { Lexer, type Token, type Tokens } from "marked";
 
 import { splitImageAlt } from "../../shared/images.ts";
 import { isSafeUrl, parseTable, type ChipColor, type RichTable } from "../../shared/table.ts";
+import { DRAWIO_LANGUAGE, parseDrawioBlock } from "../../shared/drawio.ts";
+import { drawioExport, type DrawioExport, type ExportDiagrams } from "../../shared/drawioExport.ts";
 import { EMBED_LANGUAGE, embedLabel, parseEmbedBlock } from "../../shared/embeds.ts";
 import { parseVideoBlock, VIDEO_LANGUAGE, videoLabel } from "../../shared/video.ts";
 import { slugify } from "../export.ts";
@@ -130,9 +132,11 @@ class DocxWriter {
   private readonly orderedLists: Array<{ level: number; start: number }> = [];
 
   private readonly docUrl: string;
+  private readonly diagrams: ExportDiagrams | null;
 
-  constructor(docUrl: string) {
+  constructor(docUrl: string, diagrams: ExportDiagrams | null = null) {
     this.docUrl = docUrl;
+    this.diagrams = diagrams;
   }
 
   hyperlink(href: string, content: string): string {
@@ -307,6 +311,13 @@ class DocxWriter {
         return;
       }
     }
+    if (language === DRAWIO_LANGUAGE && this.diagrams) {
+      const block = parseDrawioBlock(code.text);
+      if (block) {
+        this.linkedDiagram(drawioExport(block, this.diagrams, new URL(this.docUrl).origin));
+        return;
+      }
+    }
     if (DIAGRAM_LANGUAGES.has(language)) {
       const label = run("Diagram: open the doc to view it. ", { italic: true });
       const link = this.hyperlink(this.docUrl, run(this.docUrl, { italic: true, link: true }));
@@ -317,6 +328,23 @@ class DocxWriter {
     for (const line of code.text.split("\n")) {
       this.body.push(paragraph(run(line, {}, true), `${styleProp("CodeBlock")}${indent}`));
     }
+  }
+
+  /**
+   * A linked Draw.io diagram. Like an image it is not embedded: its title links
+   * to the picture. Without a picture, the title and a note stand in for it.
+   */
+  private linkedDiagram(out: DrawioExport): void {
+    if (out.pictureUrl !== null) {
+      const label = run(`[${out.title || "Diagram"}]`, { link: true });
+      this.body.push(paragraph(this.hyperlink(out.pictureUrl, label)));
+    } else if (out.pageUrl !== null) {
+      const title = this.hyperlink(out.pageUrl, run(out.title || "Diagram", { link: true }));
+      this.body.push(paragraph(title + run(` (${out.note})`, { italic: true })));
+    } else {
+      this.body.push(paragraph(run(out.note ?? "", { italic: true }), styleProp("Caption")));
+    }
+    if (out.caption) this.body.push(paragraph(run(out.caption), styleProp("Caption")));
   }
 
   private table(
@@ -447,10 +475,12 @@ export interface DocxInput {
   readonly markdown: string;
   /** Where the doc lives, for content Word cannot show such as diagrams. */
   readonly docUrl: string;
+  /** The Draw.io diagrams the markdown links; without them their blocks are written as code. */
+  readonly diagrams?: ExportDiagrams;
 }
 
 export function markdownToDocx(input: DocxInput): Uint8Array {
-  const writer = new DocxWriter(input.docUrl);
+  const writer = new DocxWriter(input.docUrl, input.diagrams ?? null);
   writer.blocks(new Lexer({ gfm: true }).lex(input.markdown), { quote: false, indent: 0 });
   const encoder = new TextEncoder();
   const part = (name: string, xml: string) => ({ name, data: encoder.encode(xml) });

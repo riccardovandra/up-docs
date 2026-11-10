@@ -43,6 +43,7 @@ import { OutlineRail } from "../doc/OutlineRail.tsx";
 import { TabLinkNav } from "../doc/TabLinkNav.tsx";
 import { useColumnWidth } from "../doc/toolbar/columnWidth.ts";
 import { DocToolbar } from "../doc/toolbar/DocToolbar.tsx";
+import { useDocDiagrams } from "../editor/drawio/DocDiagrams.tsx";
 import { imageAttributes } from "../editor/image.ts";
 import { insertVideoFile } from "../editor/video/insertVideo.ts";
 import { useStableCallback } from "../doc/useStableCallback.ts";
@@ -674,6 +675,15 @@ export function DocPage(props: {
     },
   );
 
+  // Linked Draw.io diagrams: the Insert diagram picker and the editor overlay.
+  const diagrams = useDocDiagrams({
+    docId: props.docId,
+    projectId: doc?.projectId ?? null,
+    editable: abilities.edit,
+    locked: lock.kind === "locked",
+    onNotice: setNotice,
+  });
+
   const me = useMe();
   const [width, toggleWidth] = useColumnWidth(me?.user.id ?? "");
   const [commentsOpen, setCommentsOpen] = useState(true);
@@ -884,6 +894,7 @@ export function DocPage(props: {
                   onUploadError={imageFailed}
                   onVideoFile={insertVideo}
                   loadEmbed={loadEmbed}
+                  drawio={diagrams.context}
                   onChange={(markdown) => saver.current?.schedule(markdown)}
                   onEditor={setEditor}
                 />
@@ -926,6 +937,7 @@ export function DocPage(props: {
           <OutlineRail editor={editor} />
         </aside>
       </div>
+      {diagrams.element}
     </div>
   );
 }

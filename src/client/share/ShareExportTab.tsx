@@ -4,6 +4,7 @@ import { displayName } from "../../shared/access.ts";
 import type { EmbedParentMessage } from "../../shared/embed.ts";
 import { api } from "../api.ts";
 import { copyMarkdown, download } from "../doc/ExportMenu.tsx";
+import { loadLinkedDiagrams } from "../editor/drawio/linkedDiagrams.ts";
 import { readyWidgetsForPrint } from "../editor/widget/WidgetView.ts";
 import {
   hasEmbedParent,
@@ -192,13 +193,15 @@ export function ShareExportTab(props: {
         import("../scribe/scribeAssets.ts"),
       ]);
       const tab = scope === "tab" && tabId ? view.tabs.find((each) => each.id === tabId) : null;
+      const tabs = tab ? [tab] : view.tabs;
       const origin = window.location.origin;
       const draft = book.draftScribeBook({
         title: tab?.title ?? view.doc.title,
         author: view.owner ? displayName(view.owner) : "UP Docs",
-        tabs: tab ? [tab] : view.tabs,
+        tabs,
         origin,
         tabUrl: (id) => `${origin}${docPath(docId, id)}`,
+        diagrams: await loadLinkedDiagrams(tabs),
       });
       const images = await assets.gatherAssets(draft);
       setStatus({ kind: "info", text: "Sending to Scribe…" });

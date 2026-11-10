@@ -185,6 +185,31 @@ describe("conversion rules", () => {
     expect(result.warnings[3]!.detail).toBe("Chart");
   });
 
+  it("turns a linked Draw.io diagram into a link to the diagram", () => {
+    const id = "0b6f3a52-6a3e-4b0c-9a55-2b1d1f4f2a10";
+    const result = convertMarkdown(
+      [
+        "Intro",
+        `\`\`\`t3-drawio\n${id}\nThe [new] flow\n\`\`\``,
+        `\`\`\`t3-drawio\n${id}\n\`\`\``,
+        "```t3-drawio\nnot an id!\n```",
+      ].join("\n\n"),
+      ORIGIN,
+    );
+    expect(result.markdown).toBe(
+      [
+        "Intro",
+        `[The \\[new\\] flow](${ORIGIN}/diagrams/${id})`,
+        `[Draw.io diagram](${ORIGIN}/diagrams/${id})`,
+        "```t3-drawio\nnot an id!\n```",
+      ].join("\n\n"),
+    );
+    expect(result.warnings.map((warning) => warning.kind)).toEqual([
+      "drawio-as-link",
+      "drawio-as-link",
+    ]);
+  });
+
   it("escapes a literal <?claude in the text", () => {
     const result = convertMarkdown("Write <?claude block x?> to place a block.", ORIGIN);
     expect(result.markdown).toBe("Write \\<?claude block x?> to place a block.");

@@ -7,6 +7,7 @@
 import { Marked, type Tokens } from "marked";
 
 import { orderTabs } from "../doc/tabTree.ts";
+import { drawioToMarkdown, type ExportDiagrams } from "../../shared/drawioExport.ts";
 import { embedsToLinks } from "../../shared/embeds.ts";
 import { splitImageAlt } from "../../shared/images.ts";
 import type { Tab } from "../../shared/protocol.ts";
@@ -86,6 +87,8 @@ export function draftScribeBook(input: {
   readonly tabs: ReadonlyArray<Tab>;
   readonly origin: string;
   readonly tabUrl: (tabId: string) => string;
+  /** The Draw.io diagrams the tabs link; without them their blocks are sent as code. */
+  readonly diagrams?: ExportDiagrams;
 }): BookDraft {
   const { origin } = input;
   const diagrams: Array<DiagramRequest> = [];
@@ -122,7 +125,12 @@ export function draftScribeBook(input: {
     input.tabs.length === 1 ? [{ tab: input.tabs[0]!, depth: 0 }] : orderTabs(input.tabs);
   const chapters = ordered.map(({ tab, depth }) => {
     // Rich tables read as plain tables; videos and embeds as links to them.
-    const markdown = embedsToLinks(videosToLinks(richTablesToGfm(tab.markdown), origin));
+    const readable = embedsToLinks(videosToLinks(richTablesToGfm(tab.markdown), origin));
+    // A linked Draw.io diagram is its picture, fetched like the doc's own images. The PNG,
+    // since Draw.io's SVG can hold its labels as HTML, which does not survive every converter.
+    const markdown = input.diagrams
+      ? drawioToMarkdown(readable, origin, input.diagrams, "png")
+      : readable;
     const html = marked.parse(dropTitleHeading(markdown, tab.title), { async: false });
     return { title: tab.title, html, sourceUrl: input.tabUrl(tab.id), depth };
   });

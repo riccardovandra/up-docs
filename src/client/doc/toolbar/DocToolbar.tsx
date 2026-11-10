@@ -10,6 +10,7 @@ import {
   ChevronDown,
   DrawIcon,
   ImageIcon,
+  LinkedDiagramIcon,
   PlusIcon,
   TableIcon,
   WidthIcon,
@@ -96,6 +97,10 @@ export const DocToolbar = memo(function DocToolbar(
       {props.editable ? (
         <>
           {tool("diagram", "Draw a diagram", <DrawIcon />)}
+          {/* Registered by a doc page; a project file has no library diagrams to link. */}
+          {menu.some((action) => action.id === "drawio")
+            ? tool("drawio", "Insert diagram", <LinkedDiagramIcon />)
+            : null}
           <button
             type="button"
             className="toolbar-button toolbar-width"

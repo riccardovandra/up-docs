@@ -6,12 +6,14 @@ import type { NodeView } from "@tiptap/pm/view";
 
 import type { DiagramCache, DiagramRender } from "./diagramCache.ts";
 import "./diagrams.css";
+import { isDrawioLanguage } from "../../shared/drawio.ts";
 import { isEmbedLanguage } from "../../shared/embeds.ts";
 import { isVideoLanguage } from "../../shared/video.ts";
 import { widgetInfo } from "../../shared/widget/fence.ts";
 import { WidgetView } from "./widget/WidgetView.ts";
 import { tableSelectionPlugin } from "./table/tableBlock.ts";
 import { isTableNode, TableView } from "./table/TableView.ts";
+import { DrawioView } from "./drawio/DrawioView.tsx";
 import { EmbedView } from "./embed/EmbedView.ts";
 import { VideoView } from "./video/VideoView.ts";
 
@@ -28,8 +30,11 @@ const isWidget = (node: ProseMirrorNode) =>
 const isDiagram = (node: ProseMirrorNode) => isMermaid(node) || isWidget(node);
 const isVideo = (node: ProseMirrorNode) => isVideoLanguage(node.attrs.language as string | null);
 const isEmbed = (node: ProseMirrorNode) => isEmbedLanguage(node.attrs.language as string | null);
+/** ```t3-drawio blocks: a Draw.io diagram from the library, linked by its id. */
+const isDrawio = (node: ProseMirrorNode) => isDrawioLanguage(node.attrs.language as string | null);
 /** Blocks shown as something other than their source until the caret enters them. */
-const hidesSource = (node: ProseMirrorNode) => isDiagram(node) || isVideo(node) || isEmbed(node);
+const hidesSource = (node: ProseMirrorNode) =>
+  isDiagram(node) || isVideo(node) || isEmbed(node) || isDrawio(node);
 
 /**
  * A fence that opens and closes `text` safely. CommonMark ends a block at the
@@ -115,6 +120,7 @@ export const DocsCodeBlock = CodeBlock.extend({
       if (isWidget(props.node)) return new WidgetView(props, editSource);
       if (isVideo(props.node)) return new VideoView(props, editSource);
       if (isEmbed(props.node)) return new EmbedView(props, editSource);
+      if (isDrawio(props.node)) return new DrawioView(props);
       return isMermaid(props.node) ? new DiagramView(props) : new PlainCodeView(props);
     };
   },
