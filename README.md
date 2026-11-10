@@ -72,6 +72,16 @@ Release walkthrough
 - Removing a video block does not delete the file. Files go when the doc is deleted. R2 storage costs about $0.015 per GB-month, and egress is free.
 - Inside T3 Code, fullscreen and player autoplay need T3 Code to pass `fullscreen; autoplay` to the docs iframe. Until that ships, videos play there with these two limits.
 
+### Diagrams
+
+The library has a Docs and Diagrams switch. A diagram is a [Draw.io](https://www.drawio.com) drawing kept next to your docs: "New diagram" opens the Draw.io editor over the page, and Save & Exit stores the drawing with a picture of it. Each diagram has its own page to reopen, rename or delete it.
+
+- The editor is the hosted `https://embed.diagrams.net/`, loaded in a frame. The drawing is handed to that frame in the browser and saved back to this app; UP Docs does not send it anywhere else.
+- A diagram is stored once, as Draw.io XML of up to 1 MB, with an SVG and a PNG picture in R2, or in D1 without a bucket.
+- Its creator and the admin manage it. The block that links a diagram into a doc is `t3-drawio`, whose first line is the diagram's id and whose optional second line is a caption; the doc editor does not draw that block yet. Anyone who can read a doc that links a diagram can see its picture, and nothing else.
+- Two people saving the same diagram do not overwrite each other silently: the second save is told, and chooses to overwrite or to reload.
+- A diagram whose picture is missing or out of date is drawn again by the next browser that shows it to someone who manages it.
+
 ### Embedded posts
 
 A doc can show a LinkedIn post, an X post or an X article in place of its link. LinkedIn and X posts show the provider's own embed, as their "Embed this post" option gives it. In the editor, paste the link on an empty line (undo turns it back into a plain link), or use "Embed post" in the "+" menu. Agents write a `t3-embed` block, whose first line is an https link and whose optional second line is a caption:

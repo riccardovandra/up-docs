@@ -126,7 +126,18 @@ const D1_CHUNK_CHARS = (D1_CHUNK_BYTES / 3) * 4;
 const keyParts = (key: string) => key.split("/") as [string, string, string];
 
 /**
- * Keeps images in `image_chunks`, for a deployment with no R2 bucket. Each row
+ * The table a key's bytes live in, and the column naming their owner. Doc
+ * images go with their doc; a diagram's pictures (`diagrams/<diagramId>/<file>`)
+ * go with their diagram.
+ */
+const chunkTable = (key: string) =>
+  key.startsWith("diagrams/")
+    ? { table: "diagram_chunks", owner: "diagram_id" }
+    : { table: "image_chunks", owner: "doc_id" };
+
+/**
+ * Keeps images in `image_chunks` (and diagram pictures in `diagram_chunks`), for
+ * a deployment with no R2 bucket. Each row
  * says how many chunks the image has, so a set with one missing reads as absent.
  * The stores do not share data: switching stores leaves existing images behind.
  *
@@ -138,14 +149,15 @@ export function d1ImageStore(db: D1Database): ImageStore {
   return {
     put: async (key, body) => {
       const [, docId, file] = keyParts(key);
+      const { table, owner } = chunkTable(key);
       const text = new Uint8Array(body).toBase64();
       const total = Math.ceil(text.length / D1_CHUNK_CHARS);
       const insert = db.prepare(
-        "INSERT INTO image_chunks (doc_id, file, seq, total, data) VALUES (?1, ?2, ?3, ?4, ?5)",
+        `INSERT INTO ${table} (${owner}, file, seq, total, data) VALUES (?1, ?2, ?3, ?4, ?5)`,
       );
       // One transaction: readers see the whole image or none of it.
       await db.batch([
-        db.prepare("DELETE FROM image_chunks WHERE doc_id = ?1 AND file = ?2").bind(docId, file),
+        db.prepare(`DELETE FROM ${table} WHERE ${owner} = ?1 AND file = ?2`).bind(docId, file),
         ...Array.from({ length: total }, (_, seq) =>
           insert.bind(
             docId,
@@ -159,9 +171,10 @@ export function d1ImageStore(db: D1Database): ImageStore {
     },
     get: async (key) => {
       const [, docId, file] = keyParts(key);
+      const { table, owner } = chunkTable(key);
       const { results } = await db
         .prepare(
-          "SELECT seq, total, data FROM image_chunks WHERE doc_id = ?1 AND file = ?2 ORDER BY seq",
+          `SELECT seq, total, data FROM ${table} WHERE ${owner} = ?1 AND file = ?2 ORDER BY seq`,
         )
         .bind(docId, file)
         .all<{ seq: number; total: number; data: string }>();
@@ -177,7 +190,8 @@ export function d1ImageStore(db: D1Database): ImageStore {
     },
     deletePrefix: async (prefix) => {
       const [, docId] = keyParts(prefix);
-      await db.prepare("DELETE FROM image_chunks WHERE doc_id = ?1").bind(docId).run();
+      const { table, owner } = chunkTable(prefix);
+      await db.prepare(`DELETE FROM ${table} WHERE ${owner} = ?1`).bind(docId).run();
     },
   };
 }

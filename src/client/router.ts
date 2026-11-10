@@ -3,6 +3,10 @@ import { useSyncExternalStore } from "react";
 
 export type Route =
   | { readonly name: "library" }
+  /** The library's Diagrams view. */
+  | { readonly name: "diagrams" }
+  /** One Draw.io diagram's own page. */
+  | { readonly name: "diagram"; readonly diagramId: string }
   | { readonly name: "doc"; readonly docId: string; readonly tabId: string | null }
   | { readonly name: "settings" }
   /** A T3 Code project file, by its workspace-relative path (`/local/docs/plan.md`). */
@@ -12,6 +16,9 @@ export function parseRoute(pathname: string): Route {
   const [first, docId, tabId] = pathname.split("/").filter(Boolean);
   if (first === "d" && docId) return { name: "doc", docId, tabId: tabId ?? null };
   if (first === "settings") return { name: "settings" };
+  if (first === "diagrams") {
+    return docId ? { name: "diagram", diagramId: docId } : { name: "diagrams" };
+  }
   const localPath = localDocPathFromAppPath(pathname);
   if (localPath !== null) return { name: "local", path: localPath };
   return { name: "library" };

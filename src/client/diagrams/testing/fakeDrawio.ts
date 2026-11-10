@@ -1,0 +1,142 @@
+import type { DiagramSummary, DiagramView } from "../../../shared/drawio.ts";
+import { ApiError } from "../../api.ts";
+import type { DiagramPictureUpload } from "../diagramsApi.ts";
+import type { DrawioAction, DrawioEvent, DrawioFrame } from "../drawioFrame.ts";
+
+export const SVG = '<svg xmlns="http://www.w3.org/2000/svg" width="40" height="20"><rect/></svg>';
+export const PNG_BASE64 = "iVBORw0KGgo".padEnd(400, "A");
+
+export const svgDataUri = (svg: string) =>
+  `data:image/svg+xml;base64,${Buffer.from(svg, "utf8").toString("base64")}`;
+export const pngDataUri = (base64: string) => `data:image/png;base64,${base64}`;
+
+/**
+ * Stands in for the Draw.io frame, which a headless browser cannot load. It
+ * records what the app posts and, unless told otherwise, answers as Draw.io
+ * does: `load` after a load, a data URI after each export.
+ */
+export function fakeDrawio(options: { readonly png?: boolean; readonly loads?: boolean } = {}) {
+  const handlers = new Set<(event: DrawioEvent) => void>();
+  const posted: Array<DrawioAction> = [];
+  const state = { removed: false, png: options.png ?? true, loads: options.loads ?? true };
+  const emit = (event: DrawioEvent) => {
+    for (const handler of [...handlers]) handler(event);
+  };
+  const frame: DrawioFrame = {
+    post: (action) => {
+      posted.push(action);
+      // Draw.io answers in a later task, never inside postMessage.
+      queueMicrotask(() => {
+        if (action.action === "load" && state.loads) emit({ event: "load" });
+        if (action.action === "export" && action.format === "svg") {
+          emit({ event: "export", format: "svg", data: svgDataUri(SVG) });
+        }
+        if (action.action === "export" && action.format === "png" && state.png) {
+          emit({ event: "export", format: "png", data: pngDataUri(PNG_BASE64) });
+        }
+      });
+    },
+    listen: (handler) => {
+      handlers.add(handler);
+      return () => handlers.delete(handler);
+    },
+    remove: () => {
+      state.removed = true;
+      handlers.clear();
+    },
+  };
+  return { frame, emit, posted, state, listening: () => handlers.size };
+}
+
+export const summary = (overrides: Partial<DiagramSummary> = {}): DiagramSummary => ({
+  id: "g1",
+  projectId: null,
+  title: "Flow",
+  version: 1,
+  pictureVersion: null,
+  hasSource: true,
+  createdBy: "owner",
+  createdAt: 1,
+  updatedAt: 1,
+  ...overrides,
+});
+
+export const view = (overrides: Partial<DiagramView> = {}): DiagramView => ({
+  ...summary(),
+  canEdit: true,
+  xml: "<mxGraphModel/>",
+  ...overrides,
+});
+
+export const conflictError = (current: DiagramSummary) =>
+  new ApiError(409, {
+    error: "version_conflict",
+    version: current.version,
+    diagram: current,
+  } as never);
+
+/** An in-memory stand-in for the diagrams API, holding diagrams by id and logging the writes. */
+export function fakeApi(initial: ReadonlyArray<DiagramView> = []) {
+  const diagrams = new Map(initial.map((diagram) => [diagram.id, diagram]));
+  const calls: Array<readonly [string, ...Array<unknown>]> = [];
+  const fail: { update?: unknown; create?: unknown; upload?: unknown } = {};
+  const take = (key: keyof typeof fail) => {
+    const cause = fail[key];
+    delete fail[key];
+    if (cause !== undefined) throw cause;
+  };
+  return {
+    diagrams,
+    calls,
+    fail,
+    get: async (diagramId: string): Promise<DiagramView> => {
+      const diagram = diagrams.get(diagramId);
+      if (!diagram) throw new ApiError(404, { error: "not_found" });
+      return diagram;
+    },
+    create: async (input: {
+      readonly projectId: string | null;
+      readonly title?: string;
+      readonly xml?: string;
+    }): Promise<DiagramView> => {
+      calls.push(["create", input]);
+      take("create");
+      const created = view({
+        id: `new${diagrams.size + 1}`,
+        projectId: input.projectId,
+        title: input.title ?? "Untitled diagram",
+        xml: input.xml ?? "",
+        hasSource: (input.xml ?? "") !== "",
+      });
+      diagrams.set(created.id, created);
+      return created;
+    },
+    update: async (
+      diagramId: string,
+      input: { readonly xml?: string; readonly baseVersion?: number; readonly title?: string },
+    ): Promise<DiagramView> => {
+      calls.push(["update", diagramId, input]);
+      take("update");
+      const current = diagrams.get(diagramId)!;
+      if (input.baseVersion !== undefined && input.baseVersion !== current.version) {
+        throw conflictError(current);
+      }
+      const next = { ...current, xml: input.xml ?? current.xml, version: current.version + 1 };
+      diagrams.set(diagramId, next);
+      return next;
+    },
+    uploadPicture: async (
+      diagramId: string,
+      picture: DiagramPictureUpload,
+    ): Promise<DiagramSummary> => {
+      calls.push(["uploadPicture", diagramId, picture]);
+      take("upload");
+      const current = diagrams.get(diagramId)!;
+      if (picture.version !== current.version) throw conflictError(current);
+      const next = { ...current, pictureVersion: picture.version };
+      diagrams.set(diagramId, next);
+      const { xml: _xml, canEdit: _canEdit, ...rest } = next;
+      return rest;
+    },
+  };
+}

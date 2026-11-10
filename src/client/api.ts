@@ -61,7 +61,8 @@ export class ApiError extends Error {
   }
 }
 
-async function request<T>(
+/** One JSON call to the API; a refusal throws ApiError with the response body. */
+export async function request<T>(
   method: string,
   path: string,
   body?: unknown,
