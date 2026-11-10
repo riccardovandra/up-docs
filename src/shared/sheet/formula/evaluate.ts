@@ -192,10 +192,20 @@ export function collectRefs(node: Node, out: AreaRef[] = []): AreaRef[] {
       collectRefs(node.right, out);
       break;
     case "call":
-      for (const a of node.args) collectRefs(a, out);
+      node.args.forEach((a, i) => {
+        // A SUMIF/AVERAGEIF target over a criteria reference is resized; collectResized covers it.
+        if (i === 2 && isResizedCall(node)) return;
+        collectRefs(a, out);
+      });
       break;
   }
   return out;
+}
+
+function isResizedCall(node: Extract<Node, { kind: "call" }>): boolean {
+  return (
+    (node.name === "SUMIF" || node.name === "AVERAGEIF") && node.args[0]?.kind === "ref" && node.args[2]?.kind === "ref"
+  );
 }
 
 /** A SUMIF/AVERAGEIF target resized to its criteria range's shape; recalc resolves it against sheet sizes. */
@@ -218,7 +228,7 @@ export function collectResized(node: Node, out: ResizedTarget[] = []): ResizedTa
     case "call": {
       for (const a of node.args) collectResized(a, out);
       const [shape, , target] = node.args;
-      if ((node.name === "SUMIF" || node.name === "AVERAGEIF") && shape?.kind === "ref" && target?.kind === "ref") {
+      if (isResizedCall(node) && shape?.kind === "ref" && target?.kind === "ref") {
         out.push({ shape: shape.ref, target: target.ref });
       }
       break;

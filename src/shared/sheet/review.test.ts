@@ -44,6 +44,17 @@ describe("review regressions", () => {
     expect(valueAt(wb, "Sheet1", "B1001")).toBe(8);
   });
 
+  it("does not cycle on a target larger than the criteria range", () => {
+    const wb = write(fresh(), "Sheet1", "A1", [
+      ["x", 1],
+      ["x", 2],
+      [null, '=SUMIF(A1:A2,"x",B1:B3)'],
+    ]);
+    expect(valueAt(wb, "Sheet1", "B3")).toBe(3);
+    const col = write(wb, "Sheet1", "C1", [['=SUMIF(A1:A2,"x",C:C)'], [5]]);
+    expect(valueAt(col, "Sheet1", "C1")).toEqual({ error: "#CYCLE!" });
+  });
+
   it("refreshes TODAY on metadata-only edit lists", () => {
     let now = Date.UTC(2026, 2, 15);
     let wb = write(fresh({ now: () => now }), "Sheet1", "A1", [["=TODAY()"]]);
