@@ -90,6 +90,28 @@ import {
   isDocType,
 } from "./docTypes.ts";
 import * as Facts from "./projectFacts.ts";
+import {
+  filledBounds,
+  findSheet,
+  formatArea,
+  isRefusal,
+  MAX_CELLS_PER_READ,
+  parseArea,
+  readCells,
+  readSheets,
+  workbookFromRecords,
+  type Edit,
+  type Refusal,
+  type Workbook,
+} from "../shared/sheet/index.ts";
+import {
+  DEFAULT_SHEET_TITLE,
+  isSheetId,
+  MAX_EDITS_PER_LIST,
+  MAX_SHEET_TITLE_LENGTH,
+  type SheetMeta,
+} from "../shared/sheets.ts";
+import * as Sheets from "./sheets.ts";
 
 const MAX_MARKDOWN_LENGTH = 1_000_000;
 /** edit_tab re-applies against the latest version this many times before giving up. */
@@ -975,6 +997,151 @@ async function linkedDrawio(ctx: ToolContext, tabs: ReadonlyArray<Tab>) {
   };
 }
 
+// ---- sheets ----
+
+const SHEET_GUIDE = {
+  guide: 'format_guide {topic: "sheet"} has the cell and edit formats.',
+};
+
+const sheetUrl = (ctx: ToolContext, sheetId: string) =>
+  `${ctx.origin}/sheets/${sheetId}`;
+
+/** The `sheetId` argument: a sheet's id, or its link (<origin>/sheets/<id>). */
+function sheetIdArg(args: Args): string {
+  const value = requireString(args, "sheetId", 2000);
+  if (isSheetId(value)) return value;
+  const linked = /\/sheets\/([A-Za-z0-9_-]{1,64})(?:[/?#]|$)/.exec(value)?.[1];
+  return (
+    linked ??
+    fail(
+      "invalid_argument",
+      '"sheetId" must be a sheet\'s id, or its link (<origin>/sheets/<id>).',
+    )
+  );
+}
+
+/** A sheet the token user manages; any other is not_found, like REST's 404. */
+async function sheetWith(ctx: ToolContext, sheetId: string): Promise<SheetMeta> {
+  try {
+    return await Sheets.requireSheet(ctx.deps.db, {
+      sheetId,
+      userId: ctx.principal.userId,
+    });
+  } catch (cause) {
+    if (cause instanceof Docs.NotFoundError) {
+      return fail(
+        "not_found",
+        "No sheet with that id that you can see. list_sheets lists yours.",
+      );
+    }
+    throw cause;
+  }
+}
+
+/** The sheet's stored workbook, with every formula computed. */
+async function loadWorkbook(ctx: ToolContext, sheetId: string) {
+  const { sheet, records } = await load(
+    Sheets.loadSheet(ctx.deps.db, sheetId),
+    "sheet",
+  );
+  return { sheet, workbook: workbookFromRecords(records) };
+}
+
+const sheetSummary = (ctx: ToolContext, sheet: SheetMeta) => ({
+  sheetId: sheet.id,
+  title: sheet.title,
+  projectId: sheet.projectId,
+  revision: sheet.revision,
+  updatedAt: new Date(sheet.updatedAt).toISOString(),
+  url: sheetUrl(ctx, sheet.id),
+});
+
+/** The sheet with its tabs, all at the workbook's revision. */
+function sheetRead(ctx: ToolContext, sheet: SheetMeta, workbook: Workbook) {
+  const { revision, sheets } = readSheets(workbook);
+  return { ...sheetSummary(ctx, sheet), revision, tabs: sheets };
+}
+
+/** A read the engine refused, reworded so the agent knows what to send instead. */
+function readRefused(
+  workbook: Workbook,
+  tab: string,
+  range: string,
+  refusal: Refusal,
+): never {
+  const extra = { refusal: refusal.refusal, detail: refusal.detail };
+  if (refusal.refusal === "unknownSheet") {
+    fail(
+      "unknown_sheet",
+      `No tab named ${JSON.stringify(tab)}. read_sheet lists the tabs by name and id.`,
+      extra,
+    );
+  }
+  if (refusal.refusal === "tooManyCells") {
+    const area = parseArea(range)!;
+    const found = findSheet(workbook, tab)!;
+    const filled = filledBounds(found);
+    const c1 = area.startCol ?? 0;
+    const c2 = area.endCol ?? Math.max(c1, filled?.c2 ?? 0);
+    const r1 = area.startRow ?? 0;
+    const rows = Math.max(1, Math.floor(MAX_CELLS_PER_READ / (c2 - c1 + 1)));
+    const first = formatArea({
+      startRow: r1,
+      startCol: c1,
+      endRow: r1 + rows - 1,
+      endCol: c2,
+    });
+    fail(
+      "too_many_cells",
+      `One read returns at most ${MAX_CELLS_PER_READ} cells. Split the range by rows: ${rows} rows of these columns per read, starting with ${first}.`,
+      extra,
+    );
+  }
+  return fail(
+    "bad_range",
+    `${refusal.detail}. Ranges read A1, A1:D20, C:C, 2:2 or F2:F.`,
+    extra,
+  );
+}
+
+/** What edit_sheet returns for a refused list: nothing was applied. */
+function editsRefused(refusal: Refusal, revision: number): never {
+  const extra = { ...refusal, revision };
+  if (refusal.refusal === "baseIsNotTheRevision") {
+    fail(
+      "edits_refused",
+      `Nothing was applied: the sheet is at revision ${revision}, so someone edited it since you read it. Re-read the cells your edits depend on (read_cells), rebuild the list on what is there now and send it again with base ${revision}.`,
+      extra,
+    );
+  }
+  const which =
+    refusal.editIndex === null
+      ? "The edit list"
+      : `Edit ${refusal.editIndex} (0-based)`;
+  return fail(
+    "edits_refused",
+    `Nothing was applied: ${which} was refused with ${refusal.refusal}: ${refusal.detail}. The sheet is still at revision ${revision}; fix the list and send it again with base ${revision}.`,
+    { ...extra, ...SHEET_GUIDE },
+  );
+}
+
+/** The project a sheet moves to: projectKey/projectId, or noProject: true for none. */
+async function sheetMoveTarget(
+  ctx: ToolContext,
+  args: Args,
+): Promise<string | null | undefined> {
+  const named = args.projectId != null || args.projectKey != null;
+  if (args.noProject === true) {
+    if (named)
+      fail(
+        "invalid_argument",
+        'Pass "noProject" or a project, not both.',
+      );
+    return null;
+  }
+  return named ? (await existingProject(ctx, args)).id : undefined;
+}
+
 export const TOOLS = [
   {
     name: "format_guide",
@@ -1465,6 +1632,101 @@ export const TOOLS = [
         },
       },
       required: ["diagramId", "baseVersion"],
+    },
+  },
+  {
+    name: "create_sheet",
+    description:
+      'Create a sheet: a shared spreadsheet with tabs and formulas that people watch change live. File it like create_doc: projectKey (with projectName if the project is new) or projectId; omit both for no project. Returns the sheet, its revision (0), its one tab "Sheet1" and its url; share the url, then build it with edit_sheet (format_guide {topic: "sheet"} first).',
+    inputSchema: {
+      type: "object",
+      properties: {
+        title: { type: "string", maxLength: MAX_SHEET_TITLE_LENGTH },
+        projectKey: { type: "string" },
+        projectName: { type: "string" },
+        projectId: { type: "string" },
+      },
+    },
+  },
+  {
+    name: "list_sheets",
+    description:
+      "List the sheets you manage (the ones you created; every sheet for the workspace admin), most recently changed first. Narrow to one project with projectId or projectKey, or pass noProject: true.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        projectId: { type: "string" },
+        projectKey: { type: "string" },
+        noProject: { type: "boolean" },
+      },
+    },
+  },
+  {
+    name: "read_sheet",
+    description:
+      "Read a sheet's outline: title, url, revision and every tab in order with its id, name, size, frozen rows and columns, and filledRange (the box of filled cells, null when empty). Read cells with read_cells.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        sheetId: { type: "string", description: "The sheet's id, or its link." },
+      },
+      required: ["sheetId"],
+    },
+  },
+  {
+    name: "read_cells",
+    description: `Read one range of one tab: each cell's formula and computed value, and the revision to send as base with edit_sheet. At most ${MAX_CELLS_PER_READ} cells per read; split larger ranges by rows.`,
+    inputSchema: {
+      type: "object",
+      properties: {
+        sheetId: { type: "string", description: "The sheet's id, or its link." },
+        sheet: { type: "string", description: "The tab's name or id." },
+        range: {
+          type: "string",
+          description: "A1, A1:D20, C:C, 2:2 or F2:F (to the last filled row).",
+        },
+      },
+      required: ["sheetId", "sheet", "range"],
+    },
+  },
+  {
+    name: "edit_sheet",
+    description: `Apply one edit list to a sheet: up to ${MAX_EDITS_PER_LIST} edits (writeCells, formatCells, addSheet, insertRows, setSheetSettings and more; format_guide {topic: "sheet"}). base is the revision you last read. The whole list lands as one new revision, which people see at once, or nothing does: a refusal names the edit and gives the current revision.`,
+    inputSchema: {
+      type: "object",
+      properties: {
+        sheetId: { type: "string", description: "The sheet's id, or its link." },
+        base: {
+          type: "integer",
+          description: "The revision read_sheet, read_cells or your last edit_sheet returned.",
+        },
+        edits: {
+          type: "array",
+          maxItems: MAX_EDITS_PER_LIST,
+          items: {
+            type: "object",
+            properties: { kind: { type: "string" } },
+            required: ["kind"],
+          },
+        },
+      },
+      required: ["sheetId", "base", "edits"],
+    },
+  },
+  {
+    name: "update_sheet",
+    description:
+      "Rename a sheet (title) or move it to another existing project (projectId or projectKey), or to no project (noProject: true). Open pages update at once. Tabs are renamed with edit_sheet.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        sheetId: { type: "string", description: "The sheet's id, or its link." },
+        title: { type: "string", maxLength: MAX_SHEET_TITLE_LENGTH },
+        projectId: { type: "string" },
+        projectKey: { type: "string" },
+        noProject: { type: "boolean" },
+      },
+      required: ["sheetId"],
     },
   },
   {
@@ -2569,6 +2831,116 @@ const handlers: Record<
       pushedAt: new Date(ctx.deps.now()).toISOString(),
     });
     return { ok: true, link };
+  },
+
+  create_sheet: async (args, ctx) => {
+    const title =
+      optionalString(args, "title", MAX_SHEET_TITLE_LENGTH) ??
+      DEFAULT_SHEET_TITLE;
+    const projectId = await targetProject(ctx, args);
+    const { sheet, records } = await load(
+      Sheets.createSheet(ctx.deps.db, {
+        projectId,
+        title,
+        createdBy: ctx.principal.userId,
+        now: ctx.deps.now(),
+      }),
+      "project",
+    );
+    return {
+      ...sheetRead(ctx, sheet, workbookFromRecords(records)),
+      ...SHEET_GUIDE,
+    };
+  },
+
+  list_sheets: async (args, ctx) => {
+    const projectId =
+      args.noProject === true
+        ? null
+        : args.projectId != null || args.projectKey != null
+          ? (await existingProject(ctx, args)).id
+          : undefined;
+    const sheets = await Sheets.listSheets(ctx.deps.db, {
+      userId: ctx.principal.userId,
+      projectId,
+    });
+    return { sheets: sheets.map((sheet) => sheetSummary(ctx, sheet)) };
+  },
+
+  read_sheet: async (args, ctx) => {
+    const sheetId = sheetIdArg(args);
+    await sheetWith(ctx, sheetId);
+    const { sheet, workbook } = await loadWorkbook(ctx, sheetId);
+    return sheetRead(ctx, sheet, workbook);
+  },
+
+  read_cells: async (args, ctx) => {
+    const sheetId = sheetIdArg(args);
+    const tab = requireString(args, "sheet", 200);
+    const range = requireString(args, "range", 100);
+    await sheetWith(ctx, sheetId);
+    const { workbook } = await loadWorkbook(ctx, sheetId);
+    const read = readCells(workbook, tab, range);
+    if (isRefusal(read)) readRefused(workbook, tab, range, read);
+    return {
+      sheetId,
+      revision: workbook.revision,
+      sheet: read.sheet,
+      tabId: read.sheetId,
+      range: read.range,
+      rows: read.rows,
+    };
+  },
+
+  edit_sheet: async (args, ctx) => {
+    const sheetId = sheetIdArg(args);
+    const { base, edits } = args;
+    if (typeof base !== "number" || !Number.isInteger(base) || base < 0) {
+      fail(
+        "invalid_argument",
+        '"base" must be the revision you last read (an integer, 0 or more).',
+      );
+    }
+    if (
+      !Array.isArray(edits) ||
+      edits.length === 0 ||
+      edits.length > MAX_EDITS_PER_LIST ||
+      edits.some((edit) => !edit || typeof edit !== "object" || Array.isArray(edit))
+    ) {
+      fail(
+        "invalid_argument",
+        `"edits" must be a list of 1 to ${MAX_EDITS_PER_LIST} edit objects, each with a "kind".`,
+        SHEET_GUIDE,
+      );
+    }
+    await sheetWith(ctx, sheetId);
+    const result = await Sheets.applySheetEdits(ctx.deps.sheetRooms, sheetId, {
+      base,
+      edits: edits as ReadonlyArray<Edit>,
+      origin: null,
+      by: await Sheets.sheetAuthor(ctx.deps.db, ctx.principal),
+    });
+    if (!result.ok) editsRefused(result.refusal, result.revision);
+    return { sheetId, revision: result.revision };
+  },
+
+  update_sheet: async (args, ctx) => {
+    const sheetId = sheetIdArg(args);
+    const title = optionalString(args, "title", MAX_SHEET_TITLE_LENGTH);
+    await sheetWith(ctx, sheetId);
+    const projectId = await sheetMoveTarget(ctx, args);
+    if (title === undefined && projectId === undefined) {
+      fail(
+        "invalid_argument",
+        'Pass "title", a project ("projectId" or "projectKey"), or "noProject": true.',
+      );
+    }
+    const sheet = await ctx.deps.sheetRooms.updateMeta(sheetId, {
+      title,
+      projectId,
+      origin: null,
+    });
+    return sheetSummary(ctx, sheet);
   },
 };
 
