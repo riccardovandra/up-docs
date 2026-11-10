@@ -46,12 +46,12 @@ async function setup() {
   const creator = await person("creator@example.com", doc.doc.id, "editor");
   const create = async (cookie: string, input: Record<string, unknown> = {}) =>
     (await send<{ diagram: DiagramView }>(cookie, "POST", "/api/diagrams", input)).body.diagram;
-  /** Puts a block linking the diagram into a doc's first tab. */
-  const link = async (target: DocWithTabs, diagramId: string) => {
+  /** Puts a block linking the diagram into a doc's first tab, written by `by`. */
+  const link = async (target: DocWithTabs, diagramId: string, by = admin) => {
     const tab = target.tabs[0]!;
-    const current = (await send<{ tab: { version: number } }>(admin, "GET", `/api/tabs/${tab.id}`))
+    const current = (await send<{ tab: { version: number } }>(by, "GET", `/api/tabs/${tab.id}`))
       .body.tab;
-    const written = await send(admin, "PATCH", `/api/tabs/${tab.id}`, {
+    const written = await send(by, "PATCH", `/api/tabs/${tab.id}`, {
       baseVersion: current.version,
       markdown: `Intro\n\n${drawioBlock(diagramId, "The flow")}\n`,
     });
@@ -150,6 +150,73 @@ describe("diagram access", () => {
     ];
     expect(refused.map((response) => response.status)).toEqual([403, 403, 403, 403, 403]);
     expect(refused[0]!.body).toEqual({ error: "forbidden" });
+  });
+
+  it("hides a diagram linked into a doc its creator cannot edit", async () => {
+    const { api, admin, creator, otherDoc, person, create, link, upload, send, as } = await setup();
+    const diagram = await create(creator, { title: "Onboarding", xml: XML });
+    await upload(creator, diagram.id, 1, PNG_BASE64);
+    // The admin owns the other doc; the creator is not on it. An editor there links the id.
+    const linker = await person("linker@example.com", otherDoc.doc.id, "editor");
+    const member = await person("member@example.com", otherDoc.doc.id);
+    await link(otherDoc, diagram.id, linker);
+
+    const statuses = async (cookie: string) => {
+      const paths = [`/api/diagrams/${diagram.id}`, `/api/diagrams/${diagram.id}/picture.svg`];
+      const responses = await Promise.all(paths.map((path) => api.call("GET", path, as(cookie))));
+      return responses.map((response) => response.status);
+    };
+    const exported = async (cookie: string) =>
+      (await api.call("GET", `/api/docs/${otherDoc.doc.id}/export.md`, as(cookie))).text();
+    for (const cookie of [linker, member]) {
+      expect(await statuses(cookie)).toEqual([404, 404]);
+      expect(await exported(cookie)).not.toContain("Onboarding");
+    }
+    // The admin manages every diagram, so sees it; being on the doc shows it to nobody else.
+    expect(await statuses(admin)).toEqual([200, 200]);
+
+    // On the doc, but as someone who could not have linked it there: still hidden.
+    const members = `/api/docs/${otherDoc.doc.id}/members`;
+    for (const role of ["viewer", "commenter"]) {
+      await send(admin, "POST", members, { email: "creator@example.com", role });
+      expect(await statuses(member)).toEqual([404, 404]);
+    }
+    // Once the creator can edit the doc, its link shows the diagram to everyone on it.
+    await send(admin, "POST", members, { email: "creator@example.com", role: "editor" });
+    for (const cookie of [linker, member]) expect(await statuses(cookie)).toEqual([200, 200]);
+    expect(await exported(member)).toContain("Onboarding");
+  });
+
+  it("shows the admin's own diagram only through docs the admin is on", async () => {
+    const { api, admin, creator, doc, person, create, link, upload, send, as } = await setup();
+    const diagram = await create(admin, { title: "Pricing", xml: XML });
+    await upload(admin, diagram.id, 1);
+    const picture = async (cookie: string) =>
+      (await api.call("GET", `/api/diagrams/${diagram.id}/picture.svg`, as(cookie))).status;
+
+    // A doc the admin is not on: the admin reaches every diagram, but not this doc.
+    const theirs = (await send<DocWithTabs>(creator, "POST", "/api/docs", { title: "Theirs" }))
+      .body;
+    await link(theirs, diagram.id, creator);
+    expect(await picture(creator)).toBe(404);
+
+    // The admin's own doc shows it to a plain reader.
+    await link(doc, diagram.id);
+    const reader = await person("reader@example.com", doc.doc.id);
+    expect(await picture(reader)).toBe(200);
+
+    // A diagram whose creator is gone is the admin's alone, whoever links it.
+    const orphan = await create(creator, { title: "Orphan", xml: XML });
+    await upload(creator, orphan.id, 1);
+    await link(doc, orphan.id);
+    const orphanPicture = async (cookie: string) =>
+      (await api.call("GET", `/api/diagrams/${orphan.id}/picture.svg`, as(cookie))).status;
+    expect(await orphanPicture(reader)).toBe(200);
+    const forget = api.db.prepare("UPDATE diagrams SET created_by = NULL WHERE id = ?");
+    await forget.bind(orphan.id).run();
+    expect(await orphanPicture(reader)).toBe(404);
+    expect(await orphanPicture(creator)).toBe(404);
+    expect(await orphanPicture(admin)).toBe(200);
   });
 
   it("answers a stranger as if the diagram did not exist", async () => {

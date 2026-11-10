@@ -1,9 +1,10 @@
 // Draw.io diagrams: the store, who may see and change one, and where one is
 // linked. The REST API and the MCP tools call these, so both share one
-// behaviour. A diagram is managed by its creator and the admin; anyone who can
-// read a doc that links it may see its picture, and nothing else.
+// behaviour. A diagram is managed by its creator and the admin. A doc that links
+// it shows it to the people on that doc only when its creator can edit that doc
+// (see `canViewDiagram`); they see its picture and what it shows, never its source.
 
-import { isAdmin } from "../shared/access.ts";
+import { canEdit as canEditDoc, isAdmin, type DocRole } from "../shared/access.ts";
 import {
   checkDiagramXml,
   DIAGRAM_PICTURE_TYPES,
@@ -114,27 +115,41 @@ interface LinkRow {
   doc_id: string;
   doc_title: string;
   readable: number;
+  creator_role: DocRole | null;
 }
 
 /**
  * Every ```t3-drawio block in the tabs, read from their markdown: there is no
  * index table. `diagramId` narrows the scan to tabs that mention that id.
- * `readable` says whether `userId` is on the tab's doc.
+ * `readable` says whether `userId` is on the tab's doc, and `byCreator` whether
+ * `creatorId` is a member of it who can edit it.
  */
 async function linkedTabs(
   db: D1Database,
-  input: { readonly diagramId?: string | undefined; readonly userId?: string | undefined },
-): Promise<ReadonlyArray<{ diagramId: string; use: DiagramUse; readable: boolean }>> {
+  input: {
+    readonly diagramId?: string | undefined;
+    readonly userId?: string | undefined;
+    readonly creatorId?: string | undefined;
+  },
+): Promise<
+  ReadonlyArray<{ diagramId: string; use: DiagramUse; readable: boolean; byCreator: boolean }>
+> {
   const { results } = await db
     .prepare(
       `SELECT t.id AS tab_id, t.title AS tab_title, t.markdown, t.doc_id, d.title AS doc_title,
-         (m.user_id IS NOT NULL) AS readable
+         (m.user_id IS NOT NULL) AS readable, c.role AS creator_role
        FROM tabs t JOIN docs d ON d.id = t.doc_id
        LEFT JOIN doc_members m ON m.doc_id = t.doc_id AND m.user_id = ?1
+       LEFT JOIN doc_members c ON c.doc_id = t.doc_id AND c.user_id = ?4
        WHERE instr(t.markdown, ?2) > 0 AND (?3 IS NULL OR instr(t.markdown, ?3) > 0)
        ORDER BY d.title COLLATE NOCASE, d.id, t.position, t.id`,
     )
-    .bind(input.userId ?? null, DRAWIO_LANGUAGE, input.diagramId ?? null)
+    .bind(
+      input.userId ?? null,
+      DRAWIO_LANGUAGE,
+      input.diagramId ?? null,
+      input.creatorId ?? null,
+    )
     .all<LinkRow>();
   return results.flatMap((row) => {
     const ids = new Set<string>();
@@ -151,7 +166,13 @@ async function linkedTabs(
       tabId: row.tab_id,
       tabTitle: row.tab_title,
     };
-    return [...ids].map((diagramId) => ({ diagramId, use, readable: row.readable === 1 }));
+    const byCreator = canEditDoc(row.creator_role);
+    return [...ids].map((diagramId) => ({
+      diagramId,
+      use,
+      readable: row.readable === 1,
+      byCreator,
+    }));
   });
 }
 
@@ -189,15 +210,27 @@ export async function diagramUsesById(
   return byId;
 }
 
-/** Whether the person may see the diagram's picture: they manage it, or read a doc linking it. */
+/**
+ * Whether the person may see the diagram: they manage it, or they are on a doc
+ * that links it and that the diagram's creator can edit. Anyone who edits a doc
+ * can put any diagram's id in a block, so a link counts only where the creator
+ * is a member who could have put it there. Membership is the doc's own list:
+ * the admin manages every diagram, but being on a doc counts only for the ones
+ * the admin created. A diagram whose creator is gone is the admin's alone.
+ */
 export async function canViewDiagram(
   db: D1Database,
   diagram: Pick<DiagramSummary, "id" | "createdBy">,
   userId: string,
 ): Promise<boolean> {
   if (canEditDiagram(diagram, userId)) return true;
-  const links = await linkedTabs(db, { diagramId: diagram.id, userId });
-  return links.some((link) => link.readable);
+  if (diagram.createdBy === null) return false;
+  const links = await linkedTabs(db, {
+    diagramId: diagram.id,
+    userId,
+    creatorId: diagram.createdBy,
+  });
+  return links.some((link) => link.readable && link.byCreator);
 }
 
 export async function getDiagram(db: D1Database, diagramId: string): Promise<Diagram> {
