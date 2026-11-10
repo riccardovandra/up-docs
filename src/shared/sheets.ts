@@ -101,10 +101,100 @@ export type SheetRoomMessage =
       readonly by: SheetAuthor;
     }
   | { readonly type: "sheet.meta"; readonly sheet: SheetMeta; readonly origin: string | null }
-  | { readonly type: "sheet.deleted"; readonly sheetId: string; readonly origin: string | null };
+  | { readonly type: "sheet.deleted"; readonly sheetId: string; readonly origin: string | null }
+  /** Sent once to a socket when it opens: itself, and everyone else already here. */
+  | {
+      readonly type: "sheet.presence.snapshot";
+      readonly self: SheetPresence;
+      readonly presences: ReadonlyArray<SheetPresence>;
+    }
+  /** Another page joined, moved its selection, switched tab or cleared. Replaces that connection's last one. */
+  | ({ readonly type: "sheet.presence" } & SheetPresence)
+  /** Another page closed. */
+  | { readonly type: "sheet.presence.left"; readonly connectionId: string };
 
 /** Close codes the sheet room uses. */
 export const SHEET_SOCKET_CLOSE = {
   deleted: 4404,
   accessRemoved: 4403,
 } as const;
+
+// ---- Presence: who has the sheet open, and where ----
+
+/**
+ * One open page in the room, as everyone else sees it. A person with the sheet
+ * open in two windows is two presences with the same `userId`, `name` and
+ * colour. `tabId`, `range` and `activeCell` are null until the page says
+ * where it is, or after it clears.
+ */
+export interface SheetPresence {
+  /** The room's id for this socket, fresh per connection. */
+  readonly connectionId: string;
+  readonly userId: string;
+  /** The person's name, "" when they have not set one. */
+  readonly name: string;
+  /** Index into the presence palette, the same for a user everywhere. */
+  readonly colorIndex: number;
+  readonly tabId: string | null;
+  /** A1 text of the selection: "B2", "B2:C4", "3:5" or "B:D". */
+  readonly range: string | null;
+  /** The selection's active cell, "B2". */
+  readonly activeCell: string | null;
+}
+
+/** Colours a presence can take; `colorIndex` is below this. */
+export const PRESENCE_COLORS = 8;
+
+/** A stable colour for a user: a hash of the user id into the palette. */
+export function presenceColorIndex(userId: string): number {
+  let hash = 2166136261;
+  for (let i = 0; i < userId.length; i += 1) {
+    hash ^= userId.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0) % PRESENCE_COLORS;
+}
+
+/**
+ * What a page may send the room, JSON per message. Only presence: edits go
+ * through `POST /api/sheets/:id/edits`. The room takes the sender from the
+ * socket, never from the message.
+ *
+ * `presence`: the page shows tab `tabId` with `range` selected. `presence.clear`:
+ * the page is open but shows no selection (it stays in the room's avatars).
+ */
+export type SheetClientMessage =
+  | {
+      readonly type: "presence";
+      readonly tabId: string;
+      readonly range: string;
+      readonly activeCell: string;
+    }
+  | { readonly type: "presence.clear" };
+
+/** Longest presence message the room reads; anything longer is dropped. */
+export const MAX_PRESENCE_MESSAGE_LENGTH = 512;
+
+const CELL = "[A-Z]{1,3}[1-9][0-9]{0,6}";
+const RANGE = new RegExp(`^(?:${CELL}(?::${CELL})?|[A-Z]{1,3}:[A-Z]{1,3}|[1-9][0-9]{0,6}:[1-9][0-9]{0,6})$`);
+const ACTIVE_CELL = new RegExp(`^${CELL}$`);
+
+/** Reads a page's message, or null when it is not a well-formed one. */
+export function parseSheetClientMessage(text: string): SheetClientMessage | null {
+  if (text.length > MAX_PRESENCE_MESSAGE_LENGTH) return null;
+  let value: unknown;
+  try {
+    value = JSON.parse(text);
+  } catch {
+    return null;
+  }
+  if (typeof value !== "object" || value === null) return null;
+  const message = value as Record<string, unknown>;
+  if (message.type === "presence.clear") return { type: "presence.clear" };
+  if (message.type !== "presence") return null;
+  const { tabId, range, activeCell } = message;
+  if (typeof tabId !== "string" || !isSheetId(tabId)) return null;
+  if (typeof range !== "string" || !RANGE.test(range)) return null;
+  if (typeof activeCell !== "string" || !ACTIVE_CELL.test(activeCell)) return null;
+  return { type: "presence", tabId, range, activeCell };
+}

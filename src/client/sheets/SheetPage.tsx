@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type MouseEvent } from "react";
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type MouseEvent } from "react";
 
 import { workbookFromRecords } from "../../shared/sheet/serialize.ts";
 import type { SheetMeta } from "../../shared/sheets.ts";
@@ -8,6 +8,15 @@ import { TitleDialog } from "../home/TitleDialog.tsx";
 import { useLockedProject } from "../lockedProject.ts";
 import { navigate } from "../router.ts";
 import type { GridOverlay } from "./Grid.tsx";
+import {
+  agentOverlays,
+  EMPTY_PRESENCE,
+  presenceAvatars,
+  presenceMessage,
+  presenceOverlays,
+  presenceReducer,
+} from "./presence.ts";
+import { PresenceAvatars } from "./PresenceAvatars.tsx";
 import type { Selection } from "./selection.ts";
 import { SheetWorkbook } from "./SheetWorkbook.tsx";
 import { postEdits, SHEETS_PATH, sheetPath, sheetsApi } from "./sheetsApi.ts";
@@ -18,6 +27,10 @@ import "./sheets.css";
 
 /** How long an agent's edit stays highlighted. */
 const FLASH_MS = 2400;
+/** How long an agent's changed cells keep its outline and name tag. */
+const AGENT_TAG_MS = 4000;
+/** At most one selection update to the room per this many ms (the last one always goes). */
+const PRESENCE_THROTTLE_MS = 100;
 
 const follow = (path: string) => (event: MouseEvent) => {
   if (event.metaKey || event.ctrlKey) return;
@@ -38,9 +51,10 @@ export function SheetPage(props: { readonly sheetId: string; readonly tabId: str
   const [notice, setNotice] = useState<string | null>(null);
   const [renaming, setRenaming] = useState(false);
   const [flashes, setFlashes] = useState<ReadonlyMap<string, ReadonlySet<number>>>(() => new Map());
-  // Seam for live presence (S4): remote cursors land here as overlays.
-  const [overlays] = useState<ReadonlyArray<GridOverlay>>([]);
+  const [presence, dispatchPresence] = useReducer(presenceReducer, EMPTY_PRESENCE);
+  const [agentTags, setAgentTags] = useState<ReadonlyArray<GridOverlay>>([]);
   const syncRef = useRef<SheetSync | null>(null);
+  const agentTagSeq = useRef(0);
   const [tabId, setTabId] = useState(props.tabId);
 
   const flash = useCallback((cells: ReadonlyArray<{ sheetId: string; row: number; col: number }>) => {
@@ -84,7 +98,15 @@ export function SheetPage(props: { readonly sheetId: string; readonly tabId: str
           },
           onRemote: (change) => {
             // People see where an agent's edits land.
-            if (change.by.kind === "agent") flash(change.changed.cells);
+            if (change.by.kind !== "agent") return;
+            flash(change.changed.cells);
+            const tags = agentOverlays(String(++agentTagSeq.current), change.by, change.changed.cells);
+            if (tags.length === 0) return;
+            setAgentTags((current) => [...current, ...tags]);
+            window.setTimeout(
+              () => setAgentTags((current) => current.filter((tag) => !tags.includes(tag))),
+              AGENT_TAG_MS,
+            );
           },
           onRefused: (refusal) => setNotice(`The change was not saved: ${refusal.detail}`),
           onGone: () => setMissing(true),
@@ -106,11 +128,16 @@ export function SheetPage(props: { readonly sheetId: string; readonly tabId: str
     };
   }, [sheetId, flash]);
 
-  useSheetRoom(sheetId, {
+  const room = useSheetRoom(sheetId, {
     onMessage: (message) => {
       if (message.type === "sheet.revision") syncRef.current?.receive(message);
       else if (message.type === "sheet.meta") setMeta(message.sheet);
       else if (message.type === "sheet.deleted") setMissing(true);
+      else {
+        dispatchPresence(message);
+        // A (re)connected socket is a new presence: tell the room where this page is.
+        if (message.type === "sheet.presence.snapshot") publish.current.flush(true);
+      }
     },
     onReconnect: () => syncRef.current?.resync(),
     onClosed: () => setMissing(true),
@@ -124,8 +151,60 @@ export function SheetPage(props: { readonly sheetId: string; readonly tabId: str
     [sheetId],
   );
 
-  // Seam for live presence (S4): publish the shown tab and selection to the room here.
-  const onSelectionChange = useCallback((_tabId: string, _selection: Selection) => undefined, []);
+  // Publishes the shown tab and selection: at once on a tab switch, otherwise at
+  // most every PRESENCE_THROTTLE_MS with the latest selection last.
+  const publish = useRef({
+    latest: null as { readonly tabId: string; readonly selection: Selection } | null,
+    sentTab: null as string | null,
+    timer: null as ReturnType<typeof setTimeout> | null,
+    dirty: false,
+    flush(force = false) {
+      if (!force && !this.dirty) return;
+      this.dirty = false;
+      const latest = this.latest;
+      const tab = syncRef.current?.view.sheets.find((sheet) => sheet.id === latest?.tabId);
+      if (!latest || !tab) return;
+      this.sentTab = latest.tabId;
+      sendRef.current(
+        presenceMessage(latest.tabId, latest.selection, { rows: tab.rowCount, cols: tab.columnCount }),
+      );
+    },
+  });
+  const sendRef = useRef(room.send);
+  sendRef.current = room.send;
+  useEffect(() => {
+    const state = publish.current;
+    return () => {
+      if (state.timer) clearTimeout(state.timer);
+    };
+  }, []);
+  const onSelectionChange = useCallback((nextTab: string, selection: Selection) => {
+    const state = publish.current;
+    state.latest = { tabId: nextTab, selection };
+    state.dirty = true;
+    if (state.timer === null || state.sentTab !== nextTab) {
+      state.flush();
+      if (state.timer) clearTimeout(state.timer);
+      const tick = () => {
+        if (!state.dirty) {
+          state.timer = null;
+          return;
+        }
+        state.flush();
+        state.timer = setTimeout(tick, PRESENCE_THROTTLE_MS);
+      };
+      state.timer = setTimeout(tick, PRESENCE_THROTTLE_MS);
+    }
+  }, []);
+
+  const overlays = useMemo(() => {
+    const tabs = sync?.view.sheets ?? [];
+    const remote = tabs.flatMap((tab) =>
+      presenceOverlays(presence, tab.id, { rows: tab.rowCount, cols: tab.columnCount }),
+    );
+    return [...remote, ...agentTags];
+  }, [presence, agentTags, sync]);
+  const avatars = useMemo(() => presenceAvatars(presence), [presence]);
 
   const back = (label: string) => (
     <button type="button" className="button secondary" onClick={() => navigate(SHEETS_PATH)}>
@@ -186,6 +265,7 @@ export function SheetPage(props: { readonly sheetId: string; readonly tabId: str
           </button>
         </div>
         <div className="doc-header-actions">
+          <PresenceAvatars avatars={avatars} />
           {shownTab ? (
             <a className="button secondary small" href={sheetsApi.csvUrl(sheetId, shownTab.id)} download>
               Export CSV

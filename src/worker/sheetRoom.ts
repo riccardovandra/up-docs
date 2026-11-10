@@ -2,7 +2,8 @@ import { DurableObject } from "cloudflare:workers";
 
 import type { SheetMeta, SheetRoomMessage } from "../shared/sheets.ts";
 import type { Env } from "./env.ts";
-import { SheetEngine, type SheetEditInput, type SheetEditResult } from "./sheets.ts";
+import { joinPresence, leavePresence, receivePresence, type PresenceHost } from "./sheetPresence.ts";
+import { SheetEngine, sheetAuthor, type SheetEditInput, type SheetEditResult } from "./sheets.ts";
 
 /** Set by the Worker, never by the client: the stub is only reachable through it. */
 export const SHEET_SOCKET_USER_HEADER = "X-Docs-User";
@@ -15,6 +16,16 @@ export const SHEET_SOCKET_USER_HEADER = "X-Docs-User";
  */
 export class SheetRoom extends DurableObject<Env> {
   private engine: SheetEngine | null = null;
+  private readonly presence: PresenceHost<WebSocket> = {
+    sockets: () => this.ctx.getWebSockets(),
+    userOf: (socket) => this.ctx.getTags(socket)[0] ?? null,
+    nameOf: (userId) =>
+      sheetAuthor(this.env.DB, { kind: "session", userId }).then(
+        (author) => author.name,
+        () => "",
+      ),
+    now: () => Date.now(),
+  };
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -83,24 +94,29 @@ export class SheetRoom extends DurableObject<Env> {
     const userId = request.headers.get(SHEET_SOCKET_USER_HEADER);
     if (!userId) return new Response("Missing user", { status: 400 });
     const { 0: client, 1: server } = new WebSocketPair();
-    // Tagged by user, for presence (S4) and for closing one person's sockets.
+    // Tagged by user: presence takes the sender from the tag, never the message.
     this.ctx.acceptWebSocket(server, [userId]);
+    await joinPresence(this.presence, server);
     return new Response(null, { status: 101, webSocket: client });
   }
 
   /**
-   * The presence seam. Edits never arrive here: they come through the REST API,
-   * where access is checked. Today anything sent is dropped. Presence (S4)
-   * parses a client message here, takes the sender from
-   * `this.ctx.getTags(socket)[0]` (the user id the Worker set, never the
-   * message), and relays it to the other sockets; per-socket state such as the
-   * cursor goes in `socket.serializeAttachment` so it survives hibernation.
+   * Presence only. Edits never arrive here: they come through the REST API,
+   * where access is checked. See `sheetPresence.ts`.
    */
-  override async webSocketMessage(_socket: WebSocket, _message: string | ArrayBuffer): Promise<void> {}
+  override async webSocketMessage(socket: WebSocket, message: string | ArrayBuffer): Promise<void> {
+    if (typeof message !== "string") return;
+    await receivePresence(this.presence, socket, message);
+  }
 
   override async webSocketClose(socket: WebSocket, code: number): Promise<void> {
+    leavePresence(this.presence, socket);
     // 1005, 1006 and 1015 describe a close and may not be sent in one.
     socket.close(code === 1005 || code === 1006 || code === 1015 ? 1000 : code, "closing");
+  }
+
+  override async webSocketError(socket: WebSocket): Promise<void> {
+    leavePresence(this.presence, socket);
   }
 }
 

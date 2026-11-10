@@ -9,6 +9,17 @@
   --sheet-grid: color-mix(in srgb, var(--text) 11%, transparent);
   --sheet-header-bg: color-mix(in srgb, var(--text) 3%, var(--bg));
   --sheet-select: #1a73e8;
+  /* Presence: one colour per person (presenceColorIndex), white name tags. */
+  --sheet-person-0: #c5221f;
+  --sheet-person-1: #188038;
+  --sheet-person-2: #8430ce;
+  --sheet-person-3: #b06000;
+  --sheet-person-4: #007b83;
+  --sheet-person-5: #c2185b;
+  --sheet-person-6: #3949ab;
+  --sheet-person-7: #5f6368;
+  --sheet-person-ink: #fff;
+  --sheet-agent: #c15f3c;
   display: flex;
   flex-direction: column;
   height: calc(100dvh - var(--open-tabs-height));
@@ -409,10 +420,57 @@
   bottom: 100%;
   padding: 0 5px;
   border-radius: 3px 3px 3px 0;
-  color: #fff;
+  color: var(--sheet-person-ink);
   font-size: 11px;
   line-height: 16px;
   white-space: nowrap;
+}
+
+.sheet-overlay-below .sheet-overlay-label {
+  top: 100%;
+  bottom: auto;
+  border-radius: 0 3px 3px 3px;
+}
+
+.sheet-overlay-inside .sheet-overlay-label {
+  top: 0;
+  bottom: auto;
+  left: 0;
+  border-radius: 0 0 3px 0;
+}
+
+/* Who is here: avatars in the top bar */
+
+.sheet-avatars {
+  display: flex;
+  align-items: center;
+  margin: 0 0.25rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.sheet-avatar {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  margin-left: -6px;
+  border-radius: 50%;
+  border: 2px solid var(--bg);
+  color: var(--sheet-person-ink);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: default;
+  user-select: none;
+}
+
+.sheet-avatar:first-child {
+  margin-left: 0;
+}
+
+.sheet-avatar-more {
+  background: var(--sheet-header-bg);
+  color: var(--text);
 }
 
 /* The in-cell editor */
@@ -722,11 +780,31 @@
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) .sheet-page {
     --sheet-select: #8ab4f8;
+    --sheet-person-0: #f28b82;
+    --sheet-person-1: #81c995;
+    --sheet-person-2: #d7aefb;
+    --sheet-person-3: #fdd663;
+    --sheet-person-4: #78d9ec;
+    --sheet-person-5: #ff8bcb;
+    --sheet-person-6: #aecbfa;
+    --sheet-person-7: #bdc1c6;
+    --sheet-person-ink: #202124;
+    --sheet-agent: #e8956f;
   }
 }
 
 :root[data-theme="dark"] .sheet-page {
   --sheet-select: #8ab4f8;
+  --sheet-person-0: #f28b82;
+  --sheet-person-1: #81c995;
+  --sheet-person-2: #d7aefb;
+  --sheet-person-3: #fdd663;
+  --sheet-person-4: #78d9ec;
+  --sheet-person-5: #ff8bcb;
+  --sheet-person-6: #aecbfa;
+  --sheet-person-7: #bdc1c6;
+  --sheet-person-ink: #202124;
+  --sheet-agent: #e8956f;
 }
 
 @media (max-width: 640px) {
