@@ -30,7 +30,7 @@ const FLASH_MS = 2400;
 /** How long an agent's changed cells keep its outline and name tag. */
 const AGENT_TAG_MS = 4000;
 /** At most one selection update to the room per this many ms (the last one always goes). */
-const PRESENCE_THROTTLE_MS = 100;
+const PRESENCE_THROTTLE_MS = 100; // keeps a page within the room's PRESENCE_BURST per second
 
 const follow = (path: string) => (event: MouseEvent) => {
   if (event.metaKey || event.ctrlKey) return;
@@ -151,11 +151,11 @@ export function SheetPage(props: { readonly sheetId: string; readonly tabId: str
     [sheetId],
   );
 
-  // Publishes the shown tab and selection: at once on a tab switch, otherwise at
-  // most every PRESENCE_THROTTLE_MS with the latest selection last.
+  // Publishes the shown tab and selection: the first change at once, then at most
+  // every PRESENCE_THROTTLE_MS with the latest last. Tab switches too: the room
+  // drops more than 10 updates a second, so a dropped final update would stick.
   const publish = useRef({
     latest: null as { readonly tabId: string; readonly selection: Selection } | null,
-    sentTab: null as string | null,
     timer: null as ReturnType<typeof setTimeout> | null,
     dirty: false,
     flush(force = false) {
@@ -164,7 +164,6 @@ export function SheetPage(props: { readonly sheetId: string; readonly tabId: str
       const latest = this.latest;
       const tab = syncRef.current?.view.sheets.find((sheet) => sheet.id === latest?.tabId);
       if (!latest || !tab) return;
-      this.sentTab = latest.tabId;
       sendRef.current(
         presenceMessage(latest.tabId, latest.selection, { rows: tab.rowCount, cols: tab.columnCount }),
       );
@@ -182,9 +181,8 @@ export function SheetPage(props: { readonly sheetId: string; readonly tabId: str
     const state = publish.current;
     state.latest = { tabId: nextTab, selection };
     state.dirty = true;
-    if (state.timer === null || state.sentTab !== nextTab) {
+    if (state.timer === null) {
       state.flush();
-      if (state.timer) clearTimeout(state.timer);
       const tick = () => {
         if (!state.dirty) {
           state.timer = null;
