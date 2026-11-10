@@ -68,10 +68,16 @@
   white-space: pre-wrap;
 }
 
-.diagram-edit {
+.diagram-actions {
   position: absolute;
   top: 0.4rem;
   right: 0.4rem;
+  display: flex;
+  gap: 0.35rem;
+  z-index: 1;
+}
+
+.diagram-edit {
   font: inherit;
   font-size: 0.8rem;
   color: var(--muted);
@@ -90,7 +96,136 @@
   display: none;
 }
 
+/* Full view with zoom and pan for mermaid blocks (see expandDiagram.ts). */
+.diagram-expand-controls {
+  display: flex;
+  gap: 0.35rem;
+}
+
+.diagram-zoom {
+  display: none;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  overflow: hidden;
+}
+
+[data-expanded] .diagram-zoom {
+  display: flex;
+}
+
+.diagram-zoom-button {
+  font: inherit;
+  font-size: 0.8rem;
+  color: var(--muted);
+  background: none;
+  border: 0;
+  padding: 0.15rem 0.55rem;
+  cursor: pointer;
+}
+
+.diagram-zoom-button:hover {
+  color: var(--text);
+  background: var(--code-bg);
+}
+
+.diagram-zoom-level {
+  min-width: 3.4rem;
+  font-variant-numeric: tabular-nums;
+  border-inline: 1px solid var(--border);
+}
+
+.diagram-pan {
+  display: none;
+}
+
+[data-expanded] .diagram-pan {
+  display: block;
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  cursor: grab;
+  touch-action: none;
+}
+
+[data-expanded] .diagram-pan[data-dragging] {
+  cursor: grabbing;
+}
+
+.diagram-expand {
+  font: inherit;
+  font-size: 0.8rem;
+  color: var(--muted);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.15rem 0.5rem;
+  cursor: pointer;
+  opacity: 0;
+}
+
+.diagram-expand:hover {
+  color: var(--text);
+}
+
+.diagram-block:hover .diagram-expand,
+.diagram-expand:focus-visible,
+[data-expanded] .diagram-expand {
+  opacity: 1;
+}
+
+.diagram-block:is([data-editing], [data-state="error"], [data-state="loading"]) .diagram-expand {
+  display: none;
+}
+
+/* Full view: the block's chrome is pinned over the page and the drawing fills it. */
+html.diagram-expanded {
+  overflow: hidden;
+}
+
+.diagram-block[data-expanded] .diagram-chrome {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  box-sizing: border-box;
+  padding: 3rem 1.5rem 1.5rem;
+  border: 0;
+  border-radius: 0;
+  outline: none;
+  background: var(--bg);
+  overflow: hidden;
+  cursor: default;
+}
+
+.diagram-block[data-expanded] .diagram-actions {
+  z-index: 1001;
+  position: fixed;
+  top: 0.75rem;
+  right: 1rem;
+}
+
+.diagram-block[data-expanded] .diagram-edit {
+  display: none;
+}
+
+.diagram-block[data-expanded] .diagram-render {
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.diagram-block[data-expanded] .diagram-render > svg {
+  width: 100% !important;
+  height: 100% !important;
+  max-width: none !important;
+}
+
 @media print {
+  .diagram-expand-controls,
+  .diagram-pan {
+    display: none;
+  }
+
   .diagram-edit {
     display: none;
   }
