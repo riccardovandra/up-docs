@@ -4,6 +4,8 @@ import { parseOwnerEmails } from "./auth.ts";
 import { parseEmbedOrigins } from "../shared/embed.ts";
 import type { CommentOpResult } from "./comments.ts";
 import { docRoom, SOCKET_USER_HEADER } from "./docRoom.ts";
+import { sheetRoom, SHEET_SOCKET_USER_HEADER } from "./sheetRoom.ts";
+import type { SheetEditResult } from "./sheets.ts";
 import { reviveError, type TabWriteResult } from "./docs.ts";
 import { resolvePublicOrigin, type Env } from "./env.ts";
 import { withEmbedPolicy } from "./embed.ts";
@@ -13,6 +15,7 @@ import { r2VideoStore } from "./videos.ts";
 import { emailEnabled, isLocalRequest, sendDocInvite, sendLoginCode } from "./email.ts";
 
 export { DocRoom } from "./docRoom.ts";
+export { SheetRoom } from "./sheetRoom.ts";
 
 async function revive<A>(call: PromiseLike<A>): Promise<A> {
   try {
@@ -48,6 +51,18 @@ function apiDeps(request: Request, env: Env, ctx: ExecutionContext): ApiDeps {
         return docRoom(env, docId).fetch(new Request(request, { headers }));
       },
       closeSockets: (docId, userId) => docRoom(env, docId).closeSockets(userId),
+    },
+    sheetRooms: {
+      applyEdits: (sheetId, input) =>
+        revive<SheetEditResult>(sheetRoom(env, sheetId).applyEdits({ sheetId, ...input })),
+      updateMeta: (sheetId, input) => revive(sheetRoom(env, sheetId).updateMeta({ sheetId, ...input })),
+      deleteSheet: (sheetId, input) =>
+        revive(sheetRoom(env, sheetId).deleteSheet({ sheetId, ...input })),
+      openSocket: (sheetId, request, userId) => {
+        const headers = new Headers(request.headers);
+        headers.set(SHEET_SOCKET_USER_HEADER, userId);
+        return sheetRoom(env, sheetId).fetch(new Request(request, { headers }));
+      },
     },
     images: env.IMAGES ? r2ImageStore(env.IMAGES) : d1ImageStore(env.DB),
     videos: env.IMAGES ? r2VideoStore(env.IMAGES) : null,

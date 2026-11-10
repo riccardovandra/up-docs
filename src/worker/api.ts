@@ -52,6 +52,15 @@ import {
   MAX_DIAGRAM_REFRESH_IDS,
   MAX_DIAGRAM_TITLE_LENGTH,
 } from "../shared/drawio.ts";
+import * as Sheets from "./sheets.ts";
+import {
+  DEFAULT_SHEET_TITLE,
+  isSheetId,
+  MAX_EDITS_PER_LIST,
+  MAX_ORIGIN_LENGTH,
+  MAX_SHEET_TITLE_LENGTH,
+} from "../shared/sheets.ts";
+import { workbookFromRecords, type Edit } from "../shared/sheet/index.ts";
 
 /** The ordered write path for a doc; production routes it to the doc's DocRoom. */
 export interface DocRooms {
@@ -141,6 +150,8 @@ export interface ApiDeps {
   readonly publicOrigin: string;
   readonly owners: ReadonlySet<string>;
   readonly rooms: DocRooms;
+  /** The ordered write path for a sheet; production routes it to the sheet's SheetRoom. */
+  readonly sheetRooms: Sheets.SheetRooms;
   readonly images: Images.ImageStore;
   /** Null without an R2 bucket: uploads are refused, and video links still work. */
   readonly videos: Videos.VideoStore | null;
@@ -298,7 +309,7 @@ async function handleImageUploadLink(
 
 /**
  * `PATCH /api/projects/:id` renames, `POST /api/projects/:id/move-docs` moves
- * every doc and diagram to `projectId` (null for no project), and `DELETE`
+ * every doc, diagram and sheet to `projectId` (null for no project), and `DELETE`
  * removes an empty project. A project with docs is never deleted with them.
  */
 async function handleProject(
@@ -332,6 +343,7 @@ async function handleProject(
     for (const docId of docIds)
       await deps.rooms.setDocProject(docId, { projectId, origin });
     await Diagrams.moveProjectDiagrams(deps.db, { from: id, to: projectId });
+    await Sheets.moveProjectSheets(deps.db, { from: id, to: projectId });
     return json({ moved: docIds.length });
   }
   if (!sub && method === "DELETE") {
@@ -386,6 +398,22 @@ export async function handleApi(
       throw cause;
     }
     return deps.rooms.openSocket(id, request, principal.userId);
+  }
+
+  if (resource === "sheets" && id && sub === "ws" && segments.length === 3 && method === "GET") {
+    const origin = request.headers.get("Origin");
+    if (principal.kind === "session" && origin !== null && !isOwnOrigin(origin, request, deps)) {
+      return error(403, "forbidden_origin");
+    }
+    if (request.headers.get("Upgrade") !== "websocket") return error(426, "expected_websocket");
+    if (!isSheetId(id)) return error(404, "not_found");
+    try {
+      await Sheets.requireSheet(deps.db, { sheetId: id, userId: principal.userId });
+    } catch (cause) {
+      if (cause instanceof Docs.NotFoundError) return error(404, "not_found");
+      throw cause;
+    }
+    return deps.sheetRooms.openSocket(id, request, principal.userId);
   }
 
   if (
@@ -895,6 +923,11 @@ export async function handleApi(
       if (response) return response;
     }
 
+    if (resource === "sheets" && segments.length <= 3) {
+      const response = await handleSheets(request, { id, sub, method, url, principal }, deps);
+      if (response) return response;
+    }
+
     const response = await handleComments(
       request,
       { resource, id, sub, method, url, principal },
@@ -1100,6 +1133,134 @@ async function handleDiagrams(
   if (method === "DELETE") {
     await need("edit");
     await Diagrams.deleteDiagram(deps.db, deps.images, id);
+    return json({ ok: true });
+  }
+
+  return null;
+}
+
+/** `null` when the client sent none; `false` when malformed. */
+function originArg(value: unknown): string | null | false {
+  if (value === undefined || value === null) return null;
+  return typeof value === "string" && value.length <= MAX_ORIGIN_LENGTH ? value : false;
+}
+
+/**
+ * Sheets, under `/api/sheets`. Their creator and the admin list, read, edit,
+ * rename, move and delete them; anyone else gets 404. Edit lists go through
+ * the sheet's room (`Sheets.applySheetEdits`), which orders them against
+ * `base`. Returns null when the path is not one of these routes.
+ */
+async function handleSheets(
+  request: Request,
+  route: {
+    readonly id: string | undefined;
+    readonly sub: string | undefined;
+    readonly method: string;
+    readonly url: URL;
+    readonly principal: Auth.Principal;
+  },
+  deps: ApiDeps,
+): Promise<Response | null> {
+  const { id, sub, method, url, principal } = route;
+  const userId = principal.userId;
+
+  if (!id && method === "GET") {
+    // `?projectId=<id>` for one project, `?projectId=none` for sheets in no project.
+    const param = url.searchParams.get("projectId");
+    const projectId = param === null ? undefined : param === "none" ? null : param;
+    return json({ sheets: await Sheets.listSheets(deps.db, { userId, projectId }) });
+  }
+
+  if (!id && method === "POST") {
+    const body = await readJson(request);
+    const projectId = projectIdArg(body.projectId);
+    const title =
+      body.title === undefined ? DEFAULT_SHEET_TITLE : str(body.title, MAX_SHEET_TITLE_LENGTH);
+    if (projectId === false || !title) return error(400, "invalid_sheet");
+    if (projectId && !(await Access.canSeeProject(deps.db, projectId, userId))) {
+      return error(404, "not_found");
+    }
+    const created = await Sheets.createSheet(deps.db, {
+      projectId: projectId ?? null,
+      title,
+      createdBy: userId,
+      now: deps.now(),
+    });
+    return json(created, 201);
+  }
+
+  if (!id) return null;
+  if (!isSheetId(id)) return error(404, "not_found");
+  const need = () => Sheets.requireSheet(deps.db, { sheetId: id, userId });
+
+  if (sub === "edits" && method === "POST") {
+    const body = await readJson(request);
+    const { base, edits } = body;
+    if (typeof base !== "number" || !Number.isInteger(base) || base < 0)
+      return error(400, "invalid_base");
+    if (!Array.isArray(edits) || edits.length > MAX_EDITS_PER_LIST)
+      return error(400, "invalid_edits");
+    const origin = originArg(body.origin);
+    if (origin === false) return error(400, "invalid_origin");
+    await need();
+    const result = await Sheets.applySheetEdits(deps.sheetRooms, id, {
+      base,
+      edits: edits as ReadonlyArray<Edit>,
+      origin,
+      by: await Sheets.sheetAuthor(deps.db, principal),
+    });
+    if (result.ok) return json({ revision: result.revision });
+    return json(
+      { error: "edits_refused", ...result.refusal, revision: result.revision },
+      result.refusal.refusal === "baseIsNotTheRevision" ? 409 : 400,
+    );
+  }
+
+  if (sub === "export.csv" && SAFE_METHODS.has(method)) {
+    await need();
+    const { sheet, records } = await Sheets.loadSheet(deps.db, id);
+    const tab = Sheets.sheetCsv(workbookFromRecords(records), url.searchParams.get("tab"));
+    if (!tab) return error(404, "unknown_tab");
+    return new Response(tab.csv, {
+      headers: {
+        "Content-Type": "text/csv; charset=utf-8",
+        "Content-Disposition": `attachment; filename="${Export.slugify(`${sheet.title} ${tab.name}`)}.csv"`,
+        "Cache-Control": "no-store",
+      },
+    });
+  }
+
+  if (sub) return null;
+
+  if (method === "GET") {
+    await need();
+    return json(await Sheets.loadSheet(deps.db, id));
+  }
+
+  if (method === "PATCH") {
+    const body = await readJson(request);
+    const title =
+      body.title === undefined ? undefined : str(body.title, MAX_SHEET_TITLE_LENGTH);
+    if (title === null) return error(400, "invalid_title");
+    const projectId = projectIdArg(body.projectId);
+    if (projectId === false) return error(400, "invalid_project");
+    if (title === undefined && projectId === undefined) return error(400, "empty_write");
+    const origin = originArg(body.origin);
+    if (origin === false) return error(400, "invalid_origin");
+    await need();
+    if (projectId && !(await Access.canSeeProject(deps.db, projectId, userId))) {
+      return error(404, "not_found");
+    }
+    const sheet = await deps.sheetRooms.updateMeta(id, { title, projectId, origin });
+    return json({ sheet });
+  }
+
+  if (method === "DELETE") {
+    const origin = originArg(url.searchParams.get("origin"));
+    if (origin === false) return error(400, "invalid_origin");
+    await need();
+    await deps.sheetRooms.deleteSheet(id, { origin });
     return json({ ok: true });
   }
 
