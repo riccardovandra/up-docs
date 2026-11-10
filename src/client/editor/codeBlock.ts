@@ -6,6 +6,7 @@ import type { NodeView } from "@tiptap/pm/view";
 
 import type { DiagramCache, DiagramRender } from "./diagramCache.ts";
 import "./diagrams.css";
+import { createExpandControl, type ExpandControl } from "./expandDiagram.ts";
 import { isDrawioLanguage } from "../../shared/drawio.ts";
 import { isEmbedLanguage } from "../../shared/embeds.ts";
 import { isVideoLanguage } from "../../shared/video.ts";
@@ -170,6 +171,7 @@ class DiagramView implements NodeView {
   readonly contentDOM = document.createElement("code");
   private readonly render = document.createElement("div");
   private readonly editButton = document.createElement("button");
+  private readonly expand: ExpandControl;
   private readonly editor: Editor;
   private readonly getPos: NodeViewRendererProps["getPos"];
   private node: ProseMirrorNode;
@@ -189,7 +191,11 @@ class DiagramView implements NodeView {
     this.editButton.type = "button";
     this.editButton.className = "diagram-edit";
     this.editButton.textContent = "Edit";
-    chrome.append(this.render, this.editButton);
+    this.expand = createExpandControl(this.dom, chrome, this.render);
+    const actions = document.createElement("div");
+    actions.className = "diagram-actions";
+    actions.append(this.expand.controls, this.editButton);
+    chrome.append(this.render, actions);
     const pre = document.createElement("pre");
     pre.className = "diagram-source";
     pre.append(this.contentDOM);
@@ -225,13 +231,19 @@ class DiagramView implements NodeView {
 
   destroy() {
     this.destroyed = true;
+    this.expand.collapse();
     this.editor.off("selectionUpdate", this.syncEditing);
     this.editor.off("focus", this.syncEditing);
     this.editor.off("blur", this.syncEditing);
   }
 
   private readonly onChromeClick = () => {
-    if (!this.editor.isEditable || this.dom.hasAttribute("data-editing")) return;
+    if (
+      !this.editor.isEditable ||
+      this.dom.hasAttribute("data-editing") ||
+      this.dom.hasAttribute("data-expanded")
+    )
+      return;
     const pos = this.getPos();
     if (typeof pos === "number") editSource(this.editor, pos, this.node);
   };
