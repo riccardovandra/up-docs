@@ -24,11 +24,12 @@ import {
 } from "./shareLogic.ts";
 
 /** The doc's public address. Inside T3 Code the page may be served from another origin. */
-export function canonicalDocUrl(docId: string): string {
+/** The doc's public URL; with a tab id, the link opens on that tab. */
+export function canonicalDocUrl(docId: string, tabId?: string | null): string {
   const origin =
     document.querySelector(`meta[name="${PUBLIC_ORIGIN_META}"]`)?.getAttribute("content") ||
     window.location.origin;
-  return `${origin}${docPath(docId)}`;
+  return `${origin}${docPath(docId, tabId)}`;
 }
 
 const errorCode = (cause: unknown) => (cause instanceof ApiError ? cause.body.error : undefined);

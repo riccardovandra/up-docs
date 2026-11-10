@@ -32,7 +32,7 @@ Workflow:
 3. Fill sections one at a time with edit_tab (replace a placeholder with the finished section), so the user watches the doc build. Use write_tab only for a new or fully rewritten tab.
 4. Use tabs (create_tab) for distinct parts such as research, plan and decisions; nest with parentTabId.
 5. Keep findings in the doc, not the chat. End with one line and the URL.
-Re-read a tab (read_doc with tabId) before editing it if the user may have changed it. Move a doc with move_doc (projectId: null for no project).
+Doc links read <origin>/d/<docId>/<tabId>: a pasted link's tabId is the tab the user is on, so read_doc with it first. Re-read a tab (read_doc with tabId) before editing it if the user may have changed it. Move a doc with move_doc (projectId: null for no project).
 Project facts: create_doc and read_doc return the project's standing facts (tools, names, rules). Follow them over your own assumptions. When the user corrects a lasting fact, save it with add_project_fact, or with resolve_comment's lesson when it came from a comment.
 How to write (what the user keeps asking for):
 - Before drafting, know the reader, the purpose and the decision the doc should drive. If one is unclear, ask one or two short questions first.

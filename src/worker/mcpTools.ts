@@ -804,7 +804,7 @@ export const TOOLS = [
   {
     name: "read_doc",
     description:
-      "Read a doc: its tab tree (ids, versions, urls), each tab's markdown and the project's facts (follow them). Pass tabId to read only that tab.",
+      "Read a doc: its tab tree (ids, versions, urls), each tab's markdown and the project's facts (follow them). Pass tabId to read only that tab; a doc link /d/<docId>/<tabId> gives both.",
     inputSchema: {
       type: "object",
       properties: { docId: { type: "string" }, tabId: { type: "string" } },
