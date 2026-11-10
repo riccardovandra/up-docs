@@ -214,7 +214,8 @@ class Draft {
     if (this.structural) {
       this.calc = computeAll(this.sheets, this.calc.options);
       this.fullRecompute = true;
-    } else if (this.pending.size > 0) {
+    } else {
+      // Always runs: TODAY/NOW refresh on every accepted edit list, even metadata-only ones.
       const changed: Array<{ sheetId: SheetId; key: number }> = [];
       for (const [sheetId, keys] of this.pending) for (const key of keys) changed.push({ sheetId, key });
       const r = recalcChanged(this.calc, this.sheets, changed);
@@ -449,10 +450,12 @@ function grow(draft: Draft, sheet: MutableSheet, row: number, col: number): void
   if (row >= sheet.rowCount) {
     sheet.rowCount = row + 1;
     draft.markMeta(sheet);
+    draft.markStructural(); // open ranges (A:A, F2:F) grow with the sheet
   }
   if (col >= sheet.columnCount) {
     sheet.columnCount = col + 1;
     draft.markMeta(sheet);
+    draft.markStructural();
   }
 }
 

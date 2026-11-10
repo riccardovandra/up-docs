@@ -193,9 +193,24 @@ export function collectRefs(node: Node, out: AreaRef[] = []): AreaRef[] {
       break;
     case "call":
       for (const a of node.args) collectRefs(a, out);
+      if ((node.name === "SUMIF" || node.name === "AVERAGEIF") && node.args[0]?.kind === "ref" && node.args[2]?.kind === "ref") {
+        // The target is resized to the criteria range's shape; depend on the cells it really reads.
+        out.push(resizedTarget(node.args[0].ref, node.args[2].ref));
+      }
       break;
   }
   return out;
+}
+
+function resizedTarget(shape: AreaRef, target: AreaRef): AreaRef {
+  const span = (start: number | null, end: number | null, at: number | null): number | null =>
+    end === null || at === null ? null : at + (end - (start ?? 0));
+  return {
+    ...target,
+    single: false,
+    endRow: span(shape.startRow, shape.endRow, target.startRow ?? 0),
+    endCol: span(shape.startCol, shape.endCol, target.startCol ?? 0),
+  };
 }
 
 /** Whether the formula calls TODAY or NOW and must recompute on every change. */

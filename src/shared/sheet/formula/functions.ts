@@ -788,9 +788,40 @@ export function isKnownFunction(name: string): boolean {
 /** Names of every supported function. */
 export const FUNCTION_NAMES: ReadonlyArray<string> = Object.keys(FUNCTIONS).sort();
 
+/** Argument positions that must be ranges; an error there (e.g. a deleted sheet's #REF!) is the result. */
+function rangeArgs(name: string, count: number): number[] {
+  const every = (from: number) => Array.from({ length: count }, (_, i) => i).filter((i) => i >= from && (i - from) % 2 === 0);
+  switch (name) {
+    case "SUMIF":
+    case "AVERAGEIF":
+      return [0, 2];
+    case "SUMIFS":
+    case "AVERAGEIFS":
+      return [0, ...every(1)];
+    case "COUNTIF":
+    case "COUNTIFS":
+      return every(0);
+    case "VLOOKUP":
+    case "HLOOKUP":
+    case "MATCH":
+      return [1];
+    case "XLOOKUP":
+      return [1, 2];
+    case "INDEX":
+    case "COUNTBLANK":
+      return [0];
+    default:
+      return [];
+  }
+}
+
 export function callFunction(name: string, args: ReadonlyArray<Value>, ctx: EvalContext): Value {
   const spec = FUNCTIONS[name];
   if (!spec) return err("#NAME?");
   if (args.length < spec.min || args.length > spec.max) return err("#N/A");
+  for (const i of rangeArgs(name, args.length)) {
+    const a = args[i];
+    if (isError(a)) return a;
+  }
   return spec.fn(args, ctx);
 }
