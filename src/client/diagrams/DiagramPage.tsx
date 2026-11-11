@@ -21,6 +21,8 @@ import { docPath, navigate } from "../router.ts";
 import { DiagramEditor } from "./DiagramEditor.tsx";
 import { type DiagramComments, diagramCommentsApi } from "./diagramCommentsApi.ts";
 import { DiagramReviewCanvas } from "./DiagramReview.tsx";
+import { PageTabs, usePreloadedPages, useUrlPage } from "./PageTabs.tsx";
+import { openCountsByPage } from "./pageTabsLogic.ts";
 import { subscribeRefresh, watchDiagram } from "./diagramRefresh.ts";
 import { diagramErrorMessage, diagramsApi, subscribeDiagram } from "./diagramsApi.ts";
 import { ThemeMenu } from "./ThemeMenu.tsx";
@@ -108,12 +110,17 @@ export function DiagramPage(props: { readonly diagramId: string }) {
   const [renaming, setRenaming] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [review, setReview] = useState(false);
-  const [pageIndex, setPageIndex] = useState(0);
   const { comments, reload: reloadComments } = useDiagramComments(
     diagramId,
     diagram?.version ?? null,
     review,
   );
+  const pageNames =
+    comments && comments.pages.length > 0
+      ? comments.pages.map((page) => page.name)
+      : (diagram?.picturePages ?? [null]);
+  const [shownPage, showPage] = useUrlPage(pageNames);
+  usePreloadedPages(diagram, pageNames, shownPage);
   const features = useEmbedFeatures();
   const hostTakesDiagrams = features?.includes("add-diagram-comment-to-chat") ?? false;
 
@@ -190,11 +197,6 @@ export function DiagramPage(props: { readonly diagramId: string }) {
   }
 
   const { canEdit } = diagram;
-  const pageNames =
-    comments && comments.pages.length > 0
-      ? comments.pages.map((page) => page.name)
-      : (diagram.picturePages ?? [null]);
-  const shownPage = Math.min(pageIndex, Math.max(0, pageNames.length - 1));
   const pageName = pageNames[shownPage] ?? null;
   const threads = comments?.threads ?? [];
   const openCount = threads.filter((thread) => thread.resolvedAt === null).length;
@@ -322,22 +324,6 @@ export function DiagramPage(props: { readonly diagramId: string }) {
 
       <div className="diagram-viewer">
         <div className="diagram-stage">
-          {pageNames.length > 1 ? (
-            <div className="diagram-pages" role="tablist" aria-label="Pages">
-              {pageNames.map((name, index) => (
-                <button
-                  key={`${index}:${name}`}
-                  type="button"
-                  role="tab"
-                  aria-selected={index === shownPage}
-                  className="diagram-page-tab"
-                  onClick={() => setPageIndex(index)}
-                >
-                  {name ?? `Page ${index + 1}`}
-                </button>
-              ))}
-            </div>
-          ) : null}
           {(() => {
             const picture = (
               <DiagramReviewCanvas
@@ -446,9 +432,18 @@ export function DiagramPage(props: { readonly diagramId: string }) {
         </aside>
       </div>
 
+      <PageTabs
+        names={pageNames}
+        active={shownPage}
+        onSelect={showPage}
+        openCounts={openCountsByPage(threads, pageNames)}
+        keys={!editing && !renaming}
+      />
+
       {editing ? (
         <DiagramEditor
           target={{ kind: "existing", diagramId }}
+          startPage={shownPage}
           onClose={() => {
             setEditing(false);
             void reload();

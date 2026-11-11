@@ -36,6 +36,8 @@ const plural = (count: number, word: string) => `${count} ${word}${count === 1 ?
  */
 export function DiagramEditor(props: {
   readonly target: DiagramEditorTarget;
+  /** The page the editor opens on, counted from 0; the first page when absent. */
+  readonly startPage?: number;
   /** After every save that reached the server, before any exit. */
   readonly onSaved?: (diagram: DiagramSummary) => void;
   readonly onClose: (saved: DiagramSummary | null) => void;
@@ -45,6 +47,7 @@ export function DiagramEditor(props: {
   const callbacks = useRef(props);
   callbacks.current = props;
   const [target] = useState(props.target);
+  const [startPage] = useState(props.startPage ?? 0);
   const [state, setState] = useState<EditorSessionState>({
     phase: "opening",
     title: target.kind === "new" ? (target.title ?? DEFAULT_DIAGRAM_TITLE) : "",
@@ -57,7 +60,7 @@ export function DiagramEditor(props: {
     const parent = stage.current;
     if (!parent) return;
     const frame = mountDrawioFrame({
-      url: drawioEditorUrl({ dark: appIsDark() }),
+      url: drawioEditorUrl({ dark: appIsDark(), page: startPage }),
       parent,
       title: "Draw.io editor",
     });

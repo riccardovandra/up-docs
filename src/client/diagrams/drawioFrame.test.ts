@@ -70,6 +70,9 @@ describe("the Draw.io URLs", () => {
       configure: "1",
     });
     expect(new URL(drawioEditorUrl({ dark: false })).searchParams.get("dark")).toBe("0");
+    // The page the view shows is the page the editor opens on; the first needs no parameter.
+    expect(new URL(drawioEditorUrl({ dark: false, page: 2 })).searchParams.get("page")).toBe("2");
+    expect(new URL(drawioEditorUrl({ dark: false, page: 0 })).searchParams.has("page")).toBe(false);
     const renderer = new URL(DRAWIO_RENDERER_URL);
     expect(renderer.origin).toBe(DRAWIO_ORIGIN);
     expect(Object.fromEntries(renderer.searchParams)).toMatchObject({ embed: "1", proto: "json" });
