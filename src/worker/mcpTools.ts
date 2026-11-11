@@ -75,6 +75,14 @@ import {
 } from "../shared/drawioModel.ts";
 import { IMAGE_TYPES, MAX_IMAGE_BYTES } from "../shared/images.ts";
 import { groupThreads } from "../shared/threads.ts";
+import {
+  layoutPage,
+  MAX_DIAGRAM_COMMENT_LENGTH,
+  pinPlacement,
+  type DiagramComment,
+  type DiagramThread,
+} from "../shared/diagramComments.ts";
+import { readDrawioLayout, type DrawioPageLayout } from "../shared/drawioModel.ts";
 import { describeWidgetProblems } from "../shared/widget/check.ts";
 import { findWidgetFences, spliceFenceSource } from "../shared/widget/fence.ts";
 import { MAX_LABEL_LENGTH, rewriteLabel } from "../shared/widget/rewrite.ts";
@@ -83,7 +91,16 @@ import * as Access from "./access.ts";
 import { importDeps, inviteByEmail, type ApiDeps } from "./api.ts";
 import type { Principal } from "./auth.ts";
 import * as Comments from "./comments.ts";
+import * as DiagramComments from "./diagramComments.ts";
 import * as Diagrams from "./diagrams.ts";
+import * as DiagramThemes from "./diagramThemes.ts";
+import { isDiagramThemeId, restyleDiagram } from "../shared/diagramTheme.ts";
+import {
+  effectiveThemeBrief,
+  ROLE_COLOUR_FORMAT,
+  shouldApplyTheme,
+  themeListing,
+} from "./mcpThemes.ts";
 import * as DocThreads from "./docThreads.ts";
 import * as Docs from "./docs.ts";
 import * as ImageImport from "./imageImport.ts";
@@ -864,6 +881,84 @@ async function drawioWith(
   }
 }
 
+const diagramReplySummary = (comment: DiagramComment) => ({
+  commentId: comment.id,
+  author: comment.author,
+  authorKind: comment.authorKind,
+  body: comment.body,
+  createdAt: new Date(comment.createdAt).toISOString(),
+});
+
+/**
+ * A diagram thread for an agent: where it is pinned (page, shape id, the
+ * shape's label then and now) and whether the shape is still there.
+ */
+function diagramThreadSummary(
+  ctx: ToolContext,
+  thread: DiagramThread,
+  layouts: ReadonlyArray<DrawioPageLayout>,
+) {
+  const { anchor } = thread;
+  const pin = pinPlacement(anchor, layoutPage(layouts, anchor.page));
+  return {
+    ...diagramReplySummary(thread),
+    diagramId: thread.diagramId,
+    url: drawioUrl(ctx, thread.diagramId),
+    page: anchor.page,
+    shapeId: anchor.shapeId,
+    // The label when the thread started; `shapeLabel` is what the shape says now.
+    quote: thread.quote,
+    ...(pin.shape ? { shapeLabel: pin.shape.label } : {}),
+    point: { x: Math.round(anchor.x), y: Math.round(anchor.y) },
+    status: pin.status,
+    resolved: thread.resolvedAt !== null,
+    replies: thread.replies.map(diagramReplySummary),
+  };
+}
+
+async function diagramThreads(ctx: ToolContext, diagram: Diagram, includeResolved: boolean) {
+  const [threads, layouts] = await Promise.all([
+    DiagramComments.listDiagramThreads(ctx.deps.db, diagram.id),
+    readDrawioLayout(diagram.xml),
+  ]);
+  return threads
+    .filter((thread) => includeResolved || thread.resolvedAt === null)
+    .map((thread) => diagramThreadSummary(ctx, thread, layouts ?? []));
+}
+
+/**
+ * The diagram comment a reply_comment or resolve_comment names: always when
+ * `diagramId` is given, else when `commentId` is no doc comment. Null for a
+ * doc comment. The token user must manage the diagram.
+ */
+async function diagramCommentArg(
+  ctx: ToolContext,
+  args: Args,
+  commentId: string,
+): Promise<{ readonly comment: DiagramComment; readonly diagram: Diagram } | null> {
+  const diagramId = args.diagramId === undefined ? null : drawioIdArg(args);
+  if (diagramId === null) {
+    try {
+      await Comments.getComment(ctx.deps.db, commentId);
+      return null;
+    } catch (cause) {
+      if (!(cause instanceof Docs.NotFoundError)) throw cause;
+    }
+  }
+  let comment: DiagramComment;
+  try {
+    comment = await DiagramComments.getDiagramComment(ctx.deps.db, commentId);
+  } catch (cause) {
+    if (!(cause instanceof Docs.NotFoundError)) throw cause;
+    return fail("not_found", "No comment with that id.");
+  }
+  if (diagramId !== null && comment.diagramId !== diagramId) {
+    fail("not_found", "No comment with that id on this diagram.");
+  }
+  const { diagram } = await drawioWith(ctx, comment.diagramId, "edit");
+  return { comment, diagram };
+}
+
 /**
  * The `xml` argument: Draw.io XML that the store accepts and the editor can
  * open, as one bare `<mxGraphModel>` (one page) or an `<mxfile>` of named
@@ -1524,25 +1619,26 @@ export const TOOLS = [
   {
     name: "list_comments",
     description:
-      'List comment threads on a doc (optionally one tab): the quoted passage, the structured `anchor` for a table cell ({kind:"cell",blockId,rowId,colId}) or diagram label, whether the thread still has its place (`status`: "anchored", "text_removed" for a quote whose text is gone, "orphaned" for a deleted cell or label), and every reply. Resolved threads are left out unless includeResolved is true.',
+      'List comment threads on a doc (optionally one tab): the quoted passage, the structured `anchor` for a table cell ({kind:"cell",blockId,rowId,colId}) or diagram label, whether the thread still has its place (`status`: "anchored", "text_removed" for a quote whose text is gone, "orphaned" for a deleted cell or label), and every reply. Resolved threads are left out unless includeResolved is true. Pass diagramId (id or link) instead of docId for a Draw.io diagram\'s threads: each has page, shapeId, quote (the shape label), point and status ("shape", "point", "shape_removed").',
     inputSchema: {
       type: "object",
       properties: {
         docId: { type: "string" },
         tabId: { type: "string" },
+        diagramId: { type: "string" },
         includeResolved: { type: "boolean" },
       },
-      required: ["docId"],
     },
   },
   {
     name: "create_comment",
     description:
-      'Start a comment thread on a passage. `quote` is exact text from the tab (markdown syntax is ignored) and must appear exactly once; include more surrounding words if it repeats. To comment on a ```t3-table cell, pass `anchor` {"kind":"cell","blockId":<table id>,"rowId","colId"} instead of a quote.',
+      'Start a comment thread on a passage. `quote` is exact text from the tab (markdown syntax is ignored) and must appear exactly once; include more surrounding words if it repeats. To comment on a ```t3-table cell, pass `anchor` {"kind":"cell","blockId":<table id>,"rowId","colId"} instead of a quote. On a Draw.io diagram, pass diagramId instead of tabId and anchor {page, shapeId} or {page, x, y}.',
     inputSchema: {
       type: "object",
       properties: {
         tabId: { type: "string" },
+        diagramId: { type: "string" },
         quote: { type: "string" },
         anchor: {
           type: "object",
@@ -1551,15 +1647,19 @@ export const TOOLS = [
         },
         body: { type: "string", description: "The comment, in markdown." },
       },
-      required: ["tabId", "body"],
+      required: ["body"],
     },
   },
   {
     name: "reply_comment",
-    description: "Reply in a comment thread.",
+    description: "Reply in a comment thread, on a doc or (with diagramId) a Draw.io diagram.",
     inputSchema: {
       type: "object",
-      properties: { commentId: { type: "string" }, body: { type: "string" } },
+      properties: {
+        commentId: { type: "string" },
+        body: { type: "string" },
+        diagramId: { type: "string" },
+      },
       required: ["commentId", "body"],
     },
   },
@@ -1571,6 +1671,7 @@ export const TOOLS = [
       type: "object",
       properties: {
         commentId: { type: "string" },
+        diagramId: { type: "string" },
         lesson: {
           type: "string",
           description:
@@ -1658,7 +1759,7 @@ export const TOOLS = [
   {
     name: "read_drawio",
     description:
-      'Read one Draw.io diagram from the library, by its id (the first line of a ```t3-drawio block) or its link (<origin>/diagrams/<id>): title, project, the docs that use it, pageNames (its pages, in order), its shapes and its connections ("A -> B", "A -[label]-> B"), per page when the file has several, and its version. The current picture of the first page, or of `page`, comes attached as a PNG image when there is one. Pass includeXml: true for the Draw.io XML (an <mxfile> holding every page when there are several), which only the diagram\'s creator and the workspace admin get; you need it to change the diagram with update_drawio.',
+      'Read one Draw.io diagram from the library, by its id (the first line of a ```t3-drawio block) or its link (<origin>/diagrams/<id>): title, project, the docs that use it, pageNames (its pages, in order), its shapes and its connections ("A -> B", "A -[label]-> B"), per page when the file has several, its version, and openComments (open comment threads with page, shapeId and quote). The current picture of the first page, or of `page`, comes attached as a PNG image when there is one. Pass includeXml: true for the Draw.io XML (an <mxfile> holding every page when there are several), which only the diagram\'s creator and the workspace admin get; you need it to change the diagram with update_drawio.',
     inputSchema: {
       type: "object",
       properties: {
@@ -1678,7 +1779,7 @@ export const TOOLS = [
   {
     name: "create_drawio",
     description:
-      'Draw a new Draw.io diagram into the library from Draw.io XML (format_guide {topic: "drawio"} first). File it like create_doc: projectKey (with projectName if the project is new) or projectId; omit both for no project. Returns the id, the link and `block`, the exact ```t3-drawio block to paste into a doc tab. It opens in the same editor as a hand-drawn diagram. Its picture appears the first time a person who manages the diagram opens it.',
+      'Draw a new Draw.io diagram into the library from Draw.io XML (format_guide {topic: "drawio"} first). File it like create_doc: projectKey (with projectName if the project is new) or projectId; omit both for no project. Returns the id, the link and `block`, the exact ```t3-drawio block to paste into a doc tab. It opens in the same editor as a hand-drawn diagram. Its picture appears the first time a person who manages the diagram opens it. `theme` gives the project\'s diagram theme and its style lines; when the project has a theme and no cell sets its own fillColor, strokeColor or fontColor, the XML is restyled to it before it is stored (applyTheme: true always restyles, false never).',
     inputSchema: {
       type: "object",
       properties: {
@@ -1690,6 +1791,11 @@ export const TOOLS = [
           type: "string",
           description:
             'The whole diagram as uncompressed Draw.io XML: one <mxGraphModel> for one page, or an <mxfile> holding a <diagram name="..."> per page, each with its <mxGraphModel>.',
+        },
+        applyTheme: {
+          type: "boolean",
+          description:
+            "true: restyle the XML to the project's theme before storing it. false: store it as written. Left out: restyle only when the project has a theme and no cell sets a colour.",
         },
       },
       required: ["title", "xml"],
@@ -1718,6 +1824,34 @@ export const TOOLS = [
         },
       },
       required: ["diagramId", "baseVersion"],
+    },
+  },
+  {
+    name: "list_diagram_themes",
+    description:
+      'List the Draw.io diagram themes you can use: the built-ins (Neutral, the default, and Uplifted) and your own custom themes. Each gives its themeId, its default box role and every role\'s colours as "fill/line/text". People make and edit themes in Settings; agents only choose them. read_drawio and create_drawio give a diagram\'s theme with the exact style lines to write.',
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "set_diagram_theme",
+    description:
+      "Choose the theme of one Draw.io diagram you manage (diagramId), or the default theme of a project's diagrams (projectKey or projectId; workspace admin only). themeId null makes the diagram follow its project again, or the project fall back to Neutral. Setting a theme changes no drawing: pass restyle: true (diagrams only) to also restyle the current version to the theme and save it as a new version; the result has the restyle summary and the new version.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        diagramId: {
+          type: "string",
+          description: "The diagram's id, or its link.",
+        },
+        projectKey: { type: "string" },
+        projectId: { type: "string" },
+        themeId: {
+          type: ["string", "null"],
+          description: "A themeId from list_diagram_themes, or null.",
+        },
+        restyle: { type: "boolean" },
+      },
+      required: ["themeId"],
     },
   },
   {
@@ -2372,6 +2506,18 @@ const handlers: Record<
   },
 
   list_comments: async (args, ctx) => {
+    if (args.diagramId !== undefined) {
+      const { diagram } = await drawioWith(ctx, drawioIdArg(args), "view");
+      return {
+        diagramId: diagram.id,
+        title: diagram.title,
+        url: drawioUrl(ctx, diagram.id),
+        threads: await diagramThreads(ctx, diagram, args.includeResolved === true),
+      };
+    }
+    if (args.docId === undefined) {
+      fail("invalid_argument", 'Pass "docId" for a doc\'s comments, or "diagramId" for a diagram\'s.');
+    }
     const docId = requireString(args, "docId");
     const tabId = optionalString(args, "tabId");
     const includeResolved = args.includeResolved === true;
@@ -2409,6 +2555,28 @@ const handlers: Record<
   },
 
   create_comment: async (args, ctx) => {
+    if (args.diagramId !== undefined) {
+      const body = requireString(args, "body", MAX_DIAGRAM_COMMENT_LENGTH);
+      const { diagram } = await drawioWith(ctx, drawioIdArg(args), "edit");
+      let placed: Awaited<ReturnType<typeof DiagramComments.resolveNewAnchor>>;
+      try {
+        placed = await DiagramComments.resolveNewAnchor(diagram.xml, args.anchor ?? {});
+      } catch (cause) {
+        if (cause instanceof DiagramComments.InvalidDiagramCommentError) {
+          return fail(cause.code, `${cause.message} read_drawio lists the pages and shape ids.`);
+        }
+        throw cause;
+      }
+      const thread = await DiagramComments.createDiagramThread(ctx.deps.db, {
+        diagramId: diagram.id,
+        ...placed,
+        body,
+        author: commentAuthor(ctx),
+        now: ctx.deps.now(),
+      });
+      const layouts = (await readDrawioLayout(diagram.xml)) ?? [];
+      return { comment: diagramThreadSummary(ctx, thread, layouts) };
+    }
     const tabId = requireString(args, "tabId");
     const body = requireString(args, "body", Comments.MAX_COMMENT_LENGTH);
     if (args.anchor !== undefined && args.anchor !== null) {
@@ -2554,6 +2722,19 @@ const handlers: Record<
   reply_comment: async (args, ctx) => {
     const commentId = requireString(args, "commentId");
     const body = requireString(args, "body", Comments.MAX_COMMENT_LENGTH);
+    const onDiagram = await diagramCommentArg(ctx, args, commentId);
+    if (onDiagram) {
+      const reply = await DiagramComments.replyDiagramThread(ctx.deps.db, {
+        commentId,
+        body,
+        author: commentAuthor(ctx),
+        now: ctx.deps.now(),
+      });
+      return {
+        reply: { ...diagramReplySummary(reply), threadId: reply.parentId },
+        diagramId: onDiagram.diagram.id,
+      };
+    }
     const target = await load(
       Comments.getComment(ctx.deps.db, commentId),
       "comment",
@@ -2570,6 +2751,41 @@ const handlers: Record<
 
   resolve_comment: async (args, ctx) => {
     const commentId = requireString(args, "commentId");
+    const onDiagram = await diagramCommentArg(ctx, args, commentId);
+    if (onDiagram) {
+      const lesson = args.lesson === undefined ? undefined : factTextArg(args, "lesson");
+      const projectId = onDiagram.diagram.projectId;
+      if (lesson !== undefined) {
+        if (projectId === null) {
+          fail("no_project", "This diagram is in no project, so the lesson has nowhere to live.");
+        }
+        await requireFactEditor(ctx, projectId);
+      }
+      const thread = await DiagramComments.resolveDiagramThread(ctx.deps.db, {
+        commentId,
+        resolved: true,
+        now: ctx.deps.now(),
+      });
+      if (lesson === undefined || projectId === null) {
+        return { threadId: thread.id, diagramId: thread.diagramId, resolved: true };
+      }
+      const fact = await load(
+        Facts.addFact(ctx.deps.db, {
+          projectId,
+          text: lesson,
+          createdBy: ctx.principal.userId,
+          sourceCommentId: thread.id,
+          now: ctx.deps.now(),
+        }),
+        "project",
+      );
+      return {
+        threadId: thread.id,
+        diagramId: thread.diagramId,
+        resolved: true,
+        fact: { factId: fact.factId, text: fact.text },
+      };
+    }
     const target = await load(
       Comments.getComment(ctx.deps.db, commentId),
       "comment",
@@ -2793,7 +3009,7 @@ const handlers: Record<
         "Only the diagram's creator and the workspace admin get its Draw.io XML. Call read_drawio without includeXml for its shapes, connections and picture.",
       );
     }
-    const [project, usage, picture, model] = await Promise.all([
+    const [project, usage, picture, model, comments] = await Promise.all([
       drawioProject(ctx, diagram.projectId),
       Diagrams.diagramUsage(ctx.deps.db, {
         diagramId,
@@ -2801,6 +3017,7 @@ const handlers: Record<
       }),
       drawioPicture(ctx, diagram, page),
       readDrawio(diagram.xml),
+      diagramThreads(ctx, diagram, false),
     ]);
     const names = pageNames(model);
     const body = {
@@ -2814,6 +3031,11 @@ const handlers: Record<
         ? { usedInOtherDocs: usage.otherDocs }
         : {}),
       ...describeDrawio(model, FULL_DRAWIO),
+      // Open comment threads, pinned to a shape (shapeId) or a point on a page.
+      ...(comments.length > 0 ? { openComments: comments } : {}),
+      theme: effectiveThemeBrief(
+        await DiagramThemes.effectiveDiagramTheme(ctx.deps.db, diagramId),
+      ),
       picture: picture.note,
       ...(args.includeXml === true
         ? {
@@ -2834,8 +3056,34 @@ const handlers: Record<
 
   create_drawio: async (args, ctx) => {
     const title = requireString(args, "title", MAX_DIAGRAM_TITLE_LENGTH);
-    const { xml, model } = await drawioXmlArg(args);
+    if (args.applyTheme != null && typeof args.applyTheme !== "boolean") {
+      fail("invalid_argument", '"applyTheme" must be true or false.');
+    }
+    const applyTheme = args.applyTheme ?? undefined;
+    const written = await drawioXmlArg(args);
     const projectId = await targetProject(ctx, args);
+    const effective = await load(
+      DiagramThemes.effectiveProjectTheme(ctx.deps.db, projectId),
+      "project",
+    );
+    let { xml, model } = written;
+    let applied: string;
+    if (await shouldApplyTheme(applyTheme, effective, xml)) {
+      const restyled = await restyleDiagram(xml, effective.theme);
+      if (!restyled.ok) {
+        fail("invalid_xml", `The Draw.io XML could not be restyled (${restyled.error}). Nothing was saved.`, DRAWIO_GUIDE);
+      }
+      xml = restyled.xml;
+      model = await readDrawio(xml);
+      applied = `Restyled to the theme "${effective.theme.name}" before saving: ${restyled.summary.changed} cells changed. Write new cells with theme.styleGuide.`;
+    } else {
+      applied =
+        applyTheme === false
+          ? "Stored as written (applyTheme: false)."
+          : effective.source === "default"
+            ? "Stored as written: the project has no theme of its own (Neutral, Draw.io's own look)."
+            : `Stored as written, keeping the colours its cells set. set_diagram_theme {diagramId, themeId: "${effective.theme.id}", restyle: true} restyles it to the theme.`;
+    }
     const diagram = await load(
       Diagrams.createDiagram(ctx.deps.db, {
         projectId,
@@ -2846,7 +3094,10 @@ const handlers: Record<
       }),
       "project",
     );
-    return drawioWritten(ctx, diagram, model);
+    return {
+      ...drawioWritten(ctx, diagram, model),
+      theme: { ...effectiveThemeBrief(effective), applied },
+    };
   },
 
   update_drawio: async (args, ctx) => {
@@ -2912,14 +3163,116 @@ const handlers: Record<
       "Draw.io diagram",
     );
     if (!result.ok) return conflict(result.conflict.version);
-    return drawioWritten(
-      ctx,
-      result.diagram,
-      xml === undefined || xml !== written?.xml
-        ? await readDrawio(result.diagram.xml)
-        : written.model,
-      notes,
-    );
+    return {
+      ...drawioWritten(
+        ctx,
+        result.diagram,
+        xml === undefined || xml !== written?.xml
+          ? await readDrawio(result.diagram.xml)
+          : written.model,
+        notes,
+      ),
+      theme: effectiveThemeBrief(
+        await DiagramThemes.effectiveDiagramTheme(ctx.deps.db, diagramId),
+      ),
+    };
+  },
+
+  list_diagram_themes: async (_args, ctx) => {
+    const { userId } = ctx.principal;
+    const list = await DiagramThemes.listDiagramThemes(ctx.deps.db, userId);
+    return {
+      themes: list.themes.map((theme) => themeListing(theme, userId)),
+      defaultThemeId: list.defaultThemeId,
+      roleColours: ROLE_COLOUR_FORMAT,
+    };
+  },
+
+  set_diagram_theme: async (args, ctx) => {
+    const { db } = ctx.deps;
+    const { userId } = ctx.principal;
+    if (!Object.hasOwn(args, "themeId") || (args.themeId !== null && !isDiagramThemeId(args.themeId))) {
+      fail(
+        "invalid_argument",
+        '"themeId" must be a themeId from list_diagram_themes, or null to follow the default.',
+      );
+    }
+    const themeId = args.themeId as string | null;
+    if (args.restyle != null && typeof args.restyle !== "boolean") {
+      fail("invalid_argument", '"restyle" must be true or false.');
+    }
+    const forProject = args.projectId != null || args.projectKey != null;
+    if (forProject === (args.diagramId != null)) {
+      fail("invalid_argument", 'Pass "diagramId", or "projectKey" or "projectId" for a project\'s default, not both.');
+    }
+    const usable = async (id: string) => {
+      try {
+        return await DiagramThemes.requireUsableDiagramTheme(db, { themeId: id, userId });
+      } catch (cause) {
+        if (cause instanceof Docs.NotFoundError) {
+          return fail("not_found", "No theme with that id that you can use. list_diagram_themes lists them.");
+        }
+        throw cause;
+      }
+    };
+
+    if (forProject) {
+      if (args.restyle === true) {
+        fail("invalid_argument", '"restyle" restyles one diagram: pass it with "diagramId".');
+      }
+      const project = await existingProject(ctx, args);
+      if (!Access.isAdmin(userId)) {
+        fail("forbidden", "Only the workspace admin sets a project's default diagram theme. set_diagram_theme {diagramId, themeId} sets one diagram's.");
+      }
+      if (themeId !== null) await usable(themeId);
+      await DiagramThemes.setProjectDiagramTheme(db, { projectId: project.id, themeId });
+      return {
+        projectId: project.id,
+        theme: effectiveThemeBrief(await DiagramThemes.effectiveProjectTheme(db, project.id)),
+        note: "New diagrams in the project start with this theme; diagrams with a theme of their own keep it. No drawing was changed.",
+      };
+    }
+
+    const diagramId = drawioIdArg(args);
+    const { diagram } = await drawioWith(ctx, diagramId, "edit");
+    if (themeId !== null) await usable(themeId);
+    await DiagramThemes.setDiagramTheme(db, { diagramId, themeId });
+    const effective = await DiagramThemes.effectiveDiagramTheme(db, diagramId);
+    const theme = effectiveThemeBrief(effective);
+    if (args.restyle !== true) {
+      return {
+        diagramId,
+        version: diagram.version,
+        theme,
+        note: 'No drawing was changed. Pass restyle: true to restyle it to the theme, or write new cells with theme.styleGuide.',
+      };
+    }
+    const result = await DiagramThemes.restyleStoredDiagram(db, {
+      diagram,
+      theme: effective.theme,
+      baseVersion: diagram.version,
+      now: ctx.deps.now(),
+    });
+    if (!result.ok) {
+      if ("invalidXml" in result) {
+        fail("invalid_xml", `The theme is set, but the diagram's XML could not be read to restyle it: ${result.invalidXml}.`);
+      }
+      fail(
+        "version_conflict",
+        "The theme is set, but someone saved the diagram while it was being restyled. Call set_diagram_theme again with restyle: true.",
+        { currentVersion: result.conflict.version },
+      );
+    }
+    return {
+      diagramId,
+      version: result.diagram.version,
+      theme,
+      restyle: result.summary,
+      note:
+        result.summary.changed === 0
+          ? "Already in the theme: nothing changed, so the version is the same."
+          : `Restyled ${result.summary.changed} cells and saved them as version ${result.diagram.version}. Its picture is redrawn the next time someone opens it or a doc that links it.`,
+    };
   },
 
   prepare_claude_doc_push: async (args, ctx) => {

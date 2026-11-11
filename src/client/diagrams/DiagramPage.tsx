@@ -1,5 +1,13 @@
 import { useCallback, useEffect, useState, type MouseEvent } from "react";
 
+import {
+  diagramCommentChatText,
+  diagramUrl,
+  type DiagramCommentChat,
+  type DiagramThread,
+} from "../../shared/diagramComments.ts";
+import { diagramCommentForChat } from "../../shared/embed.ts";
+
 import type { DiagramUsage, DiagramView } from "../../shared/drawio.ts";
 import type { Project } from "../../shared/protocol.ts";
 import { ApiError, api } from "../api.ts";
@@ -8,9 +16,11 @@ import { HomeLink } from "../home/HomeLink.tsx";
 import { DiagramIcon, DocIcon, LinkIcon, PenIcon } from "../home/icons.tsx";
 import { TitleDialog } from "../home/TitleDialog.tsx";
 import { useLockedProject } from "../lockedProject.ts";
+import { postToEmbedParent, useEmbedFeatures } from "../embedBridge.ts";
 import { docPath, navigate } from "../router.ts";
 import { DiagramEditor } from "./DiagramEditor.tsx";
-import { DiagramPicture } from "./DiagramPicture.tsx";
+import { type DiagramComments, diagramCommentsApi } from "./diagramCommentsApi.ts";
+import { DiagramReviewCanvas } from "./DiagramReview.tsx";
 import { subscribeRefresh, watchDiagram } from "./diagramRefresh.ts";
 import { diagramErrorMessage, diagramsApi, subscribeDiagram } from "./diagramsApi.ts";
 import { ThemeMenu } from "./ThemeMenu.tsx";
@@ -27,6 +37,61 @@ const follow = (path: string) => (event: MouseEvent) => {
 
 const plural = (count: number, word: string) => `${count} ${word}${count === 1 ? "" : "s"}`;
 
+/** While review mode is on and the page is seen, threads are re-read this often. */
+const REVIEW_POLL_MS = 5_000;
+
+async function copyText(text: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    // A frame without clipboard-write permission: the older copy command still works there.
+    const area = document.createElement("textarea");
+    area.value = text;
+    area.setAttribute("readonly", "");
+    area.style.position = "fixed";
+    area.style.opacity = "0";
+    document.body.append(area);
+    area.select();
+    try {
+      return document.execCommand("copy");
+    } catch {
+      return false;
+    } finally {
+      area.remove();
+    }
+  }
+}
+
+/**
+ * The diagram's comment threads and page layouts, re-read when the page's
+ * diagram refresh runs (its 20 s timer, focus, the editor closing), when the
+ * diagram's version moves, and every few seconds in review mode. That is how
+ * an agent's reply or resolve reaches an open page.
+ */
+function useDiagramComments(diagramId: string, version: number | null, review: boolean) {
+  const [comments, setComments] = useState<DiagramComments | null>(null);
+  const reload = useCallback(async () => {
+    try {
+      setComments(await diagramCommentsApi.list(diagramId));
+    } catch {
+      // Offline, or the diagram is gone: the page says so on its own.
+    }
+  }, [diagramId]);
+  useEffect(() => {
+    if (version !== null) void reload();
+  }, [reload, version]);
+  useEffect(() => subscribeRefresh(() => void reload()), [reload]);
+  useEffect(() => {
+    if (!review) return;
+    const timer = setInterval(() => {
+      if (document.visibilityState === "visible") void reload();
+    }, REVIEW_POLL_MS);
+    return () => clearInterval(timer);
+  }, [reload, review]);
+  return { comments, setComments, reload };
+}
+
 /**
  * One diagram's own page: its picture, and for its creator and the admin the
  * way to rename, delete and edit it, and the docs that link it. Someone who
@@ -42,6 +107,15 @@ export function DiagramPage(props: { readonly diagramId: string }) {
   const [editing, setEditing] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const [review, setReview] = useState(false);
+  const [pageIndex, setPageIndex] = useState(0);
+  const { comments, reload: reloadComments } = useDiagramComments(
+    diagramId,
+    diagram?.version ?? null,
+    review,
+  );
+  const features = useEmbedFeatures();
+  const hostTakesDiagrams = features?.includes("add-diagram-comment-to-chat") ?? false;
 
   const reload = useCallback(async () => {
     try {
@@ -116,6 +190,50 @@ export function DiagramPage(props: { readonly diagramId: string }) {
   }
 
   const { canEdit } = diagram;
+  const pageNames =
+    comments && comments.pages.length > 0
+      ? comments.pages.map((page) => page.name)
+      : (diagram.picturePages ?? [null]);
+  const shownPage = Math.min(pageIndex, Math.max(0, pageNames.length - 1));
+  const pageName = pageNames[shownPage] ?? null;
+  const threads = comments?.threads ?? [];
+  const openCount = threads.filter((thread) => thread.resolvedAt === null).length;
+  const openOnPage = threads.some(
+    (thread) => thread.resolvedAt === null && thread.anchor.page === pageName,
+  );
+
+  /**
+   * Every comment and reply written here goes to the T3 Code chat. A T3 Code
+   * too old for diagram comments (or none) gets it on the clipboard instead.
+   */
+  const sendToChat = async (thread: DiagramThread, body: string) => {
+    const chat: DiagramCommentChat = {
+      diagramId,
+      diagramTitle: diagram.title,
+      url: diagramUrl(window.location.origin, diagramId),
+      page: thread.anchor.page,
+      commentId: thread.id,
+      quote: thread.quote,
+      body,
+    };
+    if (hostTakesDiagrams) {
+      postToEmbedParent({ type: "t3-docs:add-comment-to-chat", ...diagramCommentForChat(chat) });
+      setNotice("Added to the chat. Send your message there when you are ready.");
+      return;
+    }
+    const copied = await copyText(diagramCommentChatText(chat));
+    setNotice(
+      copied
+        ? "Saved. Copy to chat: the comment is on your clipboard, paste it into the chat."
+        : "Saved. Use Copy to chat on the thread to put it on your clipboard.",
+    );
+  };
+  const copyToChat = hostTakesDiagrams
+    ? null
+    : (thread: DiagramThread) => {
+        const last = thread.replies.findLast((reply) => reply.authorKind === "person") ?? thread;
+        void sendToChat(thread, last.body);
+      };
   const linkedDocs = usage ? new Set(usage.uses.map((use) => use.docId)).size + usage.otherDocs : 0;
   const project = projects.find((candidate) => candidate.id === diagram.projectId);
 
@@ -157,8 +275,19 @@ export function DiagramPage(props: { readonly diagramId: string }) {
           ) : null}
           <ThemeMenu diagramId={diagramId} canEdit={canEdit} />
         </div>
+        <div className="doc-header-actions">
+          {canEdit || threads.length > 0 ? (
+            <button
+              type="button"
+              className="button secondary small diagram-review-toggle"
+              aria-pressed={review}
+              onClick={() => setReview(!review)}
+            >
+              {review ? "Exit review" : "Review"} · {openCount} open
+            </button>
+          ) : null}
         {canEdit ? (
-          <div className="doc-header-actions">
+          <>
             <button
               type="button"
               className="button secondary small"
@@ -177,8 +306,9 @@ export function DiagramPage(props: { readonly diagramId: string }) {
               <PenIcon size={15} />
               Edit in Draw.io
             </button>
-          </div>
+          </>
         ) : null}
+        </div>
       </header>
 
       {notice ? (
@@ -192,20 +322,77 @@ export function DiagramPage(props: { readonly diagramId: string }) {
 
       <div className="diagram-viewer">
         <div className="diagram-stage">
-          {canEdit ? (
-            <button
-              type="button"
-              className="diagram-canvas"
-              title="Click to edit"
-              onClick={() => setEditing(true)}
-            >
-              <DiagramPicture diagramId={diagramId} diagram={diagram} />
-            </button>
-          ) : (
-            <div className="diagram-canvas">
-              <DiagramPicture diagramId={diagramId} diagram={diagram} />
+          {pageNames.length > 1 ? (
+            <div className="diagram-pages" role="tablist" aria-label="Pages">
+              {pageNames.map((name, index) => (
+                <button
+                  key={`${index}:${name}`}
+                  type="button"
+                  role="tab"
+                  aria-selected={index === shownPage}
+                  className="diagram-page-tab"
+                  onClick={() => setPageIndex(index)}
+                >
+                  {name ?? `Page ${index + 1}`}
+                </button>
+              ))}
             </div>
-          )}
+          ) : null}
+          {(() => {
+            const picture = (
+              <DiagramReviewCanvas
+                diagram={diagram}
+                page={pageName}
+                layouts={comments?.pages ?? []}
+                threads={threads}
+                review={review}
+                canComment={canEdit}
+                copyToChat={copyToChat}
+                onCreate={async (anchor, body) => {
+                  try {
+                    const thread = await diagramCommentsApi.create(diagramId, anchor, body);
+                    await reloadComments();
+                    await sendToChat(thread, body);
+                    return thread;
+                  } catch (cause) {
+                    setNotice(diagramErrorMessage(cause));
+                    throw cause;
+                  }
+                }}
+                onReply={async (thread, body) => {
+                  try {
+                    await diagramCommentsApi.reply(thread.id, body);
+                    await reloadComments();
+                    await sendToChat(thread, body);
+                  } catch (cause) {
+                    setNotice(diagramErrorMessage(cause));
+                    throw cause;
+                  }
+                }}
+                onResolve={async (thread, resolved) => {
+                  try {
+                    await diagramCommentsApi.setResolved(thread.id, resolved);
+                    await reloadComments();
+                  } catch (cause) {
+                    setNotice(diagramErrorMessage(cause));
+                  }
+                }}
+              />
+            );
+            // Click to edit, unless pins are showing: then clicks are theirs.
+            return canEdit && !review && !openOnPage ? (
+              <button
+                type="button"
+                className="diagram-canvas"
+                title="Click to edit"
+                onClick={() => setEditing(true)}
+              >
+                {picture}
+              </button>
+            ) : (
+              <div className={review ? "diagram-canvas reviewing" : "diagram-canvas"}>{picture}</div>
+            );
+          })()}
         </div>
         <aside className="diagram-side">
           {canEdit ? (

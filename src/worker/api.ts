@@ -44,13 +44,13 @@ import {
 import * as Videos from "./videos.ts";
 import * as Embeds from "./embeds.ts";
 import { matchEmbed } from "../shared/embeds.ts";
+import * as DiagramComments from "./diagramComments.ts";
 import * as Diagrams from "./diagrams.ts";
 import * as DiagramThemes from "./diagramThemes.ts";
 import {
   isDiagramThemeId,
   parseDiagramThemeName,
   parseDiagramThemeTokens,
-  restyleDiagram,
 } from "../shared/diagramTheme.ts";
 import {
   DEFAULT_DIAGRAM_TITLE,
@@ -59,6 +59,8 @@ import {
   MAX_DIAGRAM_REFRESH_IDS,
   MAX_DIAGRAM_TITLE_LENGTH,
 } from "../shared/drawio.ts";
+import { MAX_DIAGRAM_COMMENT_LENGTH } from "../shared/diagramComments.ts";
+import { readDrawioLayout } from "../shared/drawioModel.ts";
 import * as Sheets from "./sheets.ts";
 import {
   DEFAULT_SHEET_TITLE,
@@ -959,6 +961,11 @@ export async function handleApi(
       if (response) return response;
     }
 
+    if (resource === "diagram-comments" && id && segments.length === 3) {
+      const response = await handleDiagramComment(request, { id, sub, principal }, deps);
+      if (response) return response;
+    }
+
     const response = await handleComments(
       request,
       { resource, id, sub, method, url, principal },
@@ -983,6 +990,9 @@ export async function handleApi(
         },
         tooLarge ? 413 : 400,
       );
+    }
+    if (cause instanceof DiagramComments.InvalidDiagramCommentError) {
+      return json({ error: cause.code, message: cause.message }, 400);
     }
     if (cause instanceof Access.ForbiddenError) {
       return json({ error: "forbidden", required: cause.required }, 403);
@@ -1136,14 +1146,16 @@ async function handleDiagrams(
     // `?projectId=<id>` for one project, `?projectId=none` for diagrams in no project.
     const param = url.searchParams.get("projectId");
     const projectId = param === null ? undefined : param === "none" ? null : param;
-    const [diagrams, uses] = await Promise.all([
+    const [diagrams, uses, openComments] = await Promise.all([
       Diagrams.listDiagrams(deps.db, { userId, projectId }),
       Diagrams.diagramUsesById(deps.db, userId),
+      DiagramComments.openThreadCounts(deps.db),
     ]);
     return json({
       diagrams: diagrams.map((diagram) => ({
         ...diagram,
         uses: uses.get(diagram.id) ?? [],
+        openComments: openComments.get(diagram.id) ?? 0,
       })),
     });
   }
@@ -1227,6 +1239,34 @@ async function handleDiagrams(
     return result.ok ? json({ diagram: result.diagram }) : versionConflict(result.conflict);
   }
 
+  // Comment threads: anyone who sees the diagram reads them; its managers start them.
+  // `pages`: where each page's shapes sit, so pins follow their shapes. Not the source.
+  if (sub === "comments" && method === "GET") {
+    const { diagram } = await need("view");
+    const [threads, pages] = await Promise.all([
+      DiagramComments.listDiagramThreads(deps.db, id),
+      readDrawioLayout(diagram.xml),
+    ]);
+    return json({ threads, pages: pages ?? [] });
+  }
+
+  if (sub === "comments" && method === "POST") {
+    const body = await readJson(request);
+    const text = str(body.body, MAX_DIAGRAM_COMMENT_LENGTH);
+    if (!text) return error(400, "invalid_body");
+    const { diagram } = await need("edit");
+    const { anchor, quote } = await DiagramComments.resolveNewAnchor(diagram.xml, body.anchor);
+    const thread = await DiagramComments.createDiagramThread(deps.db, {
+      diagramId: id,
+      anchor,
+      quote,
+      body: text,
+      author: diagramCommentAuthor(route.principal),
+      now,
+    });
+    return json({ thread }, 201);
+  }
+
   if (sub === "uses" && method === "GET") {
     await need("edit");
     return json(await Diagrams.diagramUsage(deps.db, { diagramId: id, userId }));
@@ -1266,29 +1306,26 @@ async function handleDiagrams(
       themeId === undefined
         ? effective
         : await DiagramThemes.requireUsableDiagramTheme(deps.db, { themeId, userId });
-    if (diagram.version !== baseVersion) return versionConflict(Diagrams.diagramSummary(diagram));
     // The person's themes and the diagram's own: a box in one of their roles keeps its role.
     const { themes } = await DiagramThemes.listDiagramThemes(deps.db, userId);
-    const restyled = await restyleDiagram(diagram.xml, theme, {
+    const result = await DiagramThemes.restyleStoredDiagram(deps.db, {
+      diagram,
+      theme,
       knownThemes: [effective, ...themes].filter((each) => !each.builtIn),
-    });
-    if (!restyled.ok) {
-      return json(
-        { error: "invalid_xml", message: `The diagram's XML could not be read: ${restyled.error}.` },
-        400,
-      );
-    }
-    const result = await Diagrams.updateDiagram(deps.db, {
-      diagramId: id,
-      xml: restyled.xml,
       baseVersion,
       now,
     });
+    if (!result.ok && "invalidXml" in result) {
+      return json(
+        { error: "invalid_xml", message: `The diagram's XML could not be read: ${result.invalidXml}.` },
+        400,
+      );
+    }
     return result.ok
       ? json({
           diagram: Diagrams.diagramView(result.diagram, true),
           themeId: theme.id,
-          summary: restyled.summary,
+          summary: result.summary,
         })
       : versionConflict(result.conflict);
   }
@@ -1344,6 +1381,60 @@ async function handleDiagrams(
   }
 
   return null;
+}
+
+/** Who writes a diagram comment: the signed-in person's email, or the token's agent. */
+const diagramCommentAuthor = (principal: Auth.Principal) =>
+  Comments.actorAuthor(
+    principal.kind === "session"
+      ? { kind: "person", email: principal.email }
+      : { kind: "agent", name: principal.tokenName },
+  );
+
+/**
+ * One diagram comment thread, under `/api/diagram-comments/:commentId`:
+ * `POST .../replies` {body} answers it, `POST .../resolve` and `.../reopen`
+ * change its state. Only the diagram's managers write. Null for other paths.
+ */
+async function handleDiagramComment(
+  request: Request,
+  route: {
+    readonly id: string;
+    readonly sub: string | undefined;
+    readonly principal: Auth.Principal;
+  },
+  deps: ApiDeps,
+): Promise<Response | null> {
+  const method = request.method;
+  if (method !== "POST" || !["replies", "resolve", "reopen"].includes(route.sub ?? "")) {
+    return null;
+  }
+  const existing = await DiagramComments.getDiagramComment(deps.db, route.id);
+  await Diagrams.requireDiagram(deps.db, {
+    diagramId: existing.diagramId,
+    userId: route.principal.userId,
+    need: "edit",
+  });
+  const now = deps.now();
+  if (route.sub === "replies") {
+    const body = await readJson(request);
+    const text = str(body.body, MAX_DIAGRAM_COMMENT_LENGTH);
+    if (!text) return error(400, "invalid_body");
+    const reply = await DiagramComments.replyDiagramThread(deps.db, {
+      commentId: route.id,
+      body: text,
+      author: diagramCommentAuthor(route.principal),
+      now,
+    });
+    const thread = await DiagramComments.getDiagramThread(deps.db, reply.id);
+    return json({ reply, thread }, 201);
+  }
+  const thread = await DiagramComments.resolveDiagramThread(deps.db, {
+    commentId: route.id,
+    resolved: route.sub === "resolve",
+    now,
+  });
+  return json({ thread });
 }
 
 /** `null` when the client sent none; `false` when malformed. */

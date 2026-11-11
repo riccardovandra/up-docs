@@ -205,6 +205,7 @@ describe("MCP Draw.io tools", () => {
       usedIn: [expect.objectContaining({ docId: doc.docId, tabId: tab.tabId })],
       shapes: ["Discovery call", "Proposal"],
       connections: ["Discovery call -[won]-> Proposal"],
+      theme: expect.objectContaining({ themeId: "neutral", source: "default" }),
       picture: expect.stringContaining("No current picture"),
     });
 

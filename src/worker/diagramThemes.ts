@@ -1,6 +1,6 @@
 // Diagram themes: custom themes as rows, built-ins from code, and the theme a
-// diagram or a project resolves to. The REST API calls these; the MCP tools
-// (later) call the same functions, so both share one behaviour.
+// diagram or a project resolves to. The REST API and the MCP tools call the
+// same functions, so both share one behaviour.
 //
 // Who may do what:
 // - Everyone signed in sees the built-ins and their own custom themes; the admin sees all.
@@ -20,8 +20,12 @@ import {
   type DiagramThemeList,
   type DiagramThemeTokens,
   type EffectiveDiagramTheme,
+  restyleDiagram,
+  type RestyleSummary,
 } from "../shared/diagramTheme.ts";
+import type { Diagram, DiagramSummary } from "../shared/drawio.ts";
 import { randomId } from "./crypto.ts";
+import { diagramSummary, updateDiagram } from "./diagrams.ts";
 import { getProject, NotFoundError } from "./docs.ts";
 
 /** A theme write the store refuses; `code` is the API's error, `message` is for the person. */
@@ -287,4 +291,44 @@ export async function effectiveProjectTheme(
     .bind(projectId)
     .first<{ diagram_theme_id: string | null }>();
   return resolve(db, null, row?.diagram_theme_id ?? null);
+}
+
+export type RestyleStoredResult =
+  | { readonly ok: true; readonly diagram: Diagram; readonly summary: RestyleSummary }
+  /** Someone saved since `baseVersion`: the diagram as it is now. */
+  | { readonly ok: false; readonly conflict: DiagramSummary }
+  /** The stored source is not XML Draw.io can open. */
+  | { readonly ok: false; readonly invalidXml: string };
+
+/**
+ * Restyles a stored diagram to `theme` and saves the result as a new version
+ * when anything changed (an unchanged result keeps the version). The diagram's
+ * theme setting is left as it is. The caller checks the person may edit it.
+ */
+export async function restyleStoredDiagram(
+  db: D1Database,
+  input: {
+    readonly diagram: Diagram;
+    readonly theme: DiagramTheme;
+    readonly baseVersion: number;
+    readonly now: number;
+    /** Custom themes whose role colours map role to role (see `restyleDiagram`). */
+    readonly knownThemes?: ReadonlyArray<DiagramTheme>;
+  },
+): Promise<RestyleStoredResult> {
+  const { diagram } = input;
+  if (diagram.version !== input.baseVersion) {
+    return { ok: false, conflict: diagramSummary(diagram) };
+  }
+  const restyled = await restyleDiagram(diagram.xml, input.theme, {
+    knownThemes: input.knownThemes ?? [],
+  });
+  if (!restyled.ok) return { ok: false, invalidXml: restyled.error };
+  const result = await updateDiagram(db, {
+    diagramId: diagram.id,
+    xml: restyled.xml,
+    baseVersion: input.baseVersion,
+    now: input.now,
+  });
+  return result.ok ? { ok: true, diagram: result.diagram, summary: restyled.summary } : result;
 }
