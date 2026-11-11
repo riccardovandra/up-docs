@@ -26,6 +26,7 @@ import { DiagramEditor, type DiagramEditorTarget } from "./DiagramEditor.tsx";
 import { DiagramPicture } from "./DiagramPicture.tsx";
 import { subscribeRefresh } from "./diagramRefresh.ts";
 import { diagramsApi } from "./diagramsApi.ts";
+import { NewDiagramDialog } from "./NewDiagramDialog.tsx";
 import "./diagrams.css";
 
 export type LibraryKind = "docs" | "diagrams" | "sheets";
@@ -118,6 +119,8 @@ export function DiagramsView(props: {
   const [failed, setFailed] = useState(false);
   const [view, setView] = useState<HomeView>(storedView);
   const [editing, setEditing] = useState<DiagramEditorTarget | null>(null);
+  /** A new diagram whose theme is being shown, before Draw.io opens. */
+  const [starting, setStarting] = useState<{ readonly projectId: string | null } | null>(null);
 
   const reload = useCallback(async () => {
     try {
@@ -157,7 +160,7 @@ export function DiagramsView(props: {
   const { resolveProjectId } = props;
   const startNew = useCallback(async () => {
     try {
-      setEditing({ kind: "new", projectId: await resolveProjectId() });
+      setStarting({ projectId: await resolveProjectId() });
     } catch {
       setFailed(true);
     }
@@ -324,6 +327,20 @@ export function DiagramsView(props: {
         </p>
       ) : null}
 
+      {starting ? (
+        <NewDiagramDialog
+          projectId={starting.projectId}
+          createIn={props.createIn}
+          onOpen={(themeId) =>
+            setEditing({
+              kind: "new",
+              projectId: starting.projectId,
+              ...(themeId === undefined ? {} : { themeId }),
+            })
+          }
+          onClose={() => setStarting(null)}
+        />
+      ) : null}
       {editing ? (
         <DiagramEditor
           target={editing}

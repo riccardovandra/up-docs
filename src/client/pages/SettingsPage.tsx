@@ -8,6 +8,7 @@ import { AccountMenu } from "../home/AccountMenu.tsx";
 import { HomeLink } from "../home/HomeLink.tsx";
 import { setMe, useMe } from "../me.ts";
 import { setAppearance, storedAppearance, type Appearance } from "../theme.ts";
+import { DiagramThemeSettings } from "./DiagramThemeSettings.tsx";
 import { ProjectSettings } from "./ProjectSettings.tsx";
 
 const APPEARANCES: ReadonlyArray<readonly [Appearance, string]> = [
@@ -114,6 +115,13 @@ export function SettingsPage() {
           <ProjectSettings />
         </>
       ) : null}
+      <h2>Diagram themes</h2>
+      <p className="muted">
+        Colours, fonts and box and arrow styles for Draw.io diagrams. New shapes start in a
+        diagram&apos;s theme, and Restyle with theme on a diagram&apos;s page applies it to what is
+        drawn. Your custom themes are yours; the built-ins can be duplicated.
+      </p>
+      <DiagramThemeSettings admin={me !== null && isAdmin(me.user.id)} />
       <h2>API tokens</h2>
       <p className="muted">
         Agents and T3 Code use these as <code>Authorization: Bearer …</code> on <code>/api</code>{" "}

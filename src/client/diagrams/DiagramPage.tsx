@@ -13,6 +13,7 @@ import { DiagramEditor } from "./DiagramEditor.tsx";
 import { DiagramPicture } from "./DiagramPicture.tsx";
 import { subscribeRefresh, watchDiagram } from "./diagramRefresh.ts";
 import { diagramErrorMessage, diagramsApi, subscribeDiagram } from "./diagramsApi.ts";
+import { ThemeMenu } from "./ThemeMenu.tsx";
 import "../home/home.css";
 import "./diagrams.css";
 
@@ -154,6 +155,7 @@ export function DiagramPage(props: { readonly diagramId: string }) {
               In {plural(linkedDocs, "doc")}
             </span>
           ) : null}
+          <ThemeMenu diagramId={diagramId} canEdit={canEdit} />
         </div>
         {canEdit ? (
           <div className="doc-header-actions">

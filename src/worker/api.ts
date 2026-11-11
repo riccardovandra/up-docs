@@ -1261,12 +1261,17 @@ async function handleDiagrams(
     const themeId = themeIdArg(body.themeId);
     if (themeId === false || themeId === null) return error(400, "invalid_theme_id");
     const { diagram } = await need("edit");
+    const effective = (await DiagramThemes.effectiveDiagramTheme(deps.db, id)).theme;
     const theme =
       themeId === undefined
-        ? (await DiagramThemes.effectiveDiagramTheme(deps.db, id)).theme
+        ? effective
         : await DiagramThemes.requireUsableDiagramTheme(deps.db, { themeId, userId });
     if (diagram.version !== baseVersion) return versionConflict(Diagrams.diagramSummary(diagram));
-    const restyled = await restyleDiagram(diagram.xml, theme);
+    // The person's themes and the diagram's own: a box in one of their roles keeps its role.
+    const { themes } = await DiagramThemes.listDiagramThemes(deps.db, userId);
+    const restyled = await restyleDiagram(diagram.xml, theme, {
+      knownThemes: [effective, ...themes].filter((each) => !each.builtIn),
+    });
     if (!restyled.ok) {
       return json(
         { error: "invalid_xml", message: `The diagram's XML could not be read: ${restyled.error}.` },

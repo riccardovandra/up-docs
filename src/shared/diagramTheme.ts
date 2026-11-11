@@ -583,7 +583,11 @@ function nearestRole(
  * The role a box is drawn in now: the nearest to its fill and line together.
  * No fill colour, Draw.io's default, or white is the default role.
  */
-function roleOf(theme: DiagramTheme, style: Style): DiagramThemeRole {
+function roleOf(
+  theme: DiagramTheme,
+  style: Style,
+  known: ReadonlyArray<DiagramTheme>,
+): DiagramThemeRole {
   const { tokens } = theme;
   const fillValue = style.get("fillColor");
   const fill = isNone(fillValue) ? null : colourOf(fillValue);
@@ -598,9 +602,9 @@ function roleOf(theme: DiagramTheme, style: Style): DiagramThemeRole {
   const own = exact(theme);
   if (own) return own;
   if (!isNone(fillValue) && (fill === null || fill === "#ffffff")) return tokens.defaultRole;
-  // Colours a built-in gave a role keep that role, so built-ins map role to role.
-  for (const known of BUILT_IN_DIAGRAM_THEMES) {
-    const role = exact(known);
+  // Colours a built-in or another known theme gave a role keep that role, so themes map role to role.
+  for (const other of known) {
+    const role = exact(other);
     if (role) return role;
   }
   return nearestRole(tokens, { fill, stroke });
@@ -628,6 +632,11 @@ function setFont(style: Style, font: DiagramFont): void {
   else style.set({ fontSource: encodeURIComponent(font.url) });
 }
 
+/** Routers the theme's edge style replaces: none named, straight, or plain orthogonal. */
+const PLAIN_ROUTES = new Set(["", "none", "orthogonalEdgeStyle"]);
+
+const isPlainRoute = (style: Style) => PLAIN_ROUTES.has(style.get("edgeStyle") ?? "");
+
 type CellKind = "shape" | "connection" | "label" | "text" | "image" | "container" | "other";
 
 /** What restyling did to one cell: its kind, its role for a shape, and the new style. */
@@ -637,7 +646,11 @@ interface CellRestyle {
   readonly style: string;
 }
 
-function restyleCell(theme: DiagramTheme, cell: DrawioCellTarget): CellRestyle | null {
+function restyleCell(
+  theme: DiagramTheme,
+  cell: DrawioCellTarget,
+  known: ReadonlyArray<DiagramTheme>,
+): CellRestyle | null {
   const { tokens } = theme;
   const style = new Style(cell.style);
   const done = (kind: CellKind, role: DiagramThemeRole | null = null): CellRestyle => ({
@@ -647,9 +660,11 @@ function restyleCell(theme: DiagramTheme, cell: DrawioCellTarget): CellRestyle |
   });
   if (cell.edge) {
     if (!isNone(style.get("strokeColor"))) style.set({ strokeColor: edgeColour(tokens) });
+    // A special router (entity relation, elbow, isometric...) keeps its own routing and corners.
+    if (isPlainRoute(style)) {
+      style.set({ rounded: tokens.cornerRadius > 0 ? "1" : "0", ...EDGE_STYLE_VALUES[tokens.edgeStyle] });
+    }
     style.set({
-      rounded: tokens.cornerRadius > 0 ? "1" : "0",
-      ...EDGE_STYLE_VALUES[tokens.edgeStyle],
       fontColor: tokens.canvas.text,
       strokeWidth: String(tokens.strokeWidth),
       shadow: tokens.shadow ? "1" : "0",
@@ -682,7 +697,7 @@ function restyleCell(theme: DiagramTheme, cell: DrawioCellTarget): CellRestyle |
     style.set({ fontColor: tokens.canvas.text, ...fontSizeValues(style, tokens.fontSize) });
     return done("text");
   }
-  const role = roleOf(theme, style);
+  const role = roleOf(theme, style, known);
   const colours = tokens.roles[role];
   if (!isNone(style.get("fillColor"))) style.set({ fillColor: colours.fill });
   if (!isNone(style.get("strokeColor"))) style.set({ strokeColor: colours.stroke });
@@ -730,8 +745,19 @@ export type RestyleResult =
  * with the same theme changes nothing. Takes one `<mxGraphModel>` or a
  * multi-page `<mxfile>`; a compressed page comes back uncompressed.
  */
-export async function restyleDiagram(xml: string, theme: DiagramTheme): Promise<RestyleResult> {
+export async function restyleDiagram(
+  xml: string,
+  theme: DiagramTheme,
+  options: {
+    /**
+     * Custom themes whose exact role colours map role to role, after the
+     * built-ins: a box in a custom theme's primary becomes this theme's primary.
+     */
+    readonly knownThemes?: ReadonlyArray<DiagramTheme>;
+  } = {},
+): Promise<RestyleResult> {
   const { tokens } = theme;
+  const known = [...BUILT_IN_DIAGRAM_THEMES, ...(options.knownThemes ?? [])];
   const counts = {
     changed: 0,
     shape: 0,
@@ -748,7 +774,7 @@ export async function restyleDiagram(xml: string, theme: DiagramTheme): Promise<
   >;
   const result = await rewriteDrawio(xml, {
     cell: (cell) => {
-      const restyled = restyleCell(theme, cell);
+      const restyled = restyleCell(theme, cell, known);
       if (!restyled) return null;
       counts[restyled.kind] += 1;
       if (restyled.role) roles[restyled.role] += 1;

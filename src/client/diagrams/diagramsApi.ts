@@ -12,7 +12,11 @@ import {
   type DiagramUsage,
   type DiagramView,
 } from "../../shared/drawio.ts";
-import type { EffectiveDiagramTheme } from "../../shared/diagramTheme.ts";
+import type {
+  DiagramTheme,
+  EffectiveDiagramTheme,
+  RestyleSummary,
+} from "../../shared/diagramTheme.ts";
 import { ApiError, request } from "../api.ts";
 
 type DiagramListener = (diagram: DiagramSummary | null) => void;
@@ -161,6 +165,28 @@ export const diagramsApi = {
       "GET",
       `/api/diagram-themes/effective?projectId=${encodeURIComponent(projectId ?? "none")}`,
     ),
+  /** One theme by id: a built-in, or a custom one the caller may use. */
+  themeById: async (themeId: string): Promise<DiagramTheme> =>
+    (await request<{ theme: DiagramTheme }>("GET", `/api/diagram-themes/${themeId}`)).theme,
+  /** Sets the diagram's own theme; null follows its project. Changes no drawing. */
+  setTheme: (diagramId: string, themeId: string | null) =>
+    request<EffectiveDiagramTheme>("PUT", `/api/diagrams/${diagramId}/theme`, { themeId }),
+  /**
+   * Restyles the stored source to the theme and saves it as a new version.
+   * A stale `baseVersion` is refused with a 409 that `diagramConflict` reads.
+   */
+  restyle: async (
+    diagramId: string,
+    input: { readonly baseVersion: number; readonly themeId?: string },
+  ): Promise<{ diagram: DiagramView; themeId: string; summary: RestyleSummary }> => {
+    const result = await request<{
+      diagram: DiagramView;
+      themeId: string;
+      summary: RestyleSummary;
+    }>("POST", `/api/diagrams/${diagramId}/restyle`, input);
+    told(result.diagram);
+    return result;
+  },
   /** The docs and tabs that link the diagram. Only for someone who manages it. */
   uses: (diagramId: string) => request<DiagramUsage>("GET", `/api/diagrams/${diagramId}/uses`),
   /** Stores the picture drawn from `version`. Refused with a 409 when the source has moved on. */
