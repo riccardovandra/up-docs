@@ -54,6 +54,8 @@ function RestyleDialog(props: {
       api: diagramsApi,
       diagramId,
       theme,
+      // Both ways in restyle with the diagram's effective theme: just chosen, or as it is.
+      effective: true,
       knownThemes: props.knownThemes,
       onState: setState,
       createFrame: () =>

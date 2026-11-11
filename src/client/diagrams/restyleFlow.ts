@@ -67,6 +67,12 @@ export function startRestyleFlow(options: {
   readonly createFrame: () => DrawioFrame;
   readonly diagramId: string;
   readonly theme: DiagramTheme;
+  /**
+   * `theme` is the diagram's effective theme: the server resolves it rather
+   * than be named it, so a custom theme the person does not own (a project's
+   * default set by the admin) still applies.
+   */
+  readonly effective?: boolean;
   /** Custom themes whose role colours map role to role, as the server's restyle maps them. */
   readonly knownThemes?: ReadonlyArray<DiagramTheme>;
   readonly onState: (state: RestyleState) => void;
@@ -148,7 +154,7 @@ export function startRestyleFlow(options: {
     try {
       const result = await api.restyle(diagramId, {
         baseVersion: previewed.version,
-        themeId: theme.id,
+        ...(options.effective ? {} : { themeId: theme.id }),
       });
       restyledVersion = result.diagram.version;
       options.onSaved?.(result.diagram);

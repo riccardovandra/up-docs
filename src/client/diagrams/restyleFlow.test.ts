@@ -15,7 +15,10 @@ const settle = async () => {
   for (let turn = 0; turn < 40; turn += 1) await new Promise((done) => setTimeout(done, 0));
 };
 
-function open(xml = NEUTRAL_XML, options: { readonly loads?: boolean } = {}) {
+function open(
+  xml = NEUTRAL_XML,
+  options: { readonly loads?: boolean; readonly effective?: boolean } = {},
+) {
   const api = fakeApi([view({ id: "g1", xml, version: 3 })]);
   const drawio = fakeDrawio(options);
   const states: Array<RestyleState> = [];
@@ -29,6 +32,7 @@ function open(xml = NEUTRAL_XML, options: { readonly loads?: boolean } = {}) {
     },
     diagramId: "g1",
     theme: UPLIFTED_THEME,
+    effective: options.effective ?? false,
     onState: (state) => states.push(state),
   });
   const last = () => states.at(-1)!;
@@ -56,6 +60,16 @@ describe("restyle with theme", () => {
     expect(run.api.calls).toEqual([["restyle", "g1", { baseVersion: 3, themeId: "uplifted" }]]);
     expect(run.last()).toMatchObject({ phase: "done" });
     expect(run.api.diagrams.get("g1")!.version).toBe(4);
+  });
+
+  it("leaves the effective theme to the server, so a project theme the person does not own applies", async () => {
+    const run = open(NEUTRAL_XML, { effective: true });
+    run.api.themes.set("g1", UPLIFTED_THEME);
+    await settle();
+    run.flow.confirm();
+    await settle();
+    expect(run.api.calls).toEqual([["restyle", "g1", { baseVersion: 3 }]]);
+    expect(run.last()).toMatchObject({ phase: "done" });
   });
 
   it("says when someone saved in between, and previews again on retry", async () => {
