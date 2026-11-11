@@ -455,3 +455,163 @@ button.diagram-canvas:hover {
     display: none;
   }
 }
+
+/* Comments: pins over the picture, the thread inline at its pin (review mode). */
+.diagram-review {
+  position: relative;
+  display: grid;
+  min-width: 0;
+  min-height: 22rem;
+}
+
+.diagram-review > .diagram-picture {
+  min-height: 22rem;
+}
+
+.diagram-review-layer {
+  position: absolute;
+}
+
+.diagram-review[data-review="on"] .diagram-review-layer {
+  cursor: crosshair;
+}
+
+.diagram-canvas.reviewing {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+}
+
+.diagram-review-hint {
+  position: absolute;
+  top: -1.4rem;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 0.15rem 0.65rem;
+  border-radius: 999px;
+  background: var(--text);
+  color: var(--bg);
+  font-size: 0.75rem;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.diagram-pin {
+  --pin: var(--accent);
+  position: absolute;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: 50% 50% 50% 0;
+  background: var(--pin);
+  color: #fff;
+  font: 700 12px/1 system-ui, sans-serif;
+  transform: translate(-50%, -100%) rotate(-45deg);
+  box-shadow: 0 2px 6px rgb(0 0 0 / 0.25);
+  cursor: pointer;
+}
+
+.diagram-pin > span {
+  transform: rotate(45deg);
+}
+
+.diagram-pin.agent {
+  --pin: var(--diagram-agent);
+}
+
+.diagram-pin.resolved {
+  --pin: #a8a29e;
+}
+
+.diagram-pin.draft {
+  opacity: 0.6;
+  pointer-events: none;
+}
+
+.diagram-pin[aria-expanded="true"] {
+  outline: 3px solid color-mix(in srgb, var(--pin) 35%, transparent);
+}
+
+.diagram-pop {
+  position: absolute;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  width: min(20rem, 70vw);
+  max-height: 26rem;
+  overflow: auto;
+  padding: 0.75rem;
+  margin-top: -0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--text);
+  text-align: left;
+  font-size: 0.9rem;
+  box-shadow: 0 12px 30px rgb(0 0 0 / 0.15);
+  cursor: default;
+}
+
+.diagram-pop-anchor {
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.diagram-resolved {
+  margin-left: 0.5rem;
+  padding: 0 0.4rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--text) 8%, transparent);
+}
+
+:root {
+  --diagram-agent: #c2571a;
+}
+
+.comment-author.diagram-agent {
+  color: var(--diagram-agent);
+}
+
+.diagram-agent-tag {
+  padding: 0 0.4rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--diagram-agent) 14%, transparent);
+  color: var(--diagram-agent);
+  font-size: 0.7rem;
+}
+
+.diagram-review-toggle[aria-pressed="true"] {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.diagram-pages {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  margin-bottom: 0.75rem;
+}
+
+.diagram-page-tab {
+  padding: 0.2rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.diagram-page-tab[aria-selected="true"] {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.diagram-chip.comments {
+  color: var(--accent);
+}

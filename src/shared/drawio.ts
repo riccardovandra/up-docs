@@ -80,6 +80,8 @@ export interface DiagramUsage {
 /** `GET /api/diagrams`: a diagram the caller manages, with the readable tabs that link it. */
 export interface DiagramListItem extends DiagramSummary {
   readonly uses: ReadonlyArray<DiagramUse>;
+  /** How many comment threads on it are open. */
+  readonly openComments: number;
 }
 
 /**
