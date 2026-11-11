@@ -16,7 +16,7 @@ import { HomeLink } from "../home/HomeLink.tsx";
 import { DiagramIcon, DocIcon, LinkIcon, PenIcon } from "../home/icons.tsx";
 import { TitleDialog } from "../home/TitleDialog.tsx";
 import { useLockedProject } from "../lockedProject.ts";
-import { isEmbedded, postToEmbedParent, useEmbedFeatures } from "../embedBridge.ts";
+import { postToEmbedParent, useEmbedFeatures } from "../embedBridge.ts";
 import { docPath, navigate } from "../router.ts";
 import { DiagramEditor } from "./DiagramEditor.tsx";
 import { type DiagramComments, diagramCommentsApi } from "./diagramCommentsApi.ts";
@@ -205,7 +205,7 @@ export function DiagramPage(props: { readonly diagramId: string }) {
    * Every comment and reply written here goes to the T3 Code chat. A T3 Code
    * too old for diagram comments (or none) gets it on the clipboard instead.
    */
-  const sendToChat = async (thread: DiagramThread, body: string, announce: boolean) => {
+  const sendToChat = async (thread: DiagramThread, body: string) => {
     const chat: DiagramCommentChat = {
       diagramId,
       diagramTitle: diagram.title,
@@ -217,10 +217,9 @@ export function DiagramPage(props: { readonly diagramId: string }) {
     };
     if (hostTakesDiagrams) {
       postToEmbedParent({ type: "t3-docs:add-comment-to-chat", ...diagramCommentForChat(chat) });
-      if (announce) setNotice("Added to the chat. Send your message there when you are ready.");
+      setNotice("Added to the chat. Send your message there when you are ready.");
       return;
     }
-    if (!announce) return;
     const copied = await copyText(diagramCommentChatText(chat));
     setNotice(
       copied
@@ -228,13 +227,11 @@ export function DiagramPage(props: { readonly diagramId: string }) {
         : "Saved. Use Copy to chat on the thread to put it on your clipboard.",
     );
   };
-  // Only inside T3 Code does a saved comment copy itself; anywhere else Copy to chat asks first.
-  const autoCopy = hostTakesDiagrams || isEmbedded();
   const copyToChat = hostTakesDiagrams
     ? null
     : (thread: DiagramThread) => {
         const last = thread.replies.findLast((reply) => reply.authorKind === "person") ?? thread;
-        void sendToChat(thread, last.body, true);
+        void sendToChat(thread, last.body);
       };
   const linkedDocs = usage ? new Set(usage.uses.map((use) => use.docId)).size + usage.otherDocs : 0;
   const project = projects.find((candidate) => candidate.id === diagram.projectId);
@@ -353,7 +350,7 @@ export function DiagramPage(props: { readonly diagramId: string }) {
                   try {
                     const thread = await diagramCommentsApi.create(diagramId, anchor, body);
                     await reloadComments();
-                    await sendToChat(thread, body, autoCopy);
+                    await sendToChat(thread, body);
                     return thread;
                   } catch (cause) {
                     setNotice(diagramErrorMessage(cause));
@@ -364,7 +361,7 @@ export function DiagramPage(props: { readonly diagramId: string }) {
                   try {
                     await diagramCommentsApi.reply(thread.id, body);
                     await reloadComments();
-                    await sendToChat(thread, body, autoCopy);
+                    await sendToChat(thread, body);
                   } catch (cause) {
                     setNotice(diagramErrorMessage(cause));
                     throw cause;
