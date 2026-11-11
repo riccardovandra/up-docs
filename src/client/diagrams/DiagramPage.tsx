@@ -148,15 +148,11 @@ export function DiagramPage(props: { readonly diagramId: string }) {
           </a>
           <span className="doc-header-crumb">/</span>
           <span className="diagram-page-title">{diagram.title}</span>
-          {canEdit && usage ? (
-            linkedDocs > 0 ? (
-              <span className="diagram-chip linked">
-                <LinkIcon size={12} />
-                In {plural(linkedDocs, "doc")}
-              </span>
-            ) : (
-              <span className="diagram-chip">Not in a doc yet</span>
-            )
+          {canEdit && usage && linkedDocs > 0 ? (
+            <span className="diagram-chip linked">
+              <LinkIcon size={12} />
+              In {plural(linkedDocs, "doc")}
+            </span>
           ) : null}
         </div>
         {canEdit ? (

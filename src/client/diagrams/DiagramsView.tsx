@@ -77,9 +77,7 @@ function UsedChip(props: { readonly docs: number }) {
       <LinkIcon size={12} />
       In {plural(props.docs, "doc")}
     </span>
-  ) : (
-    <span className="diagram-chip">Not in a doc yet</span>
-  );
+  ) : null;
 }
 
 /** Which diagrams a project scope shows: all, those in no project, or one project's. */
@@ -295,7 +293,7 @@ export function DiagramsView(props: {
                     </span>
                   </td>
                   <td className={docs.length > 0 ? "diagram-row-docs" : "doc-row-muted"}>
-                    {docs.length > 0 ? docs.join(", ") : "Not in a doc yet"}
+                    {docs.join(", ")}
                   </td>
                   <td className="doc-row-muted">{formatDay(diagram.updatedAt)}</td>
                   <td className="doc-row-actions diagram-row-actions">
