@@ -18,6 +18,7 @@ import {
   insertOnFirstSave,
   mergeDiagram,
   otherDocs,
+  pageChoices,
   pickerLists,
   usageLine,
 } from "./blockLogic.ts";
@@ -28,6 +29,8 @@ import {
   relinkDrawioBlock,
   removeBlockStep,
   removeDrawioBlock,
+  pageBlockStep,
+  setDrawioBlockPage,
 } from "./drawioSupport.ts";
 import { loadLinkedDiagrams } from "./linkedDiagrams.ts";
 
@@ -174,6 +177,37 @@ describe("linking, relinking and removing a block", () => {
     editor.destroy();
   });
 
+  it("links a page, keeps it when relinked to a copy, and points the block at another page", () => {
+    const editor = emptyTab();
+    expect(linkDiagramAtCaret(editor, ID, false, "Sales detail")).toBe(true);
+    expect(blocks(editor)).toEqual(["diagram", "p:"]);
+    expect(editor.getMarkdown()).toBe(`${drawioBlock(ID, null, "Sales detail")}\n\n`);
+    editor.destroy();
+
+    const linked = editorOn(`Intro\n\n${drawioBlock(ID, null, "Sales detail")}`);
+    expect(apply(linked, relinkBlockStep(linked.state, blockPos(linked), OTHER))).toBe(true);
+    expect(linked.getMarkdown()).toBe(`Intro\n\n${drawioBlock(OTHER, null, "Sales detail")}`);
+    expect(apply(linked, pageBlockStep(linked.state, blockPos(linked), "Overview"))).toBe(true);
+    expect(linked.getMarkdown()).toBe(`Intro\n\n${drawioBlock(OTHER, null, "Overview")}`);
+    // The same page again changes nothing.
+    expect(pageBlockStep(linked.state, blockPos(linked), "Overview")).toBeNull();
+    linked.destroy();
+
+    const captioned = editorOn(drawioBlock(ID, "The flow"));
+    expect(apply(captioned, pageBlockStep(captioned.state, blockPos(captioned), "Detail"))).toBe(true);
+    expect(captioned.getMarkdown()).toBe(drawioBlock(ID, "The flow", "Detail"));
+    captioned.destroy();
+    expect(roundTrip(drawioBlock(ID, "The flow", "Detail"))).toBe(drawioBlock(ID, "The flow", "Detail"));
+  });
+
+  it("offers the pages of a diagram of several, and keeps a page that is gone on offer", () => {
+    expect(pageChoices(null, null)).toEqual([]);
+    expect(pageChoices({ picturePages: ["Page-1"] }, null)).toEqual([]);
+    expect(pageChoices({ picturePages: null }, "A")).toEqual([]);
+    expect(pageChoices({ picturePages: ["A", null, "B"] }, null)).toEqual(["A", "B"]);
+    expect(pageChoices({ picturePages: ["A", "B"] }, "Gone")).toEqual(["A", "B", "Gone"]);
+  });
+
   it("removes only the block, and leaves an empty line when it was the whole tab", () => {
     const editor = editorOn(`Before\n\n${drawioBlock(ID)}\n\nAfter`);
     expect(apply(editor, removeBlockStep(editor.state, blockPos(editor)))).toBe(true);
@@ -204,6 +238,7 @@ describe("linking, relinking and removing a block", () => {
     expect(insertDrawioBlock(reader, OTHER, { focus: false })).toBe(false);
     expect(removeDrawioBlock(reader, blockPos(reader))).toBe(false);
     expect(relinkDrawioBlock(reader, blockPos(reader), OTHER)).toBe(false);
+    expect(setDrawioBlockPage(reader, blockPos(reader), "Other")).toBe(false);
     expect(reader.getMarkdown()).toBe(source);
     reader.destroy();
   });
@@ -500,7 +535,7 @@ describe("loading linked diagrams for a book", () => {
     });
     expect(asked.toSorted()).toEqual(["g1", "gone"]);
     expect([...loaded.values()]).toEqual([
-      { id: "g1", title: "Flow", pictureVersion: 1, hasSource: true },
+      { id: "g1", title: "Flow", pictureVersion: 1, picturePages: null, hasSource: true },
     ]);
   });
 

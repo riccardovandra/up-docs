@@ -19,8 +19,8 @@ export async function linkedDiagrams(
     [...ids].map(async (id): Promise<ExportDiagram | null> => {
       try {
         const { diagram } = await requireDiagram(db, { diagramId: id, userId, need: "view" });
-        const { title, pictureVersion, hasSource } = diagram;
-        return { id, title, pictureVersion, hasSource };
+        const { title, pictureVersion, picturePages, hasSource } = diagram;
+        return { id, title, pictureVersion, picturePages, hasSource };
       } catch (cause) {
         if (cause instanceof NotFoundError) return null;
         throw cause;

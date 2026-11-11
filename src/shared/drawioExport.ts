@@ -1,12 +1,14 @@
 // How a linked Draw.io diagram leaves the app. An export cannot show the live
 // block, so a ```t3-drawio block comes out as the diagram's picture with its
-// caption, the way an image does. A diagram with no picture yet comes out as
-// its title and a short note, and a deleted one as "Diagram not found".
+// caption, the way an image does: the picture of the page the block names. A
+// diagram with no picture yet comes out as its title and a short note, a page
+// that is gone as "Page not found", and a deleted diagram as "Diagram not found".
 
 import {
   DRAWIO_LANGUAGE,
   diagramPath,
   diagramPictureUrl,
+  pagePicture,
   parseDrawioBlock,
   type DiagramPictureFormat,
   type DiagramSummary,
@@ -15,12 +17,16 @@ import {
 import { findFences } from "./table.ts";
 
 /** What an export needs to know about a linked diagram. */
-export type ExportDiagram = Pick<DiagramSummary, "id" | "title" | "pictureVersion" | "hasSource">;
+export type ExportDiagram = Pick<
+  DiagramSummary,
+  "id" | "title" | "pictureVersion" | "picturePages" | "hasSource"
+>;
 
 /** The diagrams a doc links, by id. An id that is absent is a diagram that is gone. */
 export type ExportDiagrams = ReadonlyMap<string, ExportDiagram>;
 
 export const DIAGRAM_NOT_FOUND = "Diagram not found";
+export const PAGE_NOT_FOUND = "Page not found";
 
 /** One block, ready to write in any format. */
 export interface DrawioExport {
@@ -68,11 +74,24 @@ export function drawioExport(
         : "Diagram: nothing has been drawn in it yet.",
     };
   }
+  const page = pagePicture(diagram, block.page);
+  if (page.kind !== "picture") {
+    return {
+      title: diagram.title,
+      caption: block.caption,
+      pictureUrl: null,
+      pageUrl,
+      note:
+        page.kind === "not_found"
+          ? `${PAGE_NOT_FOUND}: the diagram has no page "${block.page}".`
+          : `Diagram page "${block.page}": its picture has not been drawn yet.`,
+    };
+  }
   return {
     title: diagram.title,
     caption: block.caption,
     // Without a version the address always serves the latest picture.
-    pictureUrl: `${origin}${diagramPictureUrl(diagram.id, format)}`,
+    pictureUrl: `${origin}${diagramPictureUrl(diagram.id, format, null, page.index)}`,
     pageUrl,
     note: null,
   };

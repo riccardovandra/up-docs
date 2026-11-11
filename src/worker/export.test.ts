@@ -55,7 +55,7 @@ describe("markdown assembly", () => {
 
   it("shows linked Draw.io diagrams as their pictures, with the caption", () => {
     const diagrams = new Map([
-      ["g1", { id: "g1", title: "Onboarding", pictureVersion: 1, hasSource: true }],
+      ["g1", { id: "g1", title: "Onboarding", pictureVersion: 1, picturePages: null, hasSource: true }],
     ]);
     const body = `Intro\n\n${drawioBlock("g1", "How a client starts")}`;
     const expected =

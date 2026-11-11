@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import type { DiagramListItem } from "../../../shared/drawio.ts";
+import { isPictureCurrent, type DiagramListItem } from "../../../shared/drawio.ts";
+import { drawioPageSources } from "../../../shared/drawioModel.ts";
 import type { Project } from "../../../shared/protocol.ts";
 import { api } from "../../api.ts";
 import { DiagramPicture } from "../../diagrams/DiagramPicture.tsx";
@@ -16,6 +17,19 @@ const plural = (count: number, word: string) => `${count} ${word}${count === 1 ?
 const linkedDocs = (diagram: DiagramListItem) => new Set(diagram.uses.map((use) => use.docId)).size;
 
 /**
+ * The named pages of a diagram, in order: from its picture when that is
+ * current, else read from its source (the picker lists diagrams the person
+ * manages, so they have it).
+ */
+async function pagesOf(diagram: DiagramListItem): Promise<ReadonlyArray<string>> {
+  const known =
+    isPictureCurrent(diagram) && diagram.picturePages !== null ? diagram.picturePages : null;
+  const names =
+    known ?? drawioPageSources((await diagramsApi.get(diagram.id)).xml ?? "")?.map((page) => page.name);
+  return (names ?? []).filter((name): name is string => name !== null && name.trim() !== "");
+}
+
+/**
  * "Insert a Draw.io diagram": the diagrams of the doc's project first, every project
  * one click away (unless the frame is locked to its project), and "New
  * diagram" always on offer. It lists the diagrams the person manages, which
@@ -26,7 +40,8 @@ export function DiagramPicker(props: {
   readonly projectId: string | null;
   /** True inside a parent that keeps this frame in one project. */
   readonly locked: boolean;
-  readonly onPick: (diagram: DiagramListItem) => void;
+  /** `page` is the page picked for a diagram of several; null for one of one page. */
+  readonly onPick: (diagram: DiagramListItem, page: string | null) => void;
   readonly onNew: () => void;
   readonly onClose: () => void;
 }) {
@@ -35,6 +50,23 @@ export function DiagramPicker(props: {
   const [failed, setFailed] = useState(false);
   const [projects, setProjects] = useState<ReadonlyArray<Project>>([]);
   const [scope, setScope] = useState<PickerScope>("project");
+  /** A diagram of several pages, once picked: the person then picks the page. */
+  const [choosing, setChoosing] = useState<{
+    readonly diagram: DiagramListItem;
+    readonly pages: ReadonlyArray<string>;
+  } | null>(null);
+  /** The diagram whose pages are being read. */
+  const [reading, setReading] = useState<string | null>(null);
+
+  const pick = async (diagram: DiagramListItem) => {
+    if (reading !== null) return;
+    setReading(diagram.id);
+    // Unreadable pages: link the first page, as a diagram of one page.
+    const pages = await pagesOf(diagram).catch((): ReadonlyArray<string> => []);
+    setReading(null);
+    if (pages.length < 2) props.onPick(diagram, null);
+    else setChoosing({ diagram, pages });
+  };
 
   useEffect(() => {
     dialog.current?.showModal();
@@ -92,7 +124,40 @@ export function DiagramPicker(props: {
       </div>
       <p className="muted">The doc links to the diagram you pick, so later edits show up here.</p>
 
-      {canSeeAll ? (
+      {choosing ? (
+        <>
+          <div className="drawio-picker-pages-head">
+            <button type="button" className="link-button" onClick={() => setChoosing(null)}>
+              Back to diagrams
+            </button>
+            <h3>Which page of "{choosing.diagram.title}"?</h3>
+          </div>
+          <div className="drawio-picker-grid" role="list" aria-label="Pages">
+            {choosing.pages.map((page, index) => (
+              <button
+                key={page}
+                type="button"
+                role="listitem"
+                className="drawio-pick"
+                onClick={() => props.onPick(choosing.diagram, page)}
+              >
+                <DiagramPicture
+                  diagramId={choosing.diagram.id}
+                  diagram={{ ...choosing.diagram, canEdit: true }}
+                  page={page}
+                  className="drawio-pick-preview"
+                />
+                <span className="drawio-pick-text">
+                  {page}
+                  <span>Page {index + 1} of {choosing.pages.length}</span>
+                </span>
+              </button>
+            ))}
+          </div>
+        </>
+      ) : null}
+
+      {!choosing && canSeeAll ? (
         <div className="home-tabs drawio-picker-tabs" role="tablist" aria-label="Which diagrams">
           {lists.scopes.map(({ scope: each, count }) => (
             <button
@@ -117,7 +182,7 @@ export function DiagramPicker(props: {
         </div>
       ) : null}
 
-      <div className="drawio-picker-grid">
+      <div className="drawio-picker-grid" hidden={choosing !== null}>
         <button type="button" className="drawio-pick" onClick={props.onNew}>
           <span className="drawio-pick-preview drawio-pick-new" aria-hidden="true">
             <PlusIcon size={34} />
@@ -132,7 +197,8 @@ export function DiagramPicker(props: {
             key={diagram.id}
             type="button"
             className="drawio-pick"
-            onClick={() => props.onPick(diagram)}
+            aria-busy={reading === diagram.id}
+            onClick={() => void pick(diagram)}
           >
             <DiagramPicture
               diagramId={diagram.id}
@@ -150,7 +216,7 @@ export function DiagramPicker(props: {
         ))}
       </div>
 
-      {failed ? (
+      {choosing ? null : failed ? (
         <p className="error drawio-picker-note">
           Could not load your diagrams.{" "}
           <button type="button" className="link-button" onClick={() => void load()}>

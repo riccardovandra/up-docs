@@ -446,15 +446,15 @@ describe("diagram pictures", () => {
     const late = Diagrams.saveDiagramPicture(api.db, images, {
       diagramId: diagram.id,
       version: 1,
-      svg: SVG.replace("<rect/>", "<rect id='old'/>"),
-      png: null,
+      pages: [{ svg: SVG.replace("<rect/>", "<rect id='old'/>"), png: null }],
+      pageNames: null,
     });
     await send(creator, "PATCH", `/api/diagrams/${diagram.id}`, { xml: XML2, baseVersion: 1 });
     const current = await Diagrams.saveDiagramPicture(api.db, api.deps.images, {
       diagramId: diagram.id,
       version: 2,
-      svg: SVG,
-      png: null,
+      pages: [{ svg: SVG, png: null }],
+      pageNames: null,
     });
     expect(current.ok).toBe(true);
     release();
@@ -491,6 +491,110 @@ describe("diagram pictures", () => {
     await upload(creator, kept.id, 1);
     await send(creator, "DELETE", `/api/diagrams/${diagram.id}`);
     expect([...api.images.keys()]).toEqual([`diagrams/${kept.id}/1.svg`]);
+  });
+});
+
+describe("a picture per page", () => {
+  const svgOf = (name: string) => SVG.replace("<rect/>", `<rect id="${name}"/>`);
+  const pages = (cookie: string, diagramId: string, version: number, names: Array<string | null>) =>
+    ({
+      cookie,
+      path: `/api/diagrams/${diagramId}/picture`,
+      body: {
+        version,
+        svg: svgOf(names[0] ?? "first"),
+        png: PNG_BASE64,
+        pageNames: names,
+        morePages: names.slice(1).map((name) => ({ svg: svgOf(name ?? "unnamed"), png: null })),
+      },
+    }) as const;
+
+  it("stores one picture per page, keeps the first page where it always was, and serves each", async () => {
+    const { api, creator, create, send, as } = await setup();
+    const diagram = await create(creator, { xml: XML });
+    const put = pages(creator, diagram.id, 1, ["Overview", "Detail", "Notes"]);
+    const saved = await send<{ diagram: DiagramSummary }>(creator, "PUT", put.path, put.body);
+    expect(saved.status).toBe(200);
+    expect(saved.body.diagram).toMatchObject({
+      pictureVersion: 1,
+      picturePages: ["Overview", "Detail", "Notes"],
+    });
+    expect([...api.images.keys()].sort()).toEqual(
+      [
+        `diagrams/${diagram.id}/1.png`,
+        `diagrams/${diagram.id}/1.svg`,
+        `diagrams/${diagram.id}/1.p1.svg`,
+        `diagrams/${diagram.id}/1.p2.svg`,
+      ].sort(),
+    );
+    const served = async (query: string) => {
+      const response = await api.call(
+        "GET",
+        `/api/diagrams/${diagram.id}/picture.svg${query}`,
+        as(creator),
+      );
+      return { status: response.status, text: await response.text(), etag: response.headers.get("ETag") };
+    };
+    expect((await served("")).text).toBe(svgOf("Overview"));
+    expect(await served("?page=0&v=1")).toMatchObject({ text: svgOf("Overview"), etag: '"svg-1"' });
+    expect(await served("?page=2&v=1")).toMatchObject({ text: svgOf("Notes"), etag: '"svg-1-p2"' });
+    expect((await served("?page=3")).status).toBe(404);
+    expect((await served("?page=-1")).status).toBe(400);
+    expect((await served("?page=one")).status).toBe(400);
+    // Only the first page had a PNG.
+    const png = await api.call("GET", `/api/diagrams/${diagram.id}/picture.png?page=1`, as(creator));
+    expect(png.status).toBe(404);
+    // The diagram says which page is which, to anyone who may see it.
+    const read = await send<{ diagram: DiagramView }>(creator, "GET", `/api/diagrams/${diagram.id}`);
+    expect(read.body.diagram.picturePages).toEqual(["Overview", "Detail", "Notes"]);
+  });
+
+  it("drops the pictures of pages that are gone, and of the version replaced", async () => {
+    const { api, creator, create, send } = await setup();
+    const diagram = await create(creator, { xml: XML });
+    const three = pages(creator, diagram.id, 1, ["A", "B", "C"]);
+    await send(creator, "PUT", three.path, three.body);
+    const two = pages(creator, diagram.id, 1, ["A", "B"]);
+    await send(creator, "PUT", two.path, two.body);
+    expect([...api.images.keys()].filter((key) => /\.p\d/.test(key)).sort()).toEqual([
+      `diagrams/${diagram.id}/1.p1.svg`,
+    ]);
+    await send(creator, "PATCH", `/api/diagrams/${diagram.id}`, { xml: XML2, baseVersion: 1 });
+    const next = pages(creator, diagram.id, 2, ["A"]);
+    await send(creator, "PUT", next.path, next.body);
+    expect([...api.images.keys()].sort()).toEqual(
+      [`diagrams/${diagram.id}/2.png`, `diagrams/${diagram.id}/2.svg`].sort(),
+    );
+  });
+
+  it("keeps an upload from before pages working: the first page, its pages unknown", async () => {
+    const { creator, create, upload } = await setup();
+    const diagram = await create(creator, { xml: XML });
+    const saved = await upload(creator, diagram.id, 1, PNG_BASE64);
+    expect(saved.body.diagram).toMatchObject({ pictureVersion: 1, picturePages: null });
+  });
+
+  it("refuses pictures that do not match the pages", async () => {
+    const { creator, create, send } = await setup();
+    const diagram = await create(creator, { xml: XML });
+    const put = (body: Record<string, unknown>) =>
+      send<{ error: string }>(creator, "PUT", `/api/diagrams/${diagram.id}/picture`, {
+        version: 1,
+        svg: SVG,
+        ...body,
+      });
+    expect((await put({ pageNames: ["A", "B"] })).status).toBe(400);
+    expect((await put({ pageNames: ["A"], morePages: [{ svg: SVG }] })).status).toBe(400);
+    expect((await put({ pageNames: [] })).status).toBe(400);
+    expect((await put({ pageNames: [7] })).body.error).toBe("invalid_picture");
+    expect((await put({ pageNames: ["A", "B"], morePages: [{ svg: "<html/>" }] })).status).toBe(400);
+    // Past the pages that get a picture, a page is named but not drawn.
+    const names = Array.from({ length: 25 }, (_, index) => `P${index}`);
+    const many = await put({
+      pageNames: names,
+      morePages: names.slice(1, 20).map(() => ({ svg: SVG })),
+    });
+    expect(many.status).toBe(200);
   });
 });
 
@@ -682,12 +786,12 @@ describe("diagram pictures in D1", () => {
     const saved = await Diagrams.saveDiagramPicture(db, images, {
       diagramId: diagram.id,
       version: 1,
-      svg: SVG,
-      png: PNG.slice().buffer,
+      pages: [{ svg: SVG, png: PNG.slice().buffer }],
+      pageNames: null,
     });
     expect(saved.ok).toBe(true);
 
-    const current = { id: diagram.id, pictureVersion: 1 };
+    const current = { id: diagram.id, pictureVersion: 1, picturePages: null };
     const svg = await Diagrams.diagramPicture(images, current, "svg");
     expect(new TextDecoder().decode(svg!.body as ArrayBuffer)).toBe(SVG);
     const png = await Diagrams.diagramPicture(images, current, "png");

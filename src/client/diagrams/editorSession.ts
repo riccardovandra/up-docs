@@ -13,7 +13,12 @@ import {
   type DiagramConflict,
   type DiagramsApi,
 } from "./diagramsApi.ts";
-import { exportDrawioPicture, type DrawioFrame, type DrawioPicture } from "./drawioFrame.ts";
+import { drawioPageSources } from "../../shared/drawioModel.ts";
+import {
+  exportDrawioPicture,
+  type DrawioFrame,
+  type DrawioPictures,
+} from "./drawioFrame.ts";
 
 export type DiagramEditorTarget =
   | { readonly kind: "existing"; readonly diagramId: string }
@@ -63,7 +68,7 @@ export function startEditorSession(options: {
   /** A save waiting on the person's answer to a conflict. */
   let held: {
     readonly xml: string;
-    readonly picture: DrawioPicture | null;
+    readonly picture: DrawioPictures | null;
     readonly exit: boolean;
     readonly conflict: DiagramConflict;
   } | null = null;
@@ -101,7 +106,7 @@ export function startEditorSession(options: {
     }
   };
 
-  const persist = async (xml: string, picture: DrawioPicture | null, exit: boolean) => {
+  const persist = async (xml: string, picture: DrawioPictures | null, exit: boolean) => {
     set({ phase: "saving", message: null });
     try {
       const diagram =
@@ -142,8 +147,20 @@ export function startEditorSession(options: {
   const save = async (xml: string, exit: boolean) => {
     if (state.phase !== "ready") return;
     set({ phase: "saving", message: null });
-    // Without a picture the save still goes through; the picture is drawn on demand later.
-    const picture = await exportDrawioPicture(frame, { spinKey: "saving" }).catch(() => null);
+    // The canvas shows one page. With several, each page is drawn on its own
+    // afterwards, by the page's hidden frame: the save goes through without a picture.
+    const pages = drawioPageSources(xml);
+    const picture =
+      pages !== null && pages.length > 1
+        ? null
+        : await exportDrawioPicture(frame, { spinKey: "saving" }).then(
+            (drawn): DrawioPictures => ({
+              ...drawn,
+              pageNames: pages?.length === 1 ? [pages[0]!.name] : null,
+              morePages: [],
+            }),
+            () => null,
+          );
     await persist(xml, picture, exit);
   };
 

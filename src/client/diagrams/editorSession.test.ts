@@ -10,7 +10,8 @@ import {
 } from "./editorSession.ts";
 import { fakeApi, fakeDrawio, PNG_BASE64, SVG, view } from "./testing/fakeDrawio.ts";
 
-const NEW_XML = "<mxfile>drawn</mxfile>";
+const NEW_XML =
+  '<mxfile><diagram name="Page-1" id="p1"><mxGraphModel><root><mxCell id="0"/></root></mxGraphModel></diagram></mxfile>';
 
 /** Lets the session's promise chains settle: every answer here is a microtask away. */
 const settle = async () => {
@@ -71,10 +72,25 @@ describe("editing a diagram", () => {
     ]);
     expect(api.calls).toEqual([
       ["update", "g1", { xml: NEW_XML, baseVersion: 4 }],
-      ["uploadPicture", "g1", { version: 5, svg: SVG, png: PNG_BASE64 }],
+      ["uploadPicture", "g1", { version: 5, svg: SVG, png: PNG_BASE64, pageNames: ["Page-1"], morePages: [] }],
     ]);
     expect(saves).toHaveLength(1);
     expect(closed).toEqual([expect.objectContaining({ id: "g1", version: 5, pictureVersion: 5 })]);
+  });
+
+  it("saves a file of several pages without a canvas picture, for each page to be drawn on its own", async () => {
+    const { api, drawio, closed } = open(existing, [view({ id: "g1", version: 4 })]);
+    drawio.emit({ event: "init" });
+    await settle();
+    const twoPages =
+      '<mxfile><diagram name="A"><mxGraphModel><root/></mxGraphModel></diagram>' +
+      '<diagram name="B"><mxGraphModel><root/></mxGraphModel></diagram></mxfile>';
+    drawio.emit({ event: "save", xml: twoPages, exit: true });
+    await settle();
+    // The canvas holds only the page the person was on: it is not taken as the diagram's picture.
+    expect(drawio.posted.map((action) => action.action)).toEqual(["load", "status"]);
+    expect(api.calls).toEqual([["update", "g1", { xml: twoPages, baseVersion: 4 }]]);
+    expect(closed).toEqual([expect.objectContaining({ version: 5, pictureVersion: null })]);
   });
 
   it("stays open after a plain Save, and saves the next one from the new version", async () => {
@@ -265,7 +281,11 @@ describe("a new diagram", () => {
     await settle();
     expect(api.calls).toEqual([
       ["create", { projectId: "p1", title: "Untitled diagram", xml: NEW_XML }],
-      ["uploadPicture", "new1", { version: 1, svg: SVG, png: PNG_BASE64 }],
+      [
+        "uploadPicture",
+        "new1",
+        { version: 1, svg: SVG, png: PNG_BASE64, pageNames: ["Page-1"], morePages: [] },
+      ],
     ]);
     drawio.emit({ event: "save", xml: "<mxfile>more</mxfile>", exit: true });
     await settle();

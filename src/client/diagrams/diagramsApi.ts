@@ -83,9 +83,14 @@ export function diagramErrorMessage(cause: unknown): string {
 export interface DiagramPictureUpload {
   /** The version of the source the picture was drawn from. */
   readonly version: number;
+  /** The first page's SVG. */
   readonly svg: string;
   /** Base64, without a data URI prefix. Null when the browser could not make one. */
   readonly png: string | null;
+  /** Every page's name, in order; null or absent when the pages are not known. */
+  readonly pageNames?: ReadonlyArray<string | null> | null;
+  /** The second page's picture on, up to MAX_DIAGRAM_PAGES pages in all. */
+  readonly morePages?: ReadonlyArray<{ readonly svg: string; readonly png: string | null }>;
 }
 
 export const diagramsApi = {

@@ -30,6 +30,17 @@ export const DRAWIO_EXAMPLE = `<mxGraphModel><root><mxCell id="0"/><mxCell id="1
 <mxCell id="e4" value="no: revise" style="${DRAWIO_ARROW}" edge="1" parent="1" source="signed" target="proposal"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="490" y="180"/><mxPoint x="310" y="180"/></Array></mxGeometry></mxCell>
 </root></mxGraphModel>`;
 
+/** The guide's multi-page example: an <mxfile> of two named pages, each with its own model. */
+export const DRAWIO_PAGES_EXAMPLE = `<mxfile><diagram id="overview" name="Overview"><mxGraphModel><root><mxCell id="0"/><mxCell id="1" parent="0"/>
+<mxCell id="sales" value="Sales" style="${DRAWIO_BOX}" vertex="1" parent="1"><mxGeometry x="40" y="40" width="140" height="60" as="geometry"/></mxCell>
+<mxCell id="delivery" value="Delivery" style="${DRAWIO_BOX}" vertex="1" parent="1"><mxGeometry x="240" y="40" width="140" height="60" as="geometry"/></mxCell>
+<mxCell id="o1" style="${DRAWIO_ARROW}" edge="1" parent="1" source="sales" target="delivery"><mxGeometry relative="1" as="geometry"/></mxCell>
+</root></mxGraphModel></diagram><diagram id="sales-detail" name="Sales detail"><mxGraphModel><root><mxCell id="0"/><mxCell id="1" parent="0"/>
+<mxCell id="lead" value="Lead" style="${DRAWIO_BOX}" vertex="1" parent="1"><mxGeometry x="40" y="40" width="140" height="60" as="geometry"/></mxCell>
+<mxCell id="call" value="Discovery call" style="${DRAWIO_BOX}" vertex="1" parent="1"><mxGeometry x="240" y="40" width="140" height="60" as="geometry"/></mxCell>
+<mxCell id="s1" style="${DRAWIO_ARROW}" edge="1" parent="1" source="lead" target="call"><mxGeometry relative="1" as="geometry"/></mxCell>
+</root></mxGraphModel></diagram></mxfile>`;
+
 /**
  * The guide's sheet example: two edit lists that build a small table, header
  * first so people see it coming. Tests apply them in order from revision 0.
@@ -81,13 +92,17 @@ Tools:
 - Connections read "A -> B", or "A -[label]-> B" with a label. "<->" has an arrowhead at both ends, "<-" only at the start, "--" none. "(loose end)" is an end attached to no shape.
 - create_drawio {projectKey or projectId, title, xml} returns the id, the link and the block to paste into a doc.
 - To change a diagram: read_drawio {diagramId, includeXml: true}, edit that XML keeping the ids of the cells you keep, and send the whole XML with update_drawio {diagramId, xml, baseVersion: the version you read}; a new title goes the same way. A stale baseVersion is refused because someone saved in between: read again and redo the change. Only the diagram's creator and the workspace admin get the XML or may change it.
-Linking: a doc shows a diagram through this block, whose first line is the diagram id and whose optional second line is a caption, nothing else. read_doc describes every linked diagram in drawioDiagrams, so you rarely need read_drawio for them. The block shows the diagram to the others on a doc only when the diagram's creator can edit that doc; to anyone else it reads as missing.
+Pages (the tabs along the bottom of the Draw.io editor): one diagram can hold up to 20. read_drawio lists them in pageNames, in order, and per page under pages.
+- One page: send one <mxGraphModel>. Several: send an <mxfile> with one <diagram name="..."> per page, in order, each holding its own uncompressed <mxGraphModel>. Every page needs a name, no two alike; each page's cell ids are its own. Problems are reported per page ("Page 2 ("Sales detail"): ...") and nothing is saved.
+- For a diagram of several pages, read_drawio {includeXml: true} returns the whole <mxfile>. Change the pages you need inside it and send all of it back: one <mxGraphModel> is refused there (it would delete the other pages), and a page you leave out of the <mxfile> is deleted. For a diagram of one page, one <mxGraphModel> replaces its drawing and keeps the page's name.
+Linking: a doc shows a diagram through this block: the diagram id, then an optional page line, then an optional caption, nothing else. Without a page line it shows the first page. To show another page, put "page: <page name>" on the line after the id. A caption that itself starts with "page:" goes after an empty "page:" line. A block whose page no longer exists shows "Page not found". read_doc describes every linked diagram in drawioDiagrams, so you rarely need read_drawio for them. The block shows the diagram to the others on a doc only when the diagram's creator can edit that doc; to anyone else it reads as missing.
 \`\`\`t3-drawio
 <diagram id>
+page: Sales detail
 Optional caption
 \`\`\`
-The picture: you write only the XML. Draw.io draws the picture in a browser, the first time a person who manages the diagram opens it or a doc that links it. Until then read_drawio has no picture and docs show "Picture not ready yet". Say so when you hand over the link.
-Writing the XML (one uncompressed <mxGraphModel>):
+The picture: you write only the XML. Draw.io draws one picture per page in a browser, the first time a person who manages the diagram opens it or a doc that links it. Until then read_drawio has no picture and docs show "Picture not ready yet". Say so when you hand over the link.
+Writing the XML (one uncompressed <mxGraphModel> per page):
 - Skeleton: <mxGraphModel><root><mxCell id="0"/><mxCell id="1" parent="0"/> ...your cells... </root></mxGraphModel>. Cells 0 and 1 are required. Every shape and connection has parent="1" and an id of its own.
 - Shape: <mxCell id="a" value="Label" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="1"><mxGeometry x="40" y="40" width="140" height="60" as="geometry"/></mxCell>. x and y are the top-left corner and y grows downward. 140 by 60 fits two short lines; leave 60 or more between shapes for the arrows.
 - Connection: <mxCell id="e1" value="optional label" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;" edge="1" parent="1" source="a" target="b"><mxGeometry relative="1" as="geometry"/></mxCell>. source and target are shape ids, so the arrow follows when a person moves a shape. Never place a connection by coordinates alone. To route one around a shape, add <Array as="points"><mxPoint x=".." y=".."/></Array> inside its mxGeometry.
@@ -95,7 +110,9 @@ Writing the XML (one uncompressed <mxGraphModel>):
 - It is XML: inside value write &amp; &lt; &gt; &quot;, and a line break as &lt;br&gt;. &nbsp; is not XML. Do not compress or base64-encode anything.
 - Writes are checked. XML that is not well-formed is refused with the line. The result lists the shapes and connections as read, and warns when a connection or a parent names an id that no cell has.
 Example (a flow with a decision and a loop back):
-${DRAWIO_EXAMPLE}`,
+${DRAWIO_EXAMPLE}
+Example of two pages:
+${DRAWIO_PAGES_EXAMPLE}`,
   video: `Videos play inside the doc from a \`\`\`t3-video block. Its first line is the source and its optional second line is the title, nothing else. The source is a YouTube link (watch, youtu.be, shorts, embed), a Loom link (share, embed), or a /api/videos/<docId>/<file> URL already uploaded in the editor; agents cannot upload video files. Bare links stay plain links. Example:
 \`\`\`t3-video
 https://www.youtube.com/watch?v=dQw4w9WgXcQ

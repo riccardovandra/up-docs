@@ -7,6 +7,7 @@ import { createRoot, type Root } from "react-dom/client";
 import {
   diagramPath,
   isDrawioLanguage,
+  pageIndexOf,
   parseDrawioBlock,
   type DiagramUsage,
   type DrawioBlock,
@@ -22,6 +23,7 @@ import {
   blockDiagram,
   detachCopy,
   mergeDiagram,
+  pageChoices,
   usageLine,
   type BlockAction,
   type BlockDiagram,
@@ -29,6 +31,7 @@ import {
 import {
   relinkDrawioBlock,
   removeDrawioBlock,
+  setDrawioBlockPage,
   type DrawioSupportStorage,
 } from "./drawioSupport.ts";
 import "./drawio.css";
@@ -88,6 +91,7 @@ function LinkedFigure(props: {
   readonly canChange: () => boolean;
   readonly onRemove: () => boolean;
   readonly onRelink: (diagramId: string) => boolean;
+  readonly onSetPage: (page: string) => boolean;
 }) {
   const { block, support } = props;
   const { diagramId } = block;
@@ -170,15 +174,27 @@ function LinkedFigure(props: {
     navigate(diagramPath(diagramId));
   };
 
-  const caption = block.caption ?? diagram?.title ?? null;
+  const caption =
+    block.caption ??
+    (diagram ? (block.page === null ? diagram.title : `${diagram.title} · ${block.page}`) : null);
   const picture = diagram ? (
     <DiagramPicture
       diagramId={diagramId}
       diagram={diagram}
+      page={block.page}
       className="drawio-picture"
       {...(block.caption ? { alt: block.caption } : {})}
     />
   ) : null;
+  // Which page the block shows, for someone who edits the doc, once the diagram has several.
+  const pages = props.editable ? pageChoices(diagram, block.page) : [];
+  const shownPage = block.page ?? pages[0] ?? "";
+  const choosePage = (page: string) => {
+    if (busy || page === shownPage || !props.canChange()) return;
+    if (!props.onSetPage(page)) {
+      support?.context()?.notify("This block is no longer in the tab.");
+    }
+  };
 
   return (
     <figure className="drawio-figure" data-status={diagram ? "linked" : (loaded ?? "loading")}>
@@ -188,6 +204,25 @@ function LinkedFigure(props: {
       </span>
       {actions.length > 0 ? (
         <div className="drawio-actions" role="group" aria-label="Diagram actions">
+          {pages.length > 0 ? (
+            <label className="drawio-page-choice">
+              <span>Page</span>
+              <select
+                className="drawio-page-select"
+                aria-label="Page shown in this doc"
+                value={shownPage}
+                onChange={(event) => choosePage(event.target.value)}
+              >
+                {pages.map((name) => (
+                  <option key={name} value={name}>
+                    {pageIndexOf(diagram?.picturePages ?? [], name) === -1
+                      ? `${name} (not found)`
+                      : name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
           {actions.map((action) =>
             action.id === "open" ? (
               <a
@@ -284,7 +319,10 @@ export class DrawioView implements NodeView {
     chrome.className = "drawio-chrome";
     chrome.contentEditable = "false";
     // Keep the browser from placing a caret in the figure, and the editor's selection where it is.
-    chrome.addEventListener("mousedown", (event) => event.preventDefault());
+    // A page list must still open.
+    chrome.addEventListener("mousedown", (event) => {
+      if (!(event.target instanceof HTMLSelectElement)) event.preventDefault();
+    });
     this.dom.append(pre, chrome);
     this.root = createRoot(chrome);
 
@@ -351,6 +389,12 @@ export class DrawioView implements NodeView {
     return pos !== null && relinkDrawioBlock(this.editor, pos, diagramId);
   };
 
+  /** Points the block at another page of its diagram. False when the block is gone. */
+  private readonly setPage = (page: string): boolean => {
+    const pos = this.position();
+    return pos !== null && setDrawioBlockPage(this.editor, pos, page);
+  };
+
   /** Repaints when the source or the right to edit changed, and tracks the caret. */
   private readonly sync = () => {
     if (this.destroyed) return;
@@ -372,6 +416,7 @@ export class DrawioView implements NodeView {
             canChange={this.canChange}
             onRemove={this.remove}
             onRelink={this.relink}
+            onSetPage={this.setPage}
           />
         ) : (
           <p className="drawio-message">

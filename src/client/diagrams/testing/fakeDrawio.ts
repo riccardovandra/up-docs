@@ -59,6 +59,7 @@ export const summary = (overrides: Partial<DiagramSummary> = {}): DiagramSummary
   title: "Flow",
   version: 1,
   pictureVersion: null,
+  picturePages: null,
   hasSource: true,
   createdBy: "owner",
   createdAt: 1,
@@ -157,7 +158,11 @@ export function fakeApi(initial: ReadonlyArray<DiagramView> = []) {
       take("upload");
       const current = diagrams.get(diagramId)!;
       if (picture.version !== current.version) throw conflictError(current);
-      const next = { ...current, pictureVersion: picture.version };
+      const next = {
+        ...current,
+        pictureVersion: picture.version,
+        picturePages: picture.pageNames ?? null,
+      };
       diagrams.set(diagramId, next);
       const { xml: _xml, canEdit: _canEdit, ...rest } = next;
       return rest;
