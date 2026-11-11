@@ -103,6 +103,7 @@ describe("embed wire protocol", () => {
     const thread = { environmentId: "e", threadId: "t" };
     const messages: ReadonlyArray<EmbedParentMessage> = [
       { type: "t3-docs:hello", features: ["start-work", "add-to-chat", "send-to"] },
+      { type: "t3-docs:hello", features: ["add-to-chat", "add-diagram-comment-to-chat"] },
       { type: "t3-docs:navigate", path: "/d/1" },
       { type: "t3-docs:link-thread", docId: "d", title: "T", ...thread },
       { type: "t3-docs:threads", threads: [{ ...thread, title: "T" }] },
@@ -146,6 +147,21 @@ describe("embed wire protocol", () => {
         body: "b",
         anchor: null,
       },
+      // A comment on a Draw.io diagram, only to a host listing add-diagram-comment-to-chat.
+      {
+        type: "t3-docs:add-comment-to-chat",
+        docId: "",
+        tabId: "",
+        docTitle: "T",
+        url: "u",
+        commentId: "c",
+        quote: "q",
+        body: "b",
+        anchor: null,
+        diagramId: "g",
+        diagramTitle: "T",
+        diagramPage: null,
+      },
       { type: LOCAL_REQUEST_TYPE, requestId: "r", request: { kind: "files.list" } },
     ];
     expect(messages.map((message) => Object.keys(message).sort().join(" "))).toEqual([
@@ -157,6 +173,7 @@ describe("embed wire protocol", () => {
       "environmentId threadId type",
       "docId environmentId threadId type",
       "anchor body commentId docId docTitle quote tabId type url",
+      "anchor body commentId diagramId diagramPage diagramTitle docId docTitle quote tabId type url",
       "request requestId type",
     ]);
   });

@@ -79,7 +79,7 @@ export async function listDiagramThreads(
   diagramId: string,
 ): Promise<ReadonlyArray<DiagramThread>> {
   const { results } = await db
-    .prepare("SELECT * FROM diagram_comments WHERE diagram_id = ? ORDER BY created_at, id")
+    .prepare("SELECT * FROM diagram_comments WHERE diagram_id = ? ORDER BY created_at, rowid")
     .bind(diagramId)
     .all<Row>();
   return groupDiagramThreads(results.map(toComment));

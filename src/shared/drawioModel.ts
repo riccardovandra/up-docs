@@ -536,7 +536,8 @@ function readLayout(head: PageHead, model: XmlElement): DrawioPageLayout {
   const shapes: Array<DrawioShapeBox> = [];
   const points: Array<{ x: number; y: number }> = [];
   for (const { cell, geometry } of order) {
-    if (!geometry || geometry.attributes.get("relative") === "1") continue;
+    // A relative vertex is a label placed along something else; an edge's geometry is always relative.
+    if (!geometry || (cell.vertex && geometry.attributes.get("relative") === "1")) continue;
     const parent = cell.parent === undefined ? undefined : placed.get(cell.parent);
     if (parent?.cell.edge) continue;
     const origin = originOf(cell.parent);
