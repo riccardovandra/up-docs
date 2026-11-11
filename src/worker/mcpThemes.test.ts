@@ -11,7 +11,7 @@ const box = (id: string, label: string, style = "rounded=1;whiteSpace=wrap;html=
   `<mxCell id="${id}" value="${label}" style="${style}" vertex="1" parent="1">` +
   `<mxGeometry x="40" y="40" width="120" height="60" as="geometry"/></mxCell>`;
 const edge = (id: string, source: string, target: string) =>
-  `<mxCell id="${id}" style="endArrow=block;html=1;" edge="1" parent="1" ` +
+  `<mxCell id="${id}" style="endArrow=block;html=1;jumpStyle=arc;jumpSize=6;" edge="1" parent="1" ` +
   `source="${source}" target="${target}"><mxGeometry relative="1" as="geometry"/></mxCell>`;
 
 const PLAIN = model(box("a", "Lead") + box("b", "Client") + edge("e", "a", "b"));

@@ -4,6 +4,7 @@
 // browser's XML parser, so a source refused here would not open there either.
 
 import { MAX_DIAGRAM_PAGES, MAX_DRAWIO_PAGE_NAME_LENGTH, pageNameLine } from "./drawio.ts";
+import { layoutProblems, type LayoutBox, type LayoutEdge, type LayoutPoint } from "./drawioLayout.ts";
 
 /** The words standing in for a shape nobody labelled, and for an end attached to nothing. */
 export const UNLABELLED_SHAPE = "(unlabelled shape)";
@@ -263,7 +264,9 @@ function cellsOf(model: XmlElement): ReadonlyArray<Cell> {
 }
 
 /** One child of `<root>` as a cell, with its `<mxGeometry>`; null when it holds no `<mxCell>`. */
-function cellOf(element: XmlElement): (Cell & { readonly geometry: XmlElement | undefined }) | null {
+function cellOf(
+  element: XmlElement,
+): (Cell & { readonly geometry: XmlElement | undefined; readonly value: string }) | null {
   const cell =
     element.name === "mxCell" ? element : element.children.find((child) => child.name === "mxCell");
   if (!cell) return null;
@@ -278,6 +281,7 @@ function cellOf(element: XmlElement): (Cell & { readonly geometry: XmlElement | 
     source: cell.attributes.get("source"),
     target: cell.attributes.get("target"),
     style,
+    value,
     geometry: cell.children.find((child) => child.name === "mxGeometry"),
   };
 }
@@ -366,6 +370,7 @@ function readPage(head: PageHead, model: XmlElement): DrawioPage {
       );
     }
   }
+  warnings.push(...pageLayoutProblems(model));
   return {
     ...head,
     shapes: shapes.map((cell) => cell.label || UNLABELLED_SHAPE),
@@ -577,6 +582,131 @@ function readLayout(head: PageHead, model: XmlElement): DrawioPageLayout {
     shapes,
     bounds: { x, y, width: Math.max(...xs) - x, height: Math.max(...ys) - y },
   };
+}
+
+/** A label's lines as drawn: each line break in the text or the HTML starts one. */
+function labelLines(value: string, style: string): ReadonlyArray<string> {
+  const html = styleValue(style, "html") === "1";
+  const broken = html ? value.replace(HIDDEN_HTML, " ").replace(BREAKING_TAG, "\n") : value;
+  return broken
+    .split("\n")
+    .map((line) => (html ? htmlToText(line) : line).replace(/\s+/g, " ").trim())
+    .filter((line) => line !== "");
+}
+
+const styleNumber = (style: string, key: string, fallback: number) => {
+  const value = Number(styleValue(style, key));
+  return styleValue(style, key) !== undefined && Number.isFinite(value) ? value : fallback;
+};
+
+/** Bare style names ("swimlane", "text") of a style string. */
+const styleNames = (style: string) =>
+  new Set(
+    style
+      .split(";")
+      .map((part) => part.trim())
+      .filter((part) => part !== "" && !part.includes("=")),
+  );
+
+/** The page's layout problems: labels that overflow, boxes that overlap, lines through boxes. */
+function pageLayoutProblems(model: XmlElement): ReadonlyArray<string> {
+  const root = model.children.find((child) => child.name === "root");
+  const cells = (root?.children ?? []).flatMap((element) => {
+    const cell = cellOf(element);
+    return cell ? [cell] : [];
+  });
+  const byId = new Map<string, (typeof cells)[number]>();
+  for (const cell of cells) if (cell.id !== undefined && !byId.has(cell.id)) byId.set(cell.id, cell);
+  const originOf = (id: string | undefined, depth = 0): LayoutPoint => {
+    const parent = id === undefined ? undefined : byId.get(id);
+    if (!parent || !parent.vertex || !parent.geometry || depth > 50) return { x: 0, y: 0 };
+    const above = originOf(parent.parent, depth + 1);
+    return {
+      x: above.x + numberAttribute(parent.geometry, "x"),
+      y: above.y + numberAttribute(parent.geometry, "y"),
+    };
+  };
+
+  const boxes: Array<LayoutBox> = [];
+  const edges: Array<LayoutEdge> = [];
+  for (const cell of cells) {
+    const { geometry, style } = cell;
+    if (!geometry || cell.id === undefined) continue;
+    const parent = cell.parent === undefined ? undefined : byId.get(cell.parent);
+    if (parent?.edge) continue;
+    const origin = originOf(cell.parent);
+    if (cell.vertex) {
+      if (geometry.attributes.get("relative") === "1") continue;
+      const names = styleNames(style);
+      const shape = styleValue(style, "shape");
+      if (names.has("edgeLabel") || names.has("image") || shape === "image" || styleValue(style, "image")) {
+        continue;
+      }
+      // Turned shapes and labels: the estimate would be wrong, so they are left alone.
+      if (styleNumber(style, "rotation", 0) !== 0 || styleValue(style, "horizontal") === "0") continue;
+      const swimlane = names.has("swimlane") || shape === "swimlane";
+      const container =
+        swimlane || names.has("group") || styleValue(style, "container") === "1" || shape === "table";
+      const spacing = styleNumber(style, "spacing", 2);
+      const fontStyle = styleNumber(style, "fontStyle", 0);
+      const html = styleValue(style, "html") === "1";
+      const centred = (key: string, value: string) => (styleValue(style, key) ?? value) === value;
+      boxes.push({
+        id: cell.id,
+        name: labelLines(cell.value, style)[0]?.slice(0, 40) ?? "",
+        x: origin.x + numberAttribute(geometry, "x"),
+        y: origin.y + numberAttribute(geometry, "y"),
+        width: numberAttribute(geometry, "width"),
+        height: numberAttribute(geometry, "height"),
+        parent: parent?.vertex ? parent.id : undefined,
+        kind: container ? "container" : names.has("text") ? "text" : "box",
+        lines: labelLines(cell.value, style),
+        fontSize: styleNumber(style, "fontSize", 12),
+        fontFamily: styleValue(style, "fontFamily") ?? "",
+        bold: (fontStyle & 1) === 1,
+        wrap: html && styleValue(style, "whiteSpace") === "wrap",
+        padding: {
+          left: spacing + styleNumber(style, "spacingLeft", 0),
+          right: spacing + styleNumber(style, "spacingRight", 0),
+          top: spacing + styleNumber(style, "spacingTop", 0),
+          bottom: spacing + styleNumber(style, "spacingBottom", 0),
+        },
+        labelInside:
+          centred("labelPosition", "center") &&
+          centred("verticalLabelPosition", "middle") &&
+          styleValue(style, "overflow") !== "width" &&
+          styleValue(style, "noLabel") !== "1",
+        header: swimlane ? styleNumber(style, "startSize", 23) : 0,
+      });
+    } else if (cell.edge) {
+      const point = (element: XmlElement): LayoutPoint => ({
+        x: origin.x + numberAttribute(element, "x"),
+        y: origin.y + numberAttribute(element, "y"),
+      });
+      const named = (as: string) => {
+        const found = geometry.children.find((child) => child.name === "mxPoint" && child.attributes.get("as") === as);
+        return found ? point(found) : undefined;
+      };
+      const list = geometry.children.find((child) => child.name === "Array" && child.attributes.get("as") === "points");
+      const fraction = (x: string, y: string) =>
+        styleValue(style, x) !== undefined && styleValue(style, y) !== undefined
+          ? { x: styleNumber(style, x, 0.5), y: styleNumber(style, y, 0.5) }
+          : undefined;
+      const router = styleValue(style, "edgeStyle") ?? "";
+      edges.push({
+        id: cell.id,
+        source: cell.source,
+        target: cell.target,
+        sourcePoint: named("sourcePoint"),
+        targetPoint: named("targetPoint"),
+        exit: fraction("exitX", "exitY"),
+        entry: fraction("entryX", "entryY"),
+        points: (list?.children ?? []).filter((child) => child.name === "mxPoint").map(point),
+        orthogonal: router !== "" && router !== "none",
+      });
+    }
+  }
+  return layoutProblems(boxes, edges);
 }
 
 const LAYOUT_READER: PageReader<DrawioPageLayout> = {
