@@ -11,6 +11,7 @@ import {
   themeStyleGuide,
   themeToDrawioConfig,
   themeVertexStyle,
+  withLineJumps,
   UPLIFTED_THEME,
   type DiagramTheme,
 } from "./diagramTheme.ts";
@@ -138,11 +139,26 @@ describe("themeToDrawioConfig", () => {
   });
 });
 
+describe("withLineJumps", () => {
+  it("adds jumps to lines that name none, keeps a line's own, and leaves a complete file as written", async () => {
+    const xml = model(edge("plain", "html=1;") + edge("own", "html=1;jumpStyle=none;"));
+    const jumped = await withLineJumps(xml);
+    const after = styles(jumped!);
+    expect(keyOf(after.plain!, "jumpStyle")).toBe("arc");
+    expect(keyOf(after.own!, "jumpStyle")).toBe("none");
+    expect(await withLineJumps(jumped!)).toBe(jumped);
+    expect(await withLineJumps("<mxGraphModel>")).toBeNull();
+  });
+});
+
 describe("themeStyleGuide", () => {
   it("names each role with its exact style string", () => {
     const lines = themeStyleGuide(UPLIFTED_THEME);
     expect(lines).toContain(`primary box: ${themeVertexStyle(UPLIFTED_THEME, "primary")}`);
-    expect(lines).toContain(`connection: ${themeEdgeStyle(UPLIFTED_THEME)}`);
+    expect(lines).toContain(`connection (main flow): ${themeEdgeStyle(UPLIFTED_THEME)}`);
+    expect(lines).toContain(
+      `secondary connection (side links, planned, references): ${themeEdgeStyle(UPLIFTED_THEME, "secondary")}`,
+    );
     expect(lines.every((line) => line.length < 400)).toBe(true);
   });
 
@@ -264,6 +280,34 @@ describe("restyleDiagram", () => {
     expect(keyOf(after.el!, "elbow")).toBe("vertical");
     expect(keyOf(after.plain!, "edgeStyle")).toBe("orthogonalEdgeStyle");
     expect(keyOf(after.plain!, "curved")).toBe("1");
+  });
+
+  it("draws main lines solid and secondary (dashed) lines thin and light, with jumps, in any theme", async () => {
+    for (const theme of [NEUTRAL_THEME, UPLIFTED_THEME]) {
+      const main = themeEdgeStyle(theme);
+      const secondary = themeEdgeStyle(theme, "secondary");
+      expect(main).toContain("jumpStyle=arc;");
+      expect(secondary).toContain("jumpStyle=arc;");
+      expect(main).not.toContain("dashed=1");
+      expect(secondary).toContain("dashed=1;");
+      expect(Number(/strokeWidth=([\d.]+)/.exec(main)![1])).toBeGreaterThanOrEqual(1.5);
+      expect(secondary).toContain("strokeWidth=1;");
+      expect(themeToDrawioConfig(theme).defaultEdgeStyle).toMatchObject({ jumpStyle: "arc" });
+    }
+    const xml = model(
+      box("a", "rounded=0;whiteSpace=wrap;html=1;") +
+        box("b", "rounded=0;whiteSpace=wrap;html=1;") +
+        edge("main", "html=1;") +
+        edge("side", "html=1;dashed=1;") +
+        edge("own", "html=1;jumpStyle=none;"),
+    );
+    const after = styles((await restyled(xml, NEUTRAL_THEME)).xml);
+    expect(keyOf(after.main!, "jumpStyle")).toBe("arc");
+    expect(keyOf(after.main!, "strokeWidth")).toBe("1.5");
+    expect(keyOf(after.main!, "strokeColor")).toBe("#000000");
+    expect(keyOf(after.side!, "strokeWidth")).toBe("1");
+    expect(keyOf(after.side!, "strokeColor")).not.toBe("#000000");
+    expect(keyOf(after.own!, "jumpStyle")).toBe("none");
   });
 
   it("changes nothing on a second run", async () => {

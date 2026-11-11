@@ -358,18 +358,66 @@ function vertexValues(tokens: DiagramThemeTokens, role: DiagramThemeRole): Style
   };
 }
 
-function edgeValues(tokens: DiagramThemeTokens): StyleValues {
+/**
+ * Built in, whatever the theme: an arc where two lines cross, so each line can
+ * be followed through a crossing.
+ */
+export const LINE_JUMP_VALUES: StyleValues = { jumpStyle: "arc", jumpSize: "6" };
+
+/**
+ * Two weights of line, whatever the theme. Main lines carry the flow the diagram
+ * is about: solid, at least MAIN_LINE_MIN_WIDTH px. Secondary lines (side links,
+ * planned or optional ones, references) recede: dashed, thin, a lighter colour.
+ * A dashed line is a secondary one.
+ */
+export type ConnectionWeight = "main" | "secondary";
+export const MAIN_LINE_MIN_WIDTH = 1.5;
+const SECONDARY_LINE_WIDTH = 1;
+/** How far a secondary line's colour moves from the main line's towards the canvas. */
+const SECONDARY_FADE = 0.45;
+
+/** `a` moved `amount` (0 to 1) of the way to `b`; both "#rrggbb". */
+function mixHex(a: string, b: string, amount: number): string {
+  const channel = (hex: string, at: number) => Number.parseInt(hex.slice(at, at + 2), 16);
+  const x = normalizeHex(a) ?? "#000000";
+  const y = normalizeHex(b) ?? "#ffffff";
+  return `#${[1, 3, 5]
+    .map((at) =>
+      Math.round(channel(x, at) + (channel(y, at) - channel(x, at)) * amount)
+        .toString(16)
+        .padStart(2, "0"),
+    )
+    .join("")}`;
+}
+
+/** Line colour, label colour and width of a connection of `weight`. */
+function weightValues(tokens: DiagramThemeTokens, weight: ConnectionWeight): StyleValues {
+  if (weight === "main") {
+    return {
+      strokeColor: edgeColour(tokens),
+      strokeWidth: String(Math.max(tokens.strokeWidth, MAIN_LINE_MIN_WIDTH)),
+      fontColor: tokens.canvas.text,
+    };
+  }
+  return {
+    dashed: "1",
+    strokeColor: mixHex(edgeColour(tokens), tokens.canvas.background, SECONDARY_FADE),
+    strokeWidth: String(SECONDARY_LINE_WIDTH),
+    fontColor: mixHex(tokens.canvas.text, tokens.canvas.background, SECONDARY_FADE / 2),
+  };
+}
+
+function edgeValues(tokens: DiagramThemeTokens, weight: ConnectionWeight = "main"): StyleValues {
   return {
     rounded: tokens.cornerRadius > 0 ? "1" : "0",
     ...EDGE_STYLE_VALUES[tokens.edgeStyle],
     html: "1",
     endArrow: tokens.arrowHead,
-    strokeColor: edgeColour(tokens),
-    strokeWidth: String(tokens.strokeWidth),
-    fontColor: tokens.canvas.text,
+    ...weightValues(tokens, weight),
     ...fontStyleValues(tokens.font),
     fontSize: String(edgeFontSize(tokens)),
     shadow: tokens.shadow ? "1" : "0",
+    ...LINE_JUMP_VALUES,
   };
 }
 
@@ -382,8 +430,9 @@ const styleString = (values: StyleValues) =>
 export const themeVertexStyle = (theme: DiagramTheme, role: DiagramThemeRole) =>
   styleString(vertexValues(theme.tokens, role));
 
-/** The style string for a new connection. */
-export const themeEdgeStyle = (theme: DiagramTheme) => styleString(edgeValues(theme.tokens));
+/** The style string for a new connection: a main one unless `weight` says secondary. */
+export const themeEdgeStyle = (theme: DiagramTheme, weight: ConnectionWeight = "main") =>
+  styleString(edgeValues(theme.tokens, weight));
 
 /** The style string for a container (swimlane) whose header takes `role`. */
 export const themeContainerStyle = (theme: DiagramTheme, role: DiagramThemeRole) =>
@@ -414,7 +463,8 @@ export function themeStyleGuide(theme: DiagramTheme): ReadonlyArray<string> {
   return [
     `Theme "${theme.name}" (${theme.id}). Default box role: ${tokens.defaultRole}.`,
     ...DIAGRAM_THEME_ROLES.map((role) => `${role} box: ${themeVertexStyle(theme, role)}`),
-    `connection: ${themeEdgeStyle(theme)}`,
+    `connection (main flow): ${themeEdgeStyle(theme)}`,
+    `secondary connection (side links, planned, references): ${themeEdgeStyle(theme, "secondary")}`,
     `container (${tokens.defaultRole} header): ${themeContainerStyle(theme, tokens.defaultRole)}`,
     `text: ${themeTextStyle(theme)}`,
   ];
@@ -659,17 +709,21 @@ function restyleCell(
     style: formatStyle(style.parts),
   });
   if (cell.edge) {
-    if (!isNone(style.get("strokeColor"))) style.set({ strokeColor: edgeColour(tokens) });
+    const { strokeColor, ...weight } = weightValues(
+      tokens,
+      style.get("dashed") === "1" ? "secondary" : "main",
+    );
+    if (!isNone(style.get("strokeColor"))) style.set({ strokeColor: strokeColor! });
     // A special router (entity relation, elbow, isometric...) keeps its own routing and corners.
     if (isPlainRoute(style)) {
       style.set({ rounded: tokens.cornerRadius > 0 ? "1" : "0", ...EDGE_STYLE_VALUES[tokens.edgeStyle] });
     }
     style.set({
-      fontColor: tokens.canvas.text,
-      strokeWidth: String(tokens.strokeWidth),
+      ...weight,
       shadow: tokens.shadow ? "1" : "0",
       ...fontSizeValues(style, edgeFontSize(tokens)),
     });
+    if (!style.has("jumpStyle")) style.set(LINE_JUMP_VALUES);
     setFont(style, tokens.font);
     // A line drawn without an arrowhead stays without one.
     if (style.get("endArrow") !== "none") style.set({ endArrow: tokens.arrowHead });
@@ -848,4 +902,28 @@ export interface RestyleDiagramInput {
   readonly baseVersion: number;
   /** Restyle to this theme; omitted: the diagram's effective theme. Does not change the setting. */
   readonly themeId?: string;
+}
+
+// ---------------------------------------------------------------- built-in defaults
+
+/**
+ * Gives every connection that names no jump style the built-in arc where it
+ * crosses another line. A line that sets its own `jumpStyle` (including
+ * "none") keeps it, and a source with nothing to add comes back exactly as
+ * written. Null when the source is not XML Draw.io can open.
+ */
+export async function withLineJumps(xml: string): Promise<string | null> {
+  let added = 0;
+  const result = await rewriteDrawio(xml, {
+    cell: (cell) => {
+      if (!cell.edge) return null;
+      const style = new Style(cell.style);
+      if (style.has("jumpStyle")) return null;
+      style.set(LINE_JUMP_VALUES);
+      added += 1;
+      return formatStyle(style.parts);
+    },
+  });
+  if (!result.ok) return null;
+  return added === 0 ? xml : result.xml;
 }

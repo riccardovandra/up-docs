@@ -14,7 +14,7 @@ const box = (id: string, label: string) =>
   `<mxCell id="${id}" value="${label}" style="rounded=1;html=1;" vertex="1" parent="1">` +
   `<mxGeometry x="40" y="40" width="120" height="60" as="geometry"/></mxCell>`;
 const edge = (id: string, source: string, target: string, label = "") =>
-  `<mxCell id="${id}" value="${label}" style="endArrow=block;html=1;" edge="1" parent="1" ` +
+  `<mxCell id="${id}" value="${label}" style="endArrow=block;html=1;jumpStyle=arc;jumpSize=6;" edge="1" parent="1" ` +
   `source="${source}" target="${target}"><mxGeometry relative="1" as="geometry"/></mxCell>`;
 
 const FLOW = model(box("a", "Discovery call") + box("b", "Proposal") + edge("e", "a", "b", "won"));
@@ -810,5 +810,31 @@ describe("Draw.io pages over MCP", () => {
       baseVersion: 2,
     });
     expect(back.isError).toBe(false);
+  });
+});
+
+describe("Draw.io layout defaults over MCP", () => {
+  it("adds line jumps on save and warns about text that overflows and lines through boxes", async () => {
+    const mcp = await makeMcpHarness();
+    const placed = (id: string, label: string, x: number, width = 100) =>
+      `<mxCell id="${id}" value="${label}" style="rounded=1;" vertex="1" parent="1">` +
+      `<mxGeometry x="${x}" y="0" width="${width}" height="40" as="geometry"/></mxCell>`;
+    const xml = model(
+      placed("a", "A", 0) +
+        placed("m", "A label much too long for its box", 200) +
+        placed("b", "B", 400) +
+        `<mxCell id="e" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="1" source="a" target="b">` +
+        `<mxGeometry relative="1" as="geometry"/></mxCell>` +
+        `<mxCell id="own" style="html=1;jumpStyle=none;" edge="1" parent="1" source="a" target="m">` +
+        `<mxGeometry relative="1" as="geometry"/></mxCell>`,
+    );
+    const created = await mcp.tool("create_drawio", { title: "Layout", xml });
+    expect(created.isError).toBe(false);
+    const warnings = created.body.warnings as ReadonlyArray<string>;
+    expect(warnings.some((w) => w.includes('"A label much too long for its box": the text runs outside'))).toBe(true);
+    expect(warnings.some((w) => w.includes('The connection "A" -> "B" runs through "A label much too long'))).toBe(true);
+    const stored = (await Diagrams.getDiagram(mcp.api.db, created.body.diagramId as string)).xml;
+    expect(stored).toContain('style="edgeStyle=orthogonalEdgeStyle;html=1;jumpStyle=arc;jumpSize=6;"');
+    expect(stored).toContain('style="html=1;jumpStyle=none;"');
   });
 });

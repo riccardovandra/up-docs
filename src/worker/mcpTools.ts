@@ -96,7 +96,7 @@ import * as DiagramComments from "./diagramComments.ts";
 import * as Diagrams from "./diagrams.ts";
 import * as DrawioLinks from "./drawioLinks.ts";
 import * as DiagramThemes from "./diagramThemes.ts";
-import { isDiagramThemeId, restyleDiagram } from "../shared/diagramTheme.ts";
+import { isDiagramThemeId, restyleDiagram, withLineJumps } from "../shared/diagramTheme.ts";
 import {
   effectiveThemeBrief,
   ROLE_COLOUR_FORMAT,
@@ -1029,6 +1029,11 @@ async function drawioXmlArg(args: Args): Promise<{
       `${problems.length === 1 ? "A page has a problem" : `${problems.length} problems with the pages`}. Nothing was saved.`,
       { problems, ...DRAWIO_GUIDE },
     );
+  }
+  // Built-in default: lines that cross get an arc. Skipped when it would push the file over its limit.
+  const jumped = await withLineJumps(xml);
+  if (jumped !== null && jumped !== xml && !checkDiagramXml(jumped)) {
+    return { xml: jumped, model: await readDrawio(jumped), root };
   }
   return { xml, model, root };
 }
