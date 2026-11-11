@@ -1,7 +1,10 @@
 import type { ApiDeps } from "./api.ts";
 import * as Auth from "./auth.ts";
+import * as DrawioLinks from "./drawioLinks.ts";
+import { MAX_DIAGRAM_XML_BYTES } from "../shared/drawio.ts";
 import {
   callTool,
+  drawioDownload,
   McpToolError,
   ToolResultWithImages,
   TOOLS,
@@ -47,7 +50,7 @@ How to write (what the user keeps asking for):
 - Draw to explain: every process, loop, system, data model or comparison of options gets a diagram beside its text. One idea per diagram, its title says what to take from it. Actions: input, system, output. Roadmaps: a cascade. Data models: before and after. Options: side by side. Keep each label line under about 24 characters.
 Formats: call format_guide {topic} before you first write one. Malformed blocks are refused with the reason.
 - Diagrams: \`\`\`t3-widget id=<slug> blocks (topic "diagram"). Existing \`\`\`mermaid blocks keep working; edit them in place, never convert them.
-- Draw.io diagrams the user reworks by hand: list_drawio, read_drawio, create_drawio, update_drawio (topic "drawio").
+- Draw.io diagrams people edit by hand: list_drawio, read_drawio, create_drawio, update_drawio; big files by link (topic "drawio").
 - Rich tables (status chips, links, per-cell comments): \`\`\`t3-table (topic "table"). Plain markdown tables are fine for static data.
 - Images: ![alt](https://...) links are copied into the doc on write; a local file goes up with prepare_image_upload (topic "image").
 - Videos: \`\`\`t3-video (topic "video"). LinkedIn and X posts: \`\`\`t3-embed (topic "embed").
@@ -228,5 +231,102 @@ export async function handleMcp(
     }
     default:
       return rpcError(body.id, -32601, `Method not found: ${body.method}`);
+  }
+}
+
+const linkJson = (status: number, body: unknown) =>
+  new Response(JSON.stringify(body, null, 2), {
+    status,
+    headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" },
+  });
+
+const LINK_INVALID = {
+  error: "link_invalid",
+  message: "This link is unknown, used, expired, or its API token was revoked. Ask for a new one.",
+};
+
+/** HTTP status for a refused upload; the JSON body is the tool's own error. */
+function linkErrorStatus(error: unknown): number {
+  if (error === "version_conflict") return 409;
+  if (error === "forbidden") return 403;
+  if (error === "not_found") return 404;
+  if (error === "too_large") return 413;
+  return 400;
+}
+
+/**
+ * `PUT /api/diagram-uploads/:token` runs create_drawio or update_drawio with
+ * the request body as `xml`; `GET /api/diagram-downloads/:token` returns a
+ * diagram's whole file. Links come from prepare_drawio_upload and read_drawio
+ * {downloadLink: true}; each works once, as the API token that asked for it,
+ * so the same rights and checks apply as to the tool call itself.
+ */
+export async function handleDrawioLink(
+  request: Request,
+  deps: ApiDeps,
+): Promise<Response | null> {
+  const { pathname } = new URL(request.url);
+  const match = /^\/api\/diagram-(uploads|downloads)\/([^/]+)$/.exec(pathname);
+  if (!match) return null;
+  const kind = match[1] === "uploads" ? "upload" : "download";
+  const method = request.method;
+  if (kind === "upload" ? method !== "PUT" && method !== "POST" : method !== "GET")
+    return linkJson(405, { error: "method_not_allowed" });
+
+  let xml: string | undefined;
+  if (kind === "upload") {
+    // Read before claiming, so a slow or broken upload does not burn the link.
+    const declared = Number(request.headers.get("Content-Length") ?? "0");
+    if (declared > MAX_DIAGRAM_XML_BYTES)
+      return linkJson(413, { error: "too_large", message: `The file is over ${MAX_DIAGRAM_XML_BYTES} bytes.` });
+    xml = await request.text();
+    if (new TextEncoder().encode(xml).length > MAX_DIAGRAM_XML_BYTES)
+      return linkJson(413, { error: "too_large", message: `The file is over ${MAX_DIAGRAM_XML_BYTES} bytes.` });
+  }
+
+  const claim = await DrawioLinks.claimDrawioLink(deps.db, {
+    token: match[2]!,
+    kind,
+    now: deps.now(),
+  });
+  if (!claim) return linkJson(404, LINK_INVALID);
+  const tokenName = await deps.db
+    .prepare("SELECT name FROM api_tokens WHERE id = ?1")
+    .bind(claim.apiTokenId)
+    .first<{ name: string }>();
+  const ctx = {
+    deps,
+    origin: deps.publicOrigin,
+    agentName: claim.agentName,
+    principal: {
+      kind: "token" as const,
+      userId: claim.userId,
+      tokenId: claim.apiTokenId,
+      tokenName: tokenName?.name ?? claim.agentName,
+    },
+  };
+  try {
+    if (claim.tool === "download") {
+      const file = await drawioDownload(ctx, String(claim.args.diagramId));
+      return new Response(file.xml, {
+        status: 200,
+        headers: {
+          "Content-Type": "application/xml; charset=utf-8",
+          "Cache-Control": "no-store",
+          "X-Diagram-Version": String(file.version),
+        },
+      });
+    }
+    const result = await callTool(claim.tool, { ...claim.args, xml }, ctx);
+    const body = result instanceof ToolResultWithImages ? result.body : result;
+    return linkJson(claim.tool === "create_drawio" ? 201 : 200, body);
+  } catch (cause) {
+    if (cause instanceof McpToolError) {
+      // A version conflict can never succeed with the same link: keep it used.
+      if (cause.detail.error !== "version_conflict") await claim.release();
+      return linkJson(linkErrorStatus(cause.detail.error), cause.detail);
+    }
+    await claim.release();
+    throw cause;
   }
 }

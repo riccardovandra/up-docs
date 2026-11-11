@@ -57,6 +57,7 @@ import {
   isDiagramId,
   isPictureCurrent,
   MAX_DIAGRAM_TITLE_LENGTH,
+  MAX_DIAGRAM_XML_BYTES,
   MAX_DRAWIO_PAGE_NAME_LENGTH,
   pageIndexOf,
   pagePicture,
@@ -93,6 +94,7 @@ import type { Principal } from "./auth.ts";
 import * as Comments from "./comments.ts";
 import * as DiagramComments from "./diagramComments.ts";
 import * as Diagrams from "./diagrams.ts";
+import * as DrawioLinks from "./drawioLinks.ts";
 import * as DiagramThemes from "./diagramThemes.ts";
 import { isDiagramThemeId, restyleDiagram } from "../shared/diagramTheme.ts";
 import {
@@ -188,7 +190,7 @@ function fail(
   throw new McpToolError({ error, message, ...extra });
 }
 
-interface ToolContext {
+export interface ToolContext {
   readonly deps: ApiDeps;
   readonly origin: string;
   /** The MCP client's name from `initialize`, else the token's name. */
@@ -837,6 +839,36 @@ const drawioUrl = (ctx: ToolContext, diagramId: string) =>
   `${ctx.origin}${diagramPath(diagramId)}`;
 
 /** The `diagramId` argument: a diagram's id, or a link to its page or picture. */
+/** A one-time Draw.io link for the agent's API token; the link acts as that token. */
+async function drawioLinkFor(
+  ctx: ToolContext,
+  tool: DrawioLinks.DrawioLinkTool,
+  args: Args,
+) {
+  const { principal } = ctx;
+  if (principal.kind !== "token") {
+    return fail("forbidden", "Draw.io links are for agents signed in with an API token.");
+  }
+  const { token, expiresAt } = await DrawioLinks.createDrawioLink(ctx.deps.db, {
+    tool,
+    userId: principal.userId,
+    apiTokenId: principal.tokenId,
+    agentName: ctx.agentName,
+    args,
+    now: ctx.deps.now(),
+  });
+  return { token, expiresAt: new Date(expiresAt).toISOString() };
+}
+
+/** The whole, uncompressed Draw.io file of a diagram the token user manages. */
+export async function drawioDownload(ctx: ToolContext, diagramId: string) {
+  const { diagram } = await drawioWith(ctx, diagramId, "edit");
+  return {
+    xml: await uncompressedDrawio(diagram.xml),
+    version: diagram.version,
+  };
+}
+
 function drawioIdArg(args: Args): string {
   const value = requireString(args, "diagramId", 2000);
   if (isDiagramId(value)) return value;
@@ -1759,7 +1791,7 @@ export const TOOLS = [
   {
     name: "read_drawio",
     description:
-      'Read one Draw.io diagram from the library, by its id (the first line of a ```t3-drawio block) or its link (<origin>/diagrams/<id>): title, project, the docs that use it, pageNames (its pages, in order), its shapes and its connections ("A -> B", "A -[label]-> B"), per page when the file has several, its version, and openComments (open comment threads with page, shapeId and quote). The current picture of the first page, or of `page`, comes attached as a PNG image when there is one. Pass includeXml: true for the Draw.io XML (an <mxfile> holding every page when there are several), which only the diagram\'s creator and the workspace admin get; you need it to change the diagram with update_drawio.',
+      'Read one Draw.io diagram from the library, by its id (the first line of a ```t3-drawio block) or its link (<origin>/diagrams/<id>): title, project, the docs that use it, pageNames (its pages, in order), its shapes and its connections ("A -> B", "A -[label]-> B"), per page when the file has several, its version, and openComments (open comment threads with page, shapeId and quote). The current picture of the first page, or of `page`, comes attached as a PNG image when there is one. Pass includeXml: true for the Draw.io XML (an <mxfile> holding every page when there are several), which only the diagram\'s creator and the workspace admin get; you need it to change the diagram with update_drawio. To change a diagram with a shell, pass downloadLink: true instead: you get a one-time link that saves the whole file to disk with curl in under a second, and reading the XML into the reply costs minutes on a large file. Edit the file with a script, then send it back with prepare_drawio_upload.',
     inputSchema: {
       type: "object",
       properties: {
@@ -1767,7 +1799,14 @@ export const TOOLS = [
           type: "string",
           description: "The diagram's id, or its link.",
         },
-        includeXml: { type: "boolean" },
+        includeXml: {
+          type: "boolean",
+          description: "Put the whole Draw.io XML in the reply. Only for small diagrams (under about 20 KB); use downloadLink when you have a shell.",
+        },
+        downloadLink: {
+          type: "boolean",
+          description: "Return a one-time curl command that saves the whole Draw.io file (every page, uncompressed) to disk, instead of putting the XML in the reply. Works for 10 minutes. Creator and workspace admin only.",
+        },
         page: {
           type: "string",
           description: "A page name from pageNames: attach that page's picture instead of the first page's.",
@@ -1779,7 +1818,7 @@ export const TOOLS = [
   {
     name: "create_drawio",
     description:
-      'Draw a new Draw.io diagram into the library from Draw.io XML (format_guide {topic: "drawio"} first). File it like create_doc: projectKey (with projectName if the project is new) or projectId; omit both for no project. Returns the id, the link and `block`, the exact ```t3-drawio block to paste into a doc tab. It opens in the same editor as a hand-drawn diagram. Its picture appears the first time a person who manages the diagram opens it. `theme` gives the project\'s diagram theme and its style lines; when the project has a theme and no cell sets its own fillColor, strokeColor or fontColor, the XML is restyled to it before it is stored (applyTheme: true always restyles, false never).',
+      'Draw a new Draw.io diagram into the library from Draw.io XML (format_guide {topic: "drawio"} first). For XML over about 20 KB, or any file already on disk, use prepare_drawio_upload instead: typing a large file into this call takes many minutes. File it like create_doc: projectKey (with projectName if the project is new) or projectId; omit both for no project. Returns the id, the link and `block`, the exact ```t3-drawio block to paste into a doc tab. It opens in the same editor as a hand-drawn diagram. Its picture appears the first time a person who manages the diagram opens it. `theme` gives the project\'s diagram theme and its style lines; when the project has a theme and no cell sets its own fillColor, strokeColor or fontColor, the XML is restyled to it before it is stored (applyTheme: true always restyles, false never).',
     inputSchema: {
       type: "object",
       properties: {
@@ -1804,7 +1843,7 @@ export const TOOLS = [
   {
     name: "update_drawio",
     description:
-      "Change a Draw.io diagram you manage: its XML, its title, or both. Pass the version you read as baseVersion. xml replaces the whole source, so start from read_drawio {includeXml: true}: for a diagram of several pages send the whole <mxfile> back (one <mxGraphModel> is refused, since it would delete the other pages), and a page you leave out is deleted. If someone saved since then nothing is written and the current version is returned: read again and redo your change. Every doc that links the diagram shows the change.",
+      "Change a Draw.io diagram you manage: its XML, its title, or both. For XML over about 20 KB, or any file already on disk, use prepare_drawio_upload {diagramId, baseVersion} instead: typing a large file into this call takes many minutes. Pass the version you read as baseVersion. xml replaces the whole source, so start from read_drawio {includeXml: true}: for a diagram of several pages send the whole <mxfile> back (one <mxGraphModel> is refused, since it would delete the other pages), and a page you leave out is deleted. If someone saved since then nothing is written and the current version is returned: read again and redo your change. Every doc that links the diagram shows the change.",
     inputSchema: {
       type: "object",
       properties: {
@@ -1824,6 +1863,36 @@ export const TOOLS = [
         },
       },
       required: ["diagramId", "baseVersion"],
+    },
+  },
+  {
+    name: "prepare_drawio_upload",
+    description:
+      "Get a one-time link to send a Draw.io file from your machine to the library, so you never type the XML into a tool call (a 200 KB file takes many minutes as text and under a second as a file). With diagramId and baseVersion the file replaces that diagram, exactly like update_drawio; without diagramId it creates a new diagram, exactly like create_drawio (title, and projectKey/projectName or projectId). Send the file with the returned curl command; the reply is the same JSON update_drawio or create_drawio returns, or its error with nothing saved. A refused file leaves the link usable, so fix it and send again. The link works for 10 minutes. The file is the whole source: an <mxfile> with every page, or one <mxGraphModel>.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        diagramId: {
+          type: "string",
+          description: "The diagram to replace, by id or link. Leave out to create a new diagram.",
+        },
+        baseVersion: {
+          type: "integer",
+          description: "With diagramId: the version read_drawio returned.",
+        },
+        title: {
+          type: "string",
+          maxLength: MAX_DIAGRAM_TITLE_LENGTH,
+          description: "Required for a new diagram; optional rename for an existing one.",
+        },
+        projectKey: { type: "string" },
+        projectName: { type: "string" },
+        projectId: { type: "string" },
+        applyTheme: {
+          type: "boolean",
+          description: "New diagrams only, as in create_drawio.",
+        },
+      },
     },
   },
   {
@@ -3009,6 +3078,16 @@ const handlers: Record<
         "Only the diagram's creator and the workspace admin get its Draw.io XML. Call read_drawio without includeXml for its shapes, connections and picture.",
       );
     }
+    if (args.downloadLink === true && !canEdit) {
+      fail(
+        "forbidden",
+        "Only the diagram's creator and the workspace admin can download its Draw.io file. Call read_drawio without downloadLink for its shapes, connections and picture.",
+      );
+    }
+    const download =
+      args.downloadLink === true
+        ? await drawioLinkFor(ctx, "download", { diagramId })
+        : null;
     const [project, usage, picture, model, comments] = await Promise.all([
       drawioProject(ctx, diagram.projectId),
       Diagrams.diagramUsage(ctx.deps.db, {
@@ -3037,6 +3116,16 @@ const handlers: Record<
         await DiagramThemes.effectiveDiagramTheme(ctx.deps.db, diagramId),
       ),
       picture: picture.note,
+      ...(download
+        ? {
+            download: {
+              url: `${ctx.origin}/api/diagram-downloads/${download.token}`,
+              expiresAt: download.expiresAt,
+              curl: `curl -sS -f -o <file.drawio> '${ctx.origin}/api/diagram-downloads/${download.token}'`,
+              next: "Run the curl command to save the whole file (every page, uncompressed). The link works once. Change the file with a script, then send it back with prepare_drawio_upload {diagramId, baseVersion: this version}.",
+            },
+          }
+        : {}),
       ...(args.includeXml === true
         ? {
             // Compressed pages come written out, so every page can be read and changed.
@@ -3175,6 +3264,53 @@ const handlers: Record<
       theme: effectiveThemeBrief(
         await DiagramThemes.effectiveDiagramTheme(ctx.deps.db, diagramId),
       ),
+    };
+  },
+
+  prepare_drawio_upload: async (args, ctx) => {
+    let tool: "create_drawio" | "update_drawio";
+    let stored: Args;
+    if (args.diagramId != null) {
+      const diagramId = drawioIdArg(args);
+      const title = optionalString(args, "title", MAX_DIAGRAM_TITLE_LENGTH);
+      const { baseVersion } = args;
+      if (typeof baseVersion !== "number" || !Number.isInteger(baseVersion)) {
+        return fail(
+          "invalid_argument",
+          '"baseVersion" is required with diagramId: pass the integer version read_drawio returned, so a newer save is not overwritten.',
+        );
+      }
+      const { diagram } = await drawioWith(ctx, diagramId, "edit");
+      if (diagram.version !== baseVersion) {
+        return fail(
+          "version_conflict",
+          "The diagram changed since you read it. Read it again with read_drawio {downloadLink: true} and redo your change.",
+          { currentVersion: diagram.version, url: drawioUrl(ctx, diagramId) },
+        );
+      }
+      tool = "update_drawio";
+      stored = { diagramId, baseVersion, ...(title === undefined ? {} : { title }) };
+    } else {
+      const title = requireString(args, "title", MAX_DIAGRAM_TITLE_LENGTH);
+      if (args.applyTheme != null && typeof args.applyTheme !== "boolean") {
+        return fail("invalid_argument", '"applyTheme" must be true or false.');
+      }
+      tool = "create_drawio";
+      stored = { title };
+      for (const key of ["projectKey", "projectName", "projectId", "applyTheme"]) {
+        if (args[key] != null) stored[key] = args[key];
+      }
+    }
+    const link = await drawioLinkFor(ctx, tool, stored);
+    const uploadUrl = `${ctx.origin}/api/diagram-uploads/${link.token}`;
+    return {
+      uploadUrl,
+      method: "PUT",
+      runs: tool,
+      expiresAt: link.expiresAt,
+      maxBytes: MAX_DIAGRAM_XML_BYTES,
+      curl: `curl -sS -X PUT -H 'Content-Type: application/xml' --data-binary @<file.drawio> '${uploadUrl}'`,
+      next: `Send the file with the curl command. The reply is what ${tool} returns (HTTP 200 or 201), or its error as JSON with nothing saved; a refused file leaves the link usable until it expires.`,
     };
   },
 
