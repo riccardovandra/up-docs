@@ -587,15 +587,20 @@ function roleOf(theme: DiagramTheme, style: Style): DiagramThemeRole {
   const { tokens } = theme;
   const fillValue = style.get("fillColor");
   const fill = isNone(fillValue) ? null : colourOf(fillValue);
-  if (!isNone(fillValue) && (fill === null || fill === "#ffffff")) return tokens.defaultRole;
   const stroke = colourOf(style.get("strokeColor"));
-  if (fill === null && stroke === null) return tokens.defaultRole;
-  // Colours a known theme gave a role keep that role, so built-ins map role to role.
-  for (const known of [theme, ...BUILT_IN_DIAGRAM_THEMES]) {
-    const role = DIAGRAM_THEME_ROLES.find((each) => {
+  const exact = (known: DiagramTheme) =>
+    DIAGRAM_THEME_ROLES.find((each) => {
       const own = known.tokens.roles[each];
       return (fill ?? own.fill) === own.fill && (stroke ?? own.stroke) === own.stroke;
     });
+  if (fill === null && stroke === null) return tokens.defaultRole;
+  // A box already in one of this theme's roles keeps it, even a white one, so a rerun changes nothing.
+  const own = exact(theme);
+  if (own) return own;
+  if (!isNone(fillValue) && (fill === null || fill === "#ffffff")) return tokens.defaultRole;
+  // Colours a built-in gave a role keep that role, so built-ins map role to role.
+  for (const known of BUILT_IN_DIAGRAM_THEMES) {
+    const role = exact(known);
     if (role) return role;
   }
   return nearestRole(tokens, { fill, stroke });

@@ -227,6 +227,24 @@ describe("restyleDiagram", () => {
     expect(twice.summary.changed).toBe(0);
   });
 
+  it("changes nothing on a second run when a theme has a white role", async () => {
+    const white: DiagramTheme = {
+      ...UPLIFTED_THEME,
+      tokens: {
+        ...UPLIFTED_THEME.tokens,
+        roles: {
+          ...UPLIFTED_THEME.tokens.roles,
+          secondary: { fill: "#ffffff", stroke: "#6b8bc4", font: "#14131b" },
+        },
+      },
+    };
+    const once = await restyled(model(box("w", "fillColor=#e1d5e7;strokeColor=#9673a6;")), white);
+    expect(keyOf(styles(once.xml).w!, "fillColor")).toBe("#ffffff");
+    const twice = await restyled(once.xml, white);
+    expect(twice.summary.changed).toBe(0);
+    expect(twice.xml).toBe(once.xml);
+  });
+
   it("goes back to Neutral and keeps the roles", async () => {
     const uplifted = await restyled(neutralFlow);
     const back = styles((await restyled(uplifted.xml, NEUTRAL_THEME)).xml);
