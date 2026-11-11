@@ -51,7 +51,6 @@ import {
   isDiagramThemeId,
   parseDiagramThemeName,
   parseDiagramThemeTokens,
-  restyleDiagram,
 } from "../shared/diagramTheme.ts";
 import {
   DEFAULT_DIAGRAM_TITLE,
@@ -1306,25 +1305,23 @@ async function handleDiagrams(
       themeId === undefined
         ? (await DiagramThemes.effectiveDiagramTheme(deps.db, id)).theme
         : await DiagramThemes.requireUsableDiagramTheme(deps.db, { themeId, userId });
-    if (diagram.version !== baseVersion) return versionConflict(Diagrams.diagramSummary(diagram));
-    const restyled = await restyleDiagram(diagram.xml, theme);
-    if (!restyled.ok) {
-      return json(
-        { error: "invalid_xml", message: `The diagram's XML could not be read: ${restyled.error}.` },
-        400,
-      );
-    }
-    const result = await Diagrams.updateDiagram(deps.db, {
-      diagramId: id,
-      xml: restyled.xml,
+    const result = await DiagramThemes.restyleStoredDiagram(deps.db, {
+      diagram,
+      theme,
       baseVersion,
       now,
     });
+    if (!result.ok && "invalidXml" in result) {
+      return json(
+        { error: "invalid_xml", message: `The diagram's XML could not be read: ${result.invalidXml}.` },
+        400,
+      );
+    }
     return result.ok
       ? json({
           diagram: Diagrams.diagramView(result.diagram, true),
           themeId: theme.id,
-          summary: restyled.summary,
+          summary: result.summary,
         })
       : versionConflict(result.conflict);
   }
