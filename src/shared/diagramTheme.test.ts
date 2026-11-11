@@ -220,6 +220,52 @@ describe("restyleDiagram", () => {
     expect(keyOf(after.l!, "fillColor")).toBeUndefined();
   });
 
+  it("maps a custom theme's roles to the target's roles when it is known", async () => {
+    const orange: DiagramTheme = {
+      ...UPLIFTED_THEME,
+      id: "orange",
+      name: "Orange",
+      builtIn: false,
+      tokens: {
+        ...UPLIFTED_THEME.tokens,
+        roles: {
+          ...UPLIFTED_THEME.tokens.roles,
+          primary: { fill: "#ffe1c2", stroke: "#e8701a", font: "#14131b" },
+        },
+      },
+    };
+    const xml = model(box("a", "rounded=1;html=1;fillColor=#ffe1c2;strokeColor=#e8701a;"));
+    const unknown = styles((await restyled(xml, NEUTRAL_THEME)).xml);
+    expect(keyOf(unknown.a!, "fillColor")).not.toBe("#dae8fc");
+    const result = await restyleDiagram(xml, NEUTRAL_THEME, { knownThemes: [orange] });
+    if (!result.ok) throw new Error(result.error);
+    expect(keyOf(styles(result.xml).a!, "fillColor")).toBe("#dae8fc");
+    expect(result.summary.roles.primary).toBe(1);
+  });
+
+  it("keeps a special connection router and restyles only plain ones", async () => {
+    const xml = model(
+      box("a", "rounded=0;whiteSpace=wrap;html=1;") +
+        box("b", "rounded=0;whiteSpace=wrap;html=1;") +
+        edge("er", "edgeStyle=entityRelationEdgeStyle;rounded=0;html=1;endArrow=ERmany;") +
+        edge("el", "edgeStyle=elbowEdgeStyle;elbow=vertical;html=1;") +
+        edge("plain", "html=1;"),
+    );
+    const curvy: DiagramTheme = {
+      ...UPLIFTED_THEME,
+      tokens: { ...UPLIFTED_THEME.tokens, edgeStyle: "curved" },
+    };
+    const after = styles((await restyled(xml, curvy)).xml);
+    expect(keyOf(after.er!, "edgeStyle")).toBe("entityRelationEdgeStyle");
+    expect(keyOf(after.er!, "rounded")).toBe("0");
+    expect(keyOf(after.er!, "curved")).toBeUndefined();
+    expect(keyOf(after.er!, "strokeColor")).toBe("#5f6470");
+    expect(keyOf(after.el!, "edgeStyle")).toBe("elbowEdgeStyle");
+    expect(keyOf(after.el!, "elbow")).toBe("vertical");
+    expect(keyOf(after.plain!, "edgeStyle")).toBe("orthogonalEdgeStyle");
+    expect(keyOf(after.plain!, "curved")).toBe("1");
+  });
+
   it("changes nothing on a second run", async () => {
     const once = await restyled(neutralFlow);
     const twice = await restyled(once.xml);

@@ -236,4 +236,25 @@ describe("restyle", () => {
     expect(back.body.themeId).toBe("neutral");
     expect(back.body.diagram.xml).toContain("fillColor=#d5e8d4");
   });
+
+  it("maps a box in one of the person's custom themes to the same role", async () => {
+    const { alice, send, createDiagram } = await setup();
+    const orange = (
+      await send<{ theme: CustomDiagramTheme }>(alice, "POST", "/api/diagram-themes", {
+        name: "Orange",
+        tokens: tokens((t) => (t.roles.primary = { fill: "#ffe1c2", stroke: "#e8701a", font: "#14131b" })),
+      })
+    ).body.theme;
+    const xml = XML.replace("fillColor=#d5e8d4;strokeColor=#82b366;", "fillColor=#ffe1c2;strokeColor=#e8701a;");
+    const diagram = await createDiagram(alice, xml);
+    await send(alice, "PUT", `/api/diagrams/${diagram.id}/theme`, { themeId: orange.id });
+    const done = await send<{ diagram: DiagramView; summary: RestyleSummary }>(
+      alice,
+      "POST",
+      `/api/diagrams/${diagram.id}/restyle`,
+      { baseVersion: 1, themeId: "uplifted" },
+    );
+    expect(done.body.summary.roles.primary).toBe(1);
+    expect(done.body.diagram.xml).toContain("fillColor=#dbe5f7");
+  });
 });

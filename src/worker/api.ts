@@ -1301,13 +1301,17 @@ async function handleDiagrams(
     const themeId = themeIdArg(body.themeId);
     if (themeId === false || themeId === null) return error(400, "invalid_theme_id");
     const { diagram } = await need("edit");
+    const effective = (await DiagramThemes.effectiveDiagramTheme(deps.db, id)).theme;
     const theme =
       themeId === undefined
-        ? (await DiagramThemes.effectiveDiagramTheme(deps.db, id)).theme
+        ? effective
         : await DiagramThemes.requireUsableDiagramTheme(deps.db, { themeId, userId });
+    // The person's themes and the diagram's own: a box in one of their roles keeps its role.
+    const { themes } = await DiagramThemes.listDiagramThemes(deps.db, userId);
     const result = await DiagramThemes.restyleStoredDiagram(deps.db, {
       diagram,
       theme,
+      knownThemes: [effective, ...themes].filter((each) => !each.builtIn),
       baseVersion,
       now,
     });
