@@ -84,7 +84,7 @@ export interface CustomDiagramTheme extends DiagramTheme {
 export const MAX_DIAGRAM_THEME_NAME_LENGTH = 80;
 export const MAX_DIAGRAM_THEME_FONT_LENGTH = 60;
 export const MAX_DIAGRAM_THEME_FONT_URL_LENGTH = 300;
-/** How many custom themes one person may keep. */
+/** How many custom themes the workspace may keep. */
 export const MAX_CUSTOM_DIAGRAM_THEMES = 50;
 export const DIAGRAM_THEME_LIMITS = {
   fontSize: { min: 8, max: 36 },

@@ -38,12 +38,11 @@ async function setup(themeId?: string) {
 const stored = async (mcp: Harness, diagramId: string) =>
   (await Diagrams.getDiagram(mcp.api.db, diagramId)).xml;
 
-/** A custom theme made through the REST route by `email` (the owner when left out). */
-async function customTheme(mcp: Harness, name: string, email?: string) {
-  const cookie = email ? await mcp.api.signIn(email) : mcp.cookie;
+/** A custom theme the admin makes through the REST route. */
+async function customTheme(mcp: Harness, name: string) {
   const response = await mcp.api.call("POST", "/api/diagram-themes", {
     body: { name, tokens: { ...UPLIFTED_THEME.tokens, defaultRole: "success" } },
-    headers: { Cookie: cookie },
+    headers: { Cookie: mcp.cookie },
   });
   expect(response.status).toBe(201);
   return ((await response.json()) as { theme: { id: string } }).theme.id;
@@ -123,7 +122,7 @@ describe("MCP diagram themes", () => {
     expect(await stored(mcp, created.body.diagramId)).toBe(PLAIN);
   });
 
-  it("lists built-ins and the caller's own themes with role colours", async () => {
+  it("lists built-ins and every custom theme with role colours, for everyone", async () => {
     const mcp = await makeMcpHarness();
     const own = await customTheme(mcp, "Board deck");
     const list = await mcp.tool("list_diagram_themes", {});
@@ -141,14 +140,15 @@ describe("MCP diagram themes", () => {
       roles: { primary: "#dbe5f7/#4d79d8/#14131b", accent: "#3a5fb5/#33559f/#ffffff" },
       look: expect.stringContaining("Inter 14, titles Montserrat"),
     });
-    expect(list.body.themes[2]).toMatchObject({ name: "Board deck", builtIn: false, mine: true, defaultRole: "success" });
+    expect(list.body.themes[2]).toMatchObject({ name: "Board deck", builtIn: false, defaultRole: "success" });
+    expect(list.body.themes[2]).not.toHaveProperty("mine");
 
-    // Someone else (signed up through a shared doc) sees only the built-ins.
+    // Someone else (signed up through a shared doc) sees the admin's theme too.
     const { doc } = await mcp.seedDoc("Intro");
     await mcp.tool("share_doc", { docId: doc.docId, email: "guest@example.com", role: "viewer" });
     const other = await mcp.asUser("guest@example.com");
     const theirs = await other("list_diagram_themes", {});
-    expect(theirs.body.themes.map((theme: { themeId: string }) => theme.themeId)).toEqual(["neutral", "uplifted"]);
+    expect(theirs.body).toEqual(list.body);
   });
 
   it("set_diagram_theme sets a diagram's theme, with and without a restyle", async () => {
@@ -265,11 +265,17 @@ describe("MCP diagram themes", () => {
     expect(project.isError).toBe(true);
     expect(["forbidden", "not_found"]).toContain(project.body.error);
 
-    // Someone else's custom theme reads as not found, even on their own diagram.
-    const hidden = await customTheme(mcp, "Owner only");
+    // The admin's custom theme is theirs to use on their own diagram, restyle included.
+    const shared = await customTheme(mcp, "Workspace");
     const own = await other("create_drawio", { title: "Mine", xml: PLAIN });
     expect(own.isError).toBe(false);
-    const borrowed = await other("set_diagram_theme", { diagramId: own.body.diagramId, themeId: hidden });
-    expect(borrowed).toMatchObject({ isError: true, body: { error: "not_found" } });
+    const used = await other("set_diagram_theme", {
+      diagramId: own.body.diagramId,
+      themeId: shared,
+      restyle: true,
+    });
+    expect(used.isError).toBe(false);
+    expect(used.body).toMatchObject({ version: 2, theme: { themeId: shared, source: "diagram" } });
+    expect(used.body.restyle.changed).toBeGreaterThan(0);
   });
 });

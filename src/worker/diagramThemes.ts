@@ -3,9 +3,9 @@
 // same functions, so both share one behaviour.
 //
 // Who may do what:
-// - Everyone signed in sees the built-ins and their own custom themes; the admin sees all.
-// - A custom theme is changed or deleted by its creator or the admin. Built-ins never change.
-// - A diagram or project may name only a theme its setter can see.
+// - Everyone signed in sees and uses the built-ins and every custom theme.
+// - Only the workspace admin creates, changes and deletes custom themes. Built-ins never change.
+// - A diagram or project may name any theme that exists.
 
 import { isAdmin } from "../shared/access.ts";
 import {
@@ -30,7 +30,7 @@ import { getProject, NotFoundError } from "./docs.ts";
 
 /** A theme write the store refuses; `code` is the API's error, `message` is for the person. */
 export class DiagramThemeError extends Error {
-  readonly code: "invalid_theme" | "theme_limit" | "built_in_theme" | "forbidden";
+  readonly code: "invalid_theme" | "theme_limit" | "built_in_theme" | "admin_only";
   readonly status: 400 | 403 | 409;
 
   constructor(code: DiagramThemeError["code"], status: DiagramThemeError["status"], message: string) {
@@ -70,11 +70,19 @@ function toTheme(row: ThemeRow): CustomDiagramTheme | null {
   };
 }
 
-/** The creator and the admin manage a custom theme. */
-export const canManageDiagramTheme = (
-  theme: Pick<CustomDiagramTheme, "createdBy">,
-  userId: string,
-) => isAdmin(userId) || (theme.createdBy !== null && theme.createdBy === userId);
+/** Only the workspace admin creates, changes and deletes custom themes, whoever made them. */
+export const canManageDiagramThemes = (userId: string) => isAdmin(userId);
+
+/** Throws DiagramThemeError admin_only (403) unless `userId` is the workspace admin. */
+export function requireThemeAdmin(userId: string): void {
+  if (!canManageDiagramThemes(userId)) {
+    throw new DiagramThemeError(
+      "admin_only",
+      403,
+      "Only the workspace admin creates, changes and deletes diagram themes. Everyone can use them.",
+    );
+  }
+}
 
 async function customTheme(db: D1Database, themeId: string): Promise<CustomDiagramTheme | null> {
   if (!isDiagramThemeId(themeId)) return null;
@@ -94,31 +102,22 @@ export async function findDiagramTheme(
 }
 
 /**
- * A theme `userId` may see and use: a built-in, one they made, or any for the
- * admin. Anything else is NotFoundError("theme"), so ids reveal nothing.
+ * A theme anyone signed in may use: a built-in or any custom theme. One that
+ * does not exist (or no longer reads) is NotFoundError("theme").
  */
 export async function requireUsableDiagramTheme(
   db: D1Database,
-  input: { readonly themeId: string; readonly userId: string },
+  input: { readonly themeId: string },
 ): Promise<DiagramTheme> {
-  const builtIn = builtInDiagramTheme(input.themeId);
-  if (builtIn) return builtIn;
-  const theme = await customTheme(db, input.themeId);
-  if (!theme || !canManageDiagramTheme(theme, input.userId)) throw new NotFoundError("theme");
+  const theme = await findDiagramTheme(db, input.themeId);
+  if (!theme) throw new NotFoundError("theme");
   return theme;
 }
 
-/** The built-ins, then the custom themes `userId` may see, by name. */
-export async function listDiagramThemes(
-  db: D1Database,
-  userId: string,
-): Promise<DiagramThemeList> {
+/** The built-ins, then every custom theme, by name. The same list for everyone. */
+export async function listDiagramThemes(db: D1Database): Promise<DiagramThemeList> {
   const { results } = await db
-    .prepare(
-      `SELECT * FROM diagram_themes WHERE ?1 OR created_by = ?2
-       ORDER BY name COLLATE NOCASE, id`,
-    )
-    .bind(isAdmin(userId) ? 1 : 0, userId)
+    .prepare("SELECT * FROM diagram_themes ORDER BY name COLLATE NOCASE, id")
     .all<ThemeRow>();
   const custom = results.map(toTheme).filter((theme) => theme !== null);
   return { themes: [...BUILT_IN_DIAGRAM_THEMES, ...custom], defaultThemeId: DEFAULT_DIAGRAM_THEME_ID };
@@ -133,15 +132,15 @@ export async function createDiagramTheme(
     readonly now: number;
   },
 ): Promise<CustomDiagramTheme> {
+  requireThemeAdmin(input.createdBy);
   const count = await db
-    .prepare("SELECT count(*) AS n FROM diagram_themes WHERE created_by = ?")
-    .bind(input.createdBy)
+    .prepare("SELECT count(*) AS n FROM diagram_themes")
     .first<{ n: number }>();
   if ((count?.n ?? 0) >= MAX_CUSTOM_DIAGRAM_THEMES) {
     throw new DiagramThemeError(
       "theme_limit",
       409,
-      `You have ${MAX_CUSTOM_DIAGRAM_THEMES} custom themes, the most one person may keep. ` +
+      `The workspace has ${MAX_CUSTOM_DIAGRAM_THEMES} custom themes, the most it may keep. ` +
         `Delete one first.`,
     );
   }
@@ -164,11 +163,12 @@ export async function createDiagramTheme(
   return theme;
 }
 
-/** The custom theme, once `userId` is known to manage it. A built-in is refused. */
+/** The custom theme, once `userId` is known to be the admin. A built-in is refused. */
 async function requireManagedTheme(
   db: D1Database,
   input: { readonly themeId: string; readonly userId: string },
 ): Promise<CustomDiagramTheme> {
+  requireThemeAdmin(input.userId);
   if (builtInDiagramTheme(input.themeId)) {
     throw new DiagramThemeError(
       "built_in_theme",
@@ -177,7 +177,7 @@ async function requireManagedTheme(
     );
   }
   const theme = await customTheme(db, input.themeId);
-  if (!theme || !canManageDiagramTheme(theme, input.userId)) throw new NotFoundError("theme");
+  if (!theme) throw new NotFoundError("theme");
   return theme;
 }
 

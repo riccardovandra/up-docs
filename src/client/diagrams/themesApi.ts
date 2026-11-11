@@ -9,8 +9,9 @@ import type {
 import { request } from "../api.ts";
 
 export const themesApi = {
-  /** Built-ins first, then the caller's own custom themes (the admin: everyone's). */
+  /** Built-ins first, then every custom theme. The same list for everyone. */
   list: () => request<DiagramThemeList>("GET", "/api/diagram-themes"),
+  /** create, update and remove are the admin's; others get 403 admin_only. */
   create: async (input: DiagramThemeInput): Promise<CustomDiagramTheme> =>
     (await request<{ theme: CustomDiagramTheme }>("POST", "/api/diagram-themes", input)).theme,
   update: async (
