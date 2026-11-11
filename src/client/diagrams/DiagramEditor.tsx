@@ -115,15 +115,13 @@ export function DiagramEditor(props: {
             {state.message}
           </span>
         ) : null}
-        {linked === null ? null : linked > 0 ? (
+        {linked !== null && linked > 0 ? (
           <span className="diagram-chip linked">
             <LinkIcon size={12} />
             Linked in {plural(linked, "doc")}. One save updates{" "}
             {linked === 1 ? "it" : "all of them"}.
           </span>
-        ) : (
-          <span className="diagram-chip">Not in a doc yet</span>
-        )}
+        ) : null}
         {/* Once Draw.io is up its own Exit is the way out, so a stray click never drops work. */}
         {starting ? (
           <button
