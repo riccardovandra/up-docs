@@ -51,18 +51,26 @@ import {
   checkDrawioIn,
   diagramPath,
   drawioBlock,
+  drawioBlocks,
   drawioDiagramIds,
+  drawioRoot,
   isDiagramId,
   isPictureCurrent,
   MAX_DIAGRAM_TITLE_LENGTH,
+  MAX_DRAWIO_PAGE_NAME_LENGTH,
+  pageIndexOf,
+  pagePicture,
   type Diagram,
   type DiagramSummary,
   type DiagramUse,
 } from "../shared/drawio.ts";
 import {
+  asNamedPage,
   describeDrawio,
+  drawioPageProblems,
   drawioWarnings,
   readDrawio,
+  uncompressedDrawio,
   type DrawioModel,
 } from "../shared/drawioModel.ts";
 import { IMAGE_TYPES, MAX_IMAGE_BYTES } from "../shared/images.ts";
@@ -347,7 +355,7 @@ function checkMediaBlocks(markdown: string, previous?: string): void {
   if (drawioProblem) {
     fail("drawio_invalid", `${drawioProblem} Nothing was written.`, {
       format:
-        "```t3-drawio\n<diagram id from list_drawio or create_drawio>\nOptional caption\n```",
+        "```t3-drawio\n<diagram id from list_drawio or create_drawio>\npage: <page name, optional>\nOptional caption\n```",
     });
   }
 }
@@ -369,19 +377,49 @@ async function checkDrawioLinks(
       `One write can link at most ${MAX_NEW_DRAWIO_LINKS} new Draw.io diagrams. Nothing was written; add them over several writes.`,
     );
   }
-  for (const diagramId of added) {
+  // A block that names a page it did not name before must name one the diagram has.
+  const pageKey = (block: { diagramId: string; page: string | null }) =>
+    `${block.diagramId}\n${block.page}`;
+  const named = new Set(drawioBlocks(previous).map(pageKey));
+  const pagesAsked = new Map<string, Set<string>>();
+  for (const block of drawioBlocks(markdown)) {
+    if (block.page === null || named.has(pageKey(block))) continue;
+    const pages = pagesAsked.get(block.diagramId) ?? new Set();
+    pages.add(block.page);
+    pagesAsked.set(block.diagramId, pages);
+  }
+  if (pagesAsked.size > MAX_NEW_DRAWIO_LINKS) {
+    fail(
+      "too_many_diagrams",
+      `One write can point blocks of at most ${MAX_NEW_DRAWIO_LINKS} Draw.io diagrams at new pages. Nothing was written; add them over several writes.`,
+    );
+  }
+  for (const diagramId of new Set([...added, ...pagesAsked.keys()])) {
+    let diagram: Diagram;
     try {
-      await Diagrams.requireDiagram(ctx.deps.db, {
+      ({ diagram } = await Diagrams.requireDiagram(ctx.deps.db, {
         diagramId,
         userId: ctx.principal.userId,
         need: "view",
-      });
+      }));
     } catch (cause) {
       if (!(cause instanceof Docs.NotFoundError)) throw cause;
-      fail(
+      return fail(
         "drawio_not_found",
         `The t3-drawio block links diagram "${diagramId}", which does not exist or is not one you can see. Nothing was written. The block's first line must be a diagram id from list_drawio or create_drawio.`,
         { diagramId },
+      );
+    }
+    const asked = pagesAsked.get(diagramId);
+    if (!asked) continue;
+    const model = await readDrawio(diagram.xml);
+    const names = model.ok ? model.pages.map((page) => page.name) : [];
+    for (const page of asked) {
+      if (pageIndexOf(names, page) !== -1) continue;
+      fail(
+        "drawio_page_not_found",
+        `The t3-drawio block names page "${page}", which diagram "${diagramId}" does not have. Nothing was written. Use one of its page names, or leave the page line out for the first page.`,
+        { diagramId, pages: names },
       );
     }
   }
@@ -826,15 +864,21 @@ async function drawioWith(
   }
 }
 
-/** The `xml` argument: Draw.io XML that the store accepts and the editor can open. */
-async function drawioXmlArg(
-  args: Args,
-): Promise<{ readonly xml: string; readonly model: DrawioModel }> {
+/**
+ * The `xml` argument: Draw.io XML that the store accepts and the editor can
+ * open, as one bare `<mxGraphModel>` (one page) or an `<mxfile>` of named
+ * `<diagram>` pages. Every page is checked, and every problem is reported.
+ */
+async function drawioXmlArg(args: Args): Promise<{
+  readonly xml: string;
+  readonly model: DrawioModel;
+  readonly root: "mxfile" | "mxGraphModel";
+}> {
   const xml = args.xml;
   if (typeof xml !== "string" || xml.trim() === "") {
     return fail(
       "invalid_argument",
-      '"xml" must be Draw.io XML: an <mxGraphModel> document.',
+      '"xml" must be Draw.io XML: one <mxGraphModel>, or an <mxfile> with a <diagram name="..."> per page.',
       DRAWIO_GUIDE,
     );
   }
@@ -850,8 +894,21 @@ async function drawioXmlArg(
       DRAWIO_GUIDE,
     );
   }
-  return { xml, model };
+  const root = drawioRoot(xml) ?? "mxGraphModel";
+  const problems = drawioPageProblems(model, root === "mxfile");
+  if (problems.length > 0) {
+    fail(
+      "invalid_pages",
+      `${problems.length === 1 ? "A page has a problem" : `${problems.length} problems with the pages`}. Nothing was saved.`,
+      { problems, ...DRAWIO_GUIDE },
+    );
+  }
+  return { xml, model, root };
 }
+
+/** Each page's name, in order: null for a page with none (a bare `<mxGraphModel>`). */
+const pageNames = (model: DrawioModel): ReadonlyArray<string | null> =>
+  model.ok ? model.pages.map((page) => page.name) : [];
 
 const drawioSummary = (ctx: ToolContext, diagram: DiagramSummary) => ({
   diagramId: diagram.id,
@@ -895,15 +952,27 @@ function toBase64(bytes: Uint8Array): string {
 async function drawioPicture(
   ctx: ToolContext,
   diagram: DiagramSummary,
+  page: string | null,
 ): Promise<{ readonly note: string; readonly image: ToolImage | null }> {
   if (!diagram.hasSource) {
     return { note: "None: nothing is drawn in this diagram yet.", image: null };
   }
   if (!isPictureCurrent(diagram)) return { note: PICTURE_PENDING, image: null };
+  const shown = pagePicture(diagram, page);
+  if (shown.kind === "not_found") {
+    return { note: `The diagram has no page "${page}": see pageNames.`, image: null };
+  }
+  if (shown.kind !== "picture") {
+    return {
+      note: `No picture of page "${page}" yet: go by its shapes and connections.`,
+      image: null,
+    };
+  }
   const picture = await Diagrams.diagramPicture(
     ctx.deps.images,
     diagram,
     "png",
+    shown.index,
   );
   if (!picture) {
     return {
@@ -919,24 +988,33 @@ async function drawioPicture(
     };
   }
   return {
-    note: "Attached after this text as a PNG image.",
+    note:
+      page === null
+        ? "Attached after this text as a PNG image (the first page)."
+        : `Attached after this text as a PNG image of page "${page}".`,
     image: { data: toBase64(bytes), mimeType: picture.contentType },
   };
 }
 
 /** What create_drawio and update_drawio return: the diagram, its block and what was read back. */
-function drawioWritten(ctx: ToolContext, diagram: Diagram, model: DrawioModel) {
-  const warnings = drawioWarnings(model);
+function drawioWritten(
+  ctx: ToolContext,
+  diagram: Diagram,
+  model: DrawioModel,
+  notes: ReadonlyArray<string> = [],
+) {
+  const warnings = [...notes, ...drawioWarnings(model)];
   return {
     ...drawioSummary(ctx, diagram),
     block: drawioBlock(diagram.id),
+    pageNames: pageNames(model),
     ...describeDrawio(model, BRIEF_DRAWIO),
     ...(warnings.length > 0 ? { warnings } : {}),
     picture:
       diagram.hasSource && isPictureCurrent(diagram)
         ? "Unchanged: the stored picture shows this version."
         : PICTURE_PENDING,
-    next: "Paste `block` into a tab with edit_tab or write_tab to show the diagram in a doc. A second line inside the block is its caption.",
+    next: "Paste `block` into a tab with edit_tab or write_tab to show the diagram in a doc. It shows the first page; to show another, add a `page: <page name>` line after the id. The last line inside the block is its caption.",
   };
 }
 
@@ -1146,7 +1224,7 @@ export const TOOLS = [
   {
     name: "format_guide",
     description:
-      "The full spec of one doc format, with an example: diagram (t3-widget), drawio (Draw.io diagrams from the library, t3-drawio), table (t3-table), video (t3-video), embed (t3-embed), comments (anchors on passages, table cells and diagram labels), sharing, or claude_push. Call it before you first write that format in a session.",
+      "The full spec of one doc format, with an example: diagram (t3-widget), drawio (Draw.io diagrams from the library and their pages, t3-drawio), table (t3-table), video (t3-video), embed (t3-embed), image (images in a doc and uploads), sheet (sheets and their formulas), comments (anchors on passages, table cells and diagram labels), sharing, or claude_push. Call it before you first write that format in a session.",
     inputSchema: {
       type: "object",
       properties: { topic: { type: "string", enum: FORMAT_TOPICS } },
@@ -1580,7 +1658,7 @@ export const TOOLS = [
   {
     name: "read_drawio",
     description:
-      'Read one Draw.io diagram from the library, by its id (the first line of a ```t3-drawio block) or its link (<origin>/diagrams/<id>): title, project, the docs that use it, its shapes and its connections ("A -> B", "A -[label]-> B"), per page when the file has several, and its version. The current picture comes attached as a PNG image when there is one. Pass includeXml: true for the Draw.io XML, which only the diagram\'s creator and the workspace admin get; you need it to change the diagram with update_drawio.',
+      'Read one Draw.io diagram from the library, by its id (the first line of a ```t3-drawio block) or its link (<origin>/diagrams/<id>): title, project, the docs that use it, pageNames (its pages, in order), its shapes and its connections ("A -> B", "A -[label]-> B"), per page when the file has several, and its version. The current picture of the first page, or of `page`, comes attached as a PNG image when there is one. Pass includeXml: true for the Draw.io XML (an <mxfile> holding every page when there are several), which only the diagram\'s creator and the workspace admin get; you need it to change the diagram with update_drawio.',
     inputSchema: {
       type: "object",
       properties: {
@@ -1589,6 +1667,10 @@ export const TOOLS = [
           description: "The diagram's id, or its link.",
         },
         includeXml: { type: "boolean" },
+        page: {
+          type: "string",
+          description: "A page name from pageNames: attach that page's picture instead of the first page's.",
+        },
       },
       required: ["diagramId"],
     },
@@ -1607,7 +1689,7 @@ export const TOOLS = [
         xml: {
           type: "string",
           description:
-            "The whole diagram as uncompressed Draw.io XML: one <mxGraphModel>.",
+            'The whole diagram as uncompressed Draw.io XML: one <mxGraphModel> for one page, or an <mxfile> holding a <diagram name="..."> per page, each with its <mxGraphModel>.',
         },
       },
       required: ["title", "xml"],
@@ -1616,7 +1698,7 @@ export const TOOLS = [
   {
     name: "update_drawio",
     description:
-      "Change a Draw.io diagram you manage: its XML, its title, or both. Pass the version you read as baseVersion. xml replaces the whole source, so start from read_drawio {includeXml: true}. If someone saved since then nothing is written and the current version is returned: read again and redo your change. Every doc that links the diagram shows the change.",
+      "Change a Draw.io diagram you manage: its XML, its title, or both. Pass the version you read as baseVersion. xml replaces the whole source, so start from read_drawio {includeXml: true}: for a diagram of several pages send the whole <mxfile> back (one <mxGraphModel> is refused, since it would delete the other pages), and a page you leave out is deleted. If someone saved since then nothing is written and the current version is returned: read again and redo your change. Every doc that links the diagram shows the change.",
     inputSchema: {
       type: "object",
       properties: {
@@ -1624,7 +1706,11 @@ export const TOOLS = [
           type: "string",
           description: "The diagram's id, or its link.",
         },
-        xml: { type: "string" },
+        xml: {
+          type: "string",
+          description:
+            "The whole new source: an <mxfile> with every page, or one <mxGraphModel> for a diagram of one page.",
+        },
         title: { type: "string", maxLength: MAX_DIAGRAM_TITLE_LENGTH },
         baseVersion: {
           type: "integer",
@@ -2699,6 +2785,7 @@ const handlers: Record<
 
   read_drawio: async (args, ctx) => {
     const diagramId = drawioIdArg(args);
+    const page = optionalString(args, "page", MAX_DRAWIO_PAGE_NAME_LENGTH) ?? null;
     const { diagram, canEdit } = await drawioWith(ctx, diagramId, "view");
     if (args.includeXml === true && !canEdit) {
       fail(
@@ -2712,11 +2799,13 @@ const handlers: Record<
         diagramId,
         userId: ctx.principal.userId,
       }),
-      drawioPicture(ctx, diagram),
+      drawioPicture(ctx, diagram, page),
       readDrawio(diagram.xml),
     ]);
+    const names = pageNames(model);
     const body = {
       ...drawioSummary(ctx, diagram),
+      pageNames: names,
       project,
       canEdit,
       usedIn: usage.uses.map((use) => drawioUse(ctx, use)),
@@ -2726,7 +2815,17 @@ const handlers: Record<
         : {}),
       ...describeDrawio(model, FULL_DRAWIO),
       picture: picture.note,
-      ...(args.includeXml === true ? { xml: diagram.xml } : {}),
+      ...(args.includeXml === true
+        ? {
+            // Compressed pages come written out, so every page can be read and changed.
+            xml: await uncompressedDrawio(diagram.xml),
+            ...(names.length > 1
+              ? {
+                  xmlNote: `The whole file: an <mxfile> with all ${names.length} pages. Change the pages you need and send the whole <mxfile> back to update_drawio; a page you leave out is deleted.`,
+                }
+              : {}),
+          }
+        : {}),
     };
     return picture.image
       ? new ToolResultWithImages(body, [picture.image])
@@ -2763,32 +2862,63 @@ const handlers: Record<
     if (args.xml == null && title === undefined) {
       fail("invalid_argument", 'Pass "xml", "title" or both.');
     }
-    await drawioWith(ctx, diagramId, "edit");
+    const { diagram: stored } = await drawioWith(ctx, diagramId, "edit");
+    const conflict = (currentVersion: number) =>
+      fail(
+        "version_conflict",
+        "The diagram changed since you read it. Nothing was written; read it again with read_drawio {includeXml: true} and redo your change.",
+        { currentVersion, url: drawioUrl(ctx, diagramId) },
+      );
+    if (stored.version !== baseVersion) conflict(stored.version);
     const written = args.xml == null ? null : await drawioXmlArg(args);
+    let xml = written?.xml;
+    const notes: Array<string> = [];
+    if (written) {
+      const storedModel = await readDrawio(stored.xml);
+      const before = pageNames(storedModel);
+      if (written.root === "mxGraphModel" && before.length > 1) {
+        // One page sent for a file of several would replace them all: refuse.
+        fail(
+          "would_delete_pages",
+          `This diagram has ${before.length} pages, and "xml" is one <mxGraphModel>, which would replace all of them with a single page. Nothing was saved. Read the whole file with read_drawio {includeXml: true}, change the page you need inside its <mxfile>, and send the whole <mxfile> back.`,
+          { pageNames: before, ...DRAWIO_GUIDE },
+        );
+      }
+      // One page for a one-page file: the drawing changes, the page keeps its name and id.
+      const only = storedModel.ok && before.length === 1 ? storedModel.pages[0] : undefined;
+      if (written.root === "mxGraphModel" && only?.name != null) {
+        xml = asNamedPage(written.xml, { name: only.name, id: only.id });
+      }
+      if (written.root === "mxfile") {
+        const after = pageNames(written.model);
+        const gone = before.filter(
+          (name): name is string => name !== null && pageIndexOf(after, name) === -1,
+        );
+        if (gone.length > 0) {
+          notes.push(
+            `Pages deleted: ${gone.map((name) => `"${name}"`).join(", ")}. A doc block that names one of them now shows "Page not found".`,
+          );
+        }
+      }
+    }
     const result = await load(
       Diagrams.updateDiagram(ctx.deps.db, {
         diagramId,
         title,
-        xml: written?.xml,
+        xml,
         baseVersion,
         now: ctx.deps.now(),
       }),
       "Draw.io diagram",
     );
-    if (!result.ok) {
-      return fail(
-        "version_conflict",
-        "The diagram changed since you read it. Nothing was written; read it again with read_drawio {includeXml: true} and redo your change.",
-        {
-          currentVersion: result.conflict.version,
-          url: drawioUrl(ctx, diagramId),
-        },
-      );
-    }
+    if (!result.ok) return conflict(result.conflict.version);
     return drawioWritten(
       ctx,
       result.diagram,
-      written?.model ?? (await readDrawio(result.diagram.xml)),
+      xml === undefined || xml !== written?.xml
+        ? await readDrawio(result.diagram.xml)
+        : written.model,
+      notes,
     );
   },
 

@@ -58,8 +58,8 @@ const changeable = (editor: Editor) => !editor.isDestroyed && editor.isEditable;
  * caret goes there and nothing is added. Where nothing follows, or only a code
  * block (whose own source the caret would open), one empty line goes in for it.
  */
-function caretAfterInserted(tr: Transaction, diagramId: string): boolean {
-  const body = drawioBlockBody(diagramId, null);
+function caretAfterInserted(tr: Transaction, diagramId: string, page: string | null): boolean {
+  const body = drawioBlockBody(diagramId, null, page);
   let end = -1;
   tr.mapping.maps.at(-1)?.forEach((_from, _to, newFrom, newTo) => {
     tr.doc.nodesBetween(newFrom, newTo, (node, pos) => {
@@ -88,11 +88,16 @@ function caretAfterInserted(tr: Transaction, diagramId: string): boolean {
  * goes in while the Draw.io editor is still open over the page, and the keys
  * the person presses next must keep going to their drawing.
  */
-export function linkDiagramAtCaret(editor: Editor, diagramId: string, focus: boolean): boolean {
+export function linkDiagramAtCaret(
+  editor: Editor,
+  diagramId: string,
+  focus: boolean,
+  page: string | null = null,
+): boolean {
   const chain = focus ? editor.chain().focus() : editor.chain();
   return chain
-    .insertContent(drawioNode(diagramId))
-    .command(({ tr }) => caretAfterInserted(tr, diagramId))
+    .insertContent(drawioNode(diagramId, null, page))
+    .command(({ tr }) => caretAfterInserted(tr, diagramId, page))
     .scrollIntoView()
     .run();
 }
@@ -101,9 +106,12 @@ export function linkDiagramAtCaret(editor: Editor, diagramId: string, focus: boo
 export function insertDrawioBlock(
   editor: Editor,
   diagramId: string,
-  options: { readonly focus: boolean } = { focus: true },
+  options: { readonly focus: boolean; readonly page?: string | null } = { focus: true },
 ): boolean {
-  return changeable(editor) && linkDiagramAtCaret(editor, diagramId, options.focus);
+  return (
+    changeable(editor) &&
+    linkDiagramAtCaret(editor, diagramId, options.focus, options.page ?? null)
+  );
 }
 
 /** The linked-diagram block that starts at `pos`, if one does. */
@@ -130,23 +138,27 @@ export function removeBlockStep(state: EditorState, pos: number): Transaction | 
 }
 
 /**
- * The change that points the block at `pos` at another diagram, keeping its
- * caption; null when no linked diagram is there.
+ * The change that points the block at `pos` at another diagram, or at another
+ * page of it (null: the first), keeping its caption; null when no linked
+ * diagram is there. The page is kept unless one is given: a copy has the same pages.
  */
 export function relinkBlockStep(
   state: EditorState,
   pos: number,
   diagramId: string,
+  page?: string | null,
 ): Transaction | null {
   const node = blockAt(state.doc, pos);
   if (!node) return null;
-  const caption = parseDrawioBlock(node.textContent)?.caption ?? null;
-  const from = pos + 1;
-  return state.tr.replaceWith(
-    from,
-    from + node.content.size,
-    state.schema.text(drawioBlockBody(diagramId, caption)),
+  const block = parseDrawioBlock(node.textContent);
+  const body = drawioBlockBody(
+    diagramId,
+    block?.caption ?? null,
+    page === undefined ? (block?.page ?? null) : page,
   );
+  if (body === node.textContent) return null;
+  const from = pos + 1;
+  return state.tr.replaceWith(from, from + node.content.size, state.schema.text(body));
 }
 
 const apply = (editor: Editor, tr: Transaction | null): boolean => {
@@ -162,3 +174,21 @@ export const removeDrawioBlock = (editor: Editor, pos: number): boolean =>
 /** Relinks the block at `pos`. False when the tab cannot be changed or the block is gone. */
 export const relinkDrawioBlock = (editor: Editor, pos: number, diagramId: string): boolean =>
   changeable(editor) && apply(editor, relinkBlockStep(editor.state, pos, diagramId));
+
+/** The change that points the block at `pos` at another page of its diagram; null when none. */
+export function pageBlockStep(
+  state: EditorState,
+  pos: number,
+  page: string | null,
+): Transaction | null {
+  const block = blockAt(state.doc, pos);
+  const diagramId = block ? parseDrawioBlock(block.textContent)?.diagramId : undefined;
+  return diagramId === undefined ? null : relinkBlockStep(state, pos, diagramId, page);
+}
+
+/**
+ * Points the block at `pos` at another page of its diagram. False when the tab
+ * cannot be changed, the block is gone, or it already shows that page.
+ */
+export const setDrawioBlockPage = (editor: Editor, pos: number, page: string | null): boolean =>
+  changeable(editor) && apply(editor, pageBlockStep(editor.state, pos, page));

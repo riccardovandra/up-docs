@@ -72,10 +72,16 @@ export function useDocDiagrams(input: {
     [docId, projectId],
   );
 
-  const link = (editor: Editor, diagram: Pick<DiagramSummary, "id" | "title">, focus: boolean) => {
+  const link = (
+    editor: Editor,
+    diagram: Pick<DiagramSummary, "id" | "title">,
+    focus: boolean,
+    page: string | null = null,
+  ) => {
+    const what = page === null ? `"${diagram.title}"` : `"${diagram.title}", page "${page}",`;
     notify.current(
-      insertDrawioBlock(editor, diagram.id, { focus })
-        ? `Linked "${diagram.title}" into this doc.`
+      insertDrawioBlock(editor, diagram.id, { focus, page })
+        ? `Linked ${what} into this doc.`
         : `"${diagram.title}" is in Diagrams, but this tab can no longer be edited. ` +
             "Use Draw.io diagram to link it.",
     );
@@ -99,9 +105,9 @@ export function useDocDiagrams(input: {
         <DiagramPicker
           projectId={projectId}
           locked={locked}
-          onPick={(diagram) => {
+          onPick={(diagram, page) => {
             setPicking(null);
-            link(picking, diagram, true);
+            link(picking, diagram, true, page);
           }}
           onNew={() => startNew(picking)}
           onClose={() => setPicking(null)}

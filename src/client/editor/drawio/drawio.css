@@ -124,6 +124,34 @@
   cursor: not-allowed;
 }
 
+/* Which page of the diagram the block shows: a small list beside the actions. */
+.drawio-page-choice {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.1rem 0.25rem 0.1rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--popover);
+  color: var(--muted);
+  font-size: 0.85rem;
+  box-shadow: 0 1px 4px rgb(0 0 0 / 0.12);
+}
+
+.drawio-page-select {
+  max-width: 12rem;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.drawio-page-select:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 1px;
+}
+
 /* The picture stays on white in dark mode: Draw.io draws for a light page. */
 .drawio-stage {
   display: grid;
@@ -340,4 +368,27 @@
   .drawio-pick-preview {
     height: 5rem;
   }
+}
+
+/* The picker's second step, for a diagram of several pages. */
+.drawio-picker-pages-head {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.25rem;
+  margin-bottom: 0.75rem;
+}
+
+.drawio-picker-pages-head h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.drawio-pick[aria-busy="true"] {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+.drawio-picker-grid[hidden] {
+  display: none;
 }

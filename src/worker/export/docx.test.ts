@@ -268,7 +268,7 @@ describe("markdown to Word", () => {
 
   it("writes a linked Draw.io diagram as its title linking to the picture, then the caption", () => {
     const diagrams: ExportDiagrams = new Map([
-      ["g1", { id: "g1", title: "Onboarding & kickoff", pictureVersion: 2, hasSource: true }],
+      ["g1", { id: "g1", title: "Onboarding & kickoff", pictureVersion: 2, picturePages: null, hasSource: true }],
     ]);
     const { document, rels } = render(drawioBlock("g1", "How a client starts"), diagrams);
     expect(document).not.toContain("t3-drawio");
@@ -283,7 +283,7 @@ describe("markdown to Word", () => {
 
   it("writes the title and a note for a diagram with no picture, and says when one is gone", () => {
     const diagrams: ExportDiagrams = new Map([
-      ["g1", { id: "g1", title: "Onboarding", pictureVersion: null, hasSource: true }],
+      ["g1", { id: "g1", title: "Onboarding", pictureVersion: null, picturePages: null, hasSource: true }],
     ]);
     const { document, rels } = render(
       `${drawioBlock("g1")}\n\n${drawioBlock("gone", "Old flow")}`,

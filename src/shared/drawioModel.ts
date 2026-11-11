@@ -3,6 +3,8 @@
 // XML is parsed here by hand, and strictly: Draw.io opens a file with the
 // browser's XML parser, so a source refused here would not open there either.
 
+import { MAX_DIAGRAM_PAGES, MAX_DRAWIO_PAGE_NAME_LENGTH, pageNameLine } from "./drawio.ts";
+
 /** The words standing in for a shape nobody labelled, and for an end attached to nothing. */
 export const UNLABELLED_SHAPE = "(unlabelled shape)";
 export const LOOSE_END = "(loose end)";
@@ -17,6 +19,10 @@ const MAX_WARNINGS = 10;
 export interface DrawioPage {
   /** The page's name in an `<mxfile>`; null for a bare `<mxGraphModel>`. */
   readonly name: string | null;
+  /** The page's own id in an `<mxfile>` (Draw.io keeps it across renames); null when it has none. */
+  readonly id: string | null;
+  /** Whether the page's model is stored compressed inside its `<diagram>`. */
+  readonly compressed: boolean;
   /** Every shape's label, in file order. */
   readonly shapes: ReadonlyArray<string>;
   /**
@@ -42,16 +48,23 @@ interface XmlElement {
   attributes: Map<string, string>;
   children: Array<XmlElement>;
   text: string;
+  /** Where the element starts in the source, where its opening tag ends, and where it ends. */
+  start: number;
+  openEnd: number;
+  end: number;
 }
 
 // Shared by every element that has none, so a file of many empty elements stays small in memory.
 const NO_ATTRIBUTES: Map<string, string> = new Map();
 const NO_CHILDREN: Array<XmlElement> = [];
-const element = (name: string): XmlElement => ({
+const element = (name: string, start = 0): XmlElement => ({
   name,
   attributes: NO_ATTRIBUTES,
   children: NO_CHILDREN,
   text: "",
+  start,
+  openEnd: start,
+  end: start,
 });
 
 const XML_ENTITIES: Readonly<Record<string, string>> = {
@@ -134,13 +147,14 @@ function parseXml(xml: string): XmlElement {
       const top = stack.at(-1)!;
       if (top === document) bad(`</${name}> closes nothing`);
       if (top.name !== name) bad(`</${name}> where </${top.name}> was expected`);
+      top.end = end;
       stack.pop();
       at = end;
     } else {
       TAG_NAME.lastIndex = at + 1;
       const name = TAG_NAME.exec(xml)?.[0];
       if (name === undefined) return bad('a "<" that starts no tag: write &lt;');
-      const opened = element(name);
+      const opened = element(name, open);
       at = TAG_NAME.lastIndex;
       for (;;) {
         ATTRIBUTE.lastIndex = at;
@@ -166,8 +180,10 @@ function parseXml(xml: string): XmlElement {
       }
       if (parent.children === NO_CHILDREN) parent.children = [];
       parent.children.push(opened);
-      if (end[1] === "") stack.push(opened);
       at = TAG_END.lastIndex;
+      opened.openEnd = at;
+      opened.end = at;
+      if (end[1] === "") stack.push(opened);
     }
   }
   if (stack.length > 1) bad(`<${stack.at(-1)!.name}> is never closed`, xml.length);
@@ -277,7 +293,16 @@ const quoted = (cells: ReadonlyArray<Cell>) =>
     .map((cell) => `"${cell.label || cell.id || "?"}"`)
     .join(", ") + (cells.length > 3 ? ` and ${cells.length - 3} more` : "");
 
-function readPage(name: string | null, model: XmlElement): DrawioPage {
+/** What names a page, read from its `<diagram>` element. */
+interface PageHead {
+  readonly name: string | null;
+  readonly id: string | null;
+  readonly compressed: boolean;
+}
+
+const BARE_PAGE: PageHead = { name: null, id: null, compressed: false };
+
+function readPage(head: PageHead, model: XmlElement): DrawioPage {
   const cells = cellsOf(model);
   const byId = new Map<string, Cell>();
   const repeated = new Set<string>();
@@ -339,7 +364,7 @@ function readPage(name: string | null, model: XmlElement): DrawioPage {
     }
   }
   return {
-    name,
+    ...head,
     shapes: shapes.map((cell) => cell.label || UNLABELLED_SHAPE),
     connections,
     warnings,
@@ -347,8 +372,8 @@ function readPage(name: string | null, model: XmlElement): DrawioPage {
   };
 }
 
-const emptyPage = (name: string | null, unreadable: string | null = null): DrawioPage => ({
-  name,
+const emptyPage = (head: PageHead, unreadable: string | null = null): DrawioPage => ({
+  ...head,
   shapes: [],
   connections: [],
   warnings: [],
@@ -381,28 +406,42 @@ async function inflate(content: string, budget: { left: number }): Promise<strin
   return decodeURIComponent(text + decoder.decode());
 }
 
+/** A compressed page's XML, or null when it cannot be decoded. */
+async function inflatePage(content: string, budget: { left: number }): Promise<string | null> {
+  try {
+    return await inflate(content, budget);
+  } catch {
+    return null;
+  }
+}
+
 async function readDiagramElement(
   diagram: XmlElement,
   budget: { left: number },
 ): Promise<DrawioPage> {
   const name = diagram.attributes.get("name") ?? null;
+  const id = diagram.attributes.get("id") ?? null;
   const model = diagram.children.find((child) => child.name === "mxGraphModel");
-  if (model) return readPage(name, model);
+  if (model) return readPage({ name, id, compressed: false }, model);
   const content = diagram.text.trim();
-  if (content === "") return emptyPage(name);
-  let inner: string;
-  try {
-    inner = await inflate(content, budget);
-  } catch {
-    return emptyPage(name, "This page is saved compressed and could not be decoded.");
+  if (content === "") {
+    // A page with elements but no model is not one Draw.io would draw.
+    return diagram.children.length > 0
+      ? emptyPage({ name, id, compressed: false }, "This page holds no <mxGraphModel>.")
+      : emptyPage({ name, id, compressed: false });
+  }
+  const head = { name, id, compressed: true };
+  const inner = await inflatePage(content, budget);
+  if (inner === null) {
+    return emptyPage(head, "This page is saved compressed and could not be decoded.");
   }
   try {
     const root = parseXml(inner);
-    if (root.name === "mxGraphModel") return readPage(name, root);
+    if (root.name === "mxGraphModel") return readPage(head, root);
   } catch (cause) {
     if (!(cause instanceof XmlError)) throw cause;
   }
-  return emptyPage(name, "This page is saved compressed and its content is not a Draw.io model.");
+  return emptyPage(head, "This page is saved compressed and its content is not a Draw.io model.");
 }
 
 /**
@@ -420,7 +459,7 @@ export async function readDrawio(xml: string): Promise<DrawioModel> {
     if (cause instanceof XmlError) return { ok: false, error: cause.message };
     throw cause;
   }
-  if (root.name === "mxGraphModel") return { ok: true, pages: [readPage(null, root)] };
+  if (root.name === "mxGraphModel") return { ok: true, pages: [readPage(BARE_PAGE, root)] };
   if (root.name !== "mxfile") {
     return { ok: false, error: "the root element must be <mxfile> or <mxGraphModel>" };
   }
@@ -499,4 +538,123 @@ export function drawioWarnings(model: DrawioModel): ReadonlyArray<string> {
     const notes = page.unreadable === null ? page.warnings : [page.unreadable];
     return notes.map((note) => `${where}${note}`);
   });
+}
+
+/** One page of a source as Draw.io can open it on its own, for drawing that page's picture. */
+export interface DrawioPageSource {
+  readonly name: string | null;
+  readonly id: string | null;
+  /** A whole source holding only this page: the bare model, or an `<mxfile>` with one `<diagram>`. */
+  readonly xml: string;
+}
+
+/**
+ * The pages of a source, in order, each as a source of its own. The page's
+ * text is copied as written, compressed or not, so Draw.io reads it as it
+ * would the whole file. Null when the source is not one Draw.io can open.
+ */
+export function drawioPageSources(xml: string): ReadonlyArray<DrawioPageSource> | null {
+  if (xml.trim() === "") return [];
+  let root: XmlElement;
+  try {
+    root = parseXml(xml);
+  } catch (cause) {
+    if (cause instanceof XmlError) return null;
+    throw cause;
+  }
+  if (root.name === "mxGraphModel") return [{ name: null, id: null, xml }];
+  if (root.name !== "mxfile") return null;
+  const open = xml.slice(root.start, root.openEnd).replace(/\/>$/, ">");
+  return root.children
+    .filter((child) => child.name === "diagram")
+    .map((diagram) => ({
+      name: diagram.attributes.get("name") ?? null,
+      id: diagram.attributes.get("id") ?? null,
+      xml: `${open}${xml.slice(diagram.start, diagram.end)}</mxfile>`,
+    }));
+}
+
+/**
+ * The source with every compressed page written out as its `<mxGraphModel>`,
+ * so an agent can read and change it. Pages that are not compressed, or that
+ * cannot be decoded, stay as they are; a source that does not parse is returned unchanged.
+ */
+export async function uncompressedDrawio(xml: string): Promise<string> {
+  let root: XmlElement;
+  try {
+    root = parseXml(xml);
+  } catch (cause) {
+    if (cause instanceof XmlError) return xml;
+    throw cause;
+  }
+  if (root.name !== "mxfile") return xml;
+  const budget = { left: MAX_INFLATED_BYTES };
+  let result = xml;
+  // From the last page back, so the offsets of the pages before stay right.
+  const pages = root.children.filter((child) => child.name === "diagram").reverse();
+  for (const diagram of pages) {
+    const content = diagram.text.trim();
+    if (diagram.end === diagram.openEnd || content === "") continue;
+    if (diagram.children.some((child) => child.name === "mxGraphModel")) continue;
+    const inner = await inflatePage(content, budget);
+    if (inner === null || !/^\s*<mxGraphModel[\s>/]/.test(inner)) continue;
+    const close = diagram.end - "</diagram>".length;
+    result = `${result.slice(0, diagram.openEnd)}${inner}${result.slice(close)}`;
+  }
+  return result;
+}
+
+const escapeAttribute = (value: string) =>
+  value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;");
+
+/**
+ * A bare `<mxGraphModel>` source as the one page of an `<mxfile>`, named and
+ * numbered as given, so replacing a one-page file's drawing keeps its page name.
+ */
+export function asNamedPage(modelXml: string, page: { readonly name: string; readonly id: string | null }): string {
+  const model = modelXml.replace(/^\s*<\?xml[^>]*\?>\s*/, "");
+  const id = page.id === null ? "" : ` id="${escapeAttribute(page.id)}"`;
+  return `<mxfile><diagram name="${escapeAttribute(page.name)}"${id}>${model}</diagram></mxfile>`;
+}
+
+/** How a page is named in a message: "Page 2 ("Flow")", or "Page 2" when it has no name. */
+export const pageLabel = (index: number, name: string | null) =>
+  `Page ${index + 1}${name ? ` ("${name}")` : ""}`;
+
+/**
+ * What stops a source an agent sends from being saved, page by page; empty when
+ * nothing does. An `<mxfile>` must hold 1 to MAX_DIAGRAM_PAGES pages, each named
+ * (docs pick a page by its name), no two alike, and each one readable.
+ */
+export function drawioPageProblems(model: DrawioModel, isFile: boolean): ReadonlyArray<string> {
+  if (!model.ok) return [];
+  if (!isFile) return model.pages.flatMap((page) => (page.unreadable ? [page.unreadable] : []));
+  if (model.pages.length === 0) {
+    return ['The <mxfile> has no pages: put each page in a <diagram name="..."> element.'];
+  }
+  const problems: Array<string> = [];
+  if (model.pages.length > MAX_DIAGRAM_PAGES) {
+    problems.push(
+      `The file has ${model.pages.length} pages; at most ${MAX_DIAGRAM_PAGES} fit in one ` +
+        `diagram. Split it into several diagrams.`,
+    );
+  }
+  const seen = new Map<string, number>();
+  for (const [index, page] of model.pages.entries()) {
+    const where = pageLabel(index, page.name);
+    const name = page.name === null ? "" : pageNameLine(page.name);
+    if (name === "") {
+      problems.push(`${where}: give its <diagram> a name attribute; docs pick a page by name.`);
+    } else if (name.length > MAX_DRAWIO_PAGE_NAME_LENGTH) {
+      problems.push(`${where}: the name is over ${MAX_DRAWIO_PAGE_NAME_LENGTH} characters.`);
+    } else if (seen.has(name)) {
+      problems.push(
+        `${where}: page ${seen.get(name)! + 1} has the same name; give every page its own.`,
+      );
+    } else {
+      seen.set(name, index);
+    }
+    if (page.unreadable) problems.push(`${where}: ${page.unreadable}`);
+  }
+  return problems;
 }

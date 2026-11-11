@@ -122,8 +122,8 @@ describe("draftScribeBook", () => {
       origin: ORIGIN,
       tabUrl: (id) => `${ORIGIN}/d/doc1/${id}`,
       diagrams: new Map([
-        ["g1", { id: "g1", title: "Onboarding", pictureVersion: 2, hasSource: true }],
-        ["g2", { id: "g2", title: "Undrawn", pictureVersion: null, hasSource: true }],
+        ["g1", { id: "g1", title: "Onboarding", pictureVersion: 2, picturePages: null, hasSource: true }],
+        ["g2", { id: "g2", title: "Undrawn", pictureVersion: null, picturePages: null, hasSource: true }],
       ]),
     });
     const html = book.chapters[0]!.html;

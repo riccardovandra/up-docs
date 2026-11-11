@@ -6,10 +6,14 @@ import {
   diagramPictureUrl,
   drawioBlock,
   drawioBlockBody,
+  drawioBlocks,
   drawioDiagramIds,
   isDrawioLanguage,
   isPictureCurrent,
+  MAX_DIAGRAM_PAGES,
   MAX_DIAGRAM_XML_BYTES,
+  pageIndexOf,
+  pagePicture,
   parseDrawioBlock,
 } from "./drawio.ts";
 
@@ -17,12 +21,63 @@ const ID = "3f2c1a9e-5b7d-4c21-9e0f-6a8b7c5d4e3f";
 
 describe("parseDrawioBlock", () => {
   it("reads the diagram id, and a caption when there is one", () => {
-    expect(parseDrawioBlock(ID)).toEqual({ diagramId: ID, caption: null });
+    expect(parseDrawioBlock(ID)).toEqual({ diagramId: ID, page: null, caption: null });
     expect(parseDrawioBlock(`  ${ID}  \n  How a client is onboarded  \n`)).toEqual({
       diagramId: ID,
+      page: null,
       caption: "How a client is onboarded",
     });
-    expect(parseDrawioBlock(`${ID}\n\n`)).toEqual({ diagramId: ID, caption: null });
+    expect(parseDrawioBlock(`${ID}\n\n`)).toEqual({ diagramId: ID, page: null, caption: null });
+  });
+
+  it("reads a page line after the id, then the caption", () => {
+    expect(parseDrawioBlock(`${ID}\npage: Sales detail`)).toEqual({
+      diagramId: ID,
+      page: "Sales detail",
+      caption: null,
+    });
+    expect(parseDrawioBlock(`${ID}\n  page:   Sales   detail \nThe sales steps`)).toEqual({
+      diagramId: ID,
+      page: "Sales detail",
+      caption: "The sales steps",
+    });
+    // An empty page line is the first page.
+    expect(parseDrawioBlock(`${ID}\npage:\nCaption`)).toEqual({
+      diagramId: ID,
+      page: null,
+      caption: "Caption",
+    });
+  });
+
+  it("reads a caption that starts with page: as a page line, unless an empty page line comes first", () => {
+    // The rule: the line after the id is the page line whenever it starts with "page:".
+    expect(parseDrawioBlock(`${ID}\npage: one of three`)).toMatchObject({
+      page: "one of three",
+      caption: null,
+    });
+    // Such a caption is written after an empty page line, and reads back as written.
+    const body = drawioBlockBody(ID, "page: one of three");
+    expect(body).toBe(`${ID}\npage:\npage: one of three`);
+    expect(parseDrawioBlock(body)).toEqual({
+      diagramId: ID,
+      page: null,
+      caption: "page: one of three",
+    });
+    // "Page:" in another case, or later in the line, is a caption as before.
+    expect(parseDrawioBlock(`${ID}\nPage: 3 of the flow`)).toMatchObject({
+      page: null,
+      caption: "Page: 3 of the flow",
+    });
+  });
+
+  it("writes and reads back a page with a caption", () => {
+    expect(drawioBlockBody(ID, "Flow", "Sales\n detail")).toBe(`${ID}\npage: Sales detail\nFlow`);
+    expect(drawioBlock(ID, null, "Detail")).toBe(`\`\`\`t3-drawio\n${ID}\npage: Detail\n\`\`\``);
+    expect(parseDrawioBlock(drawioBlockBody(ID, "Flow", "Detail"))).toEqual({
+      diagramId: ID,
+      page: "Detail",
+      caption: "Flow",
+    });
   });
 
   it.each([
@@ -35,6 +90,9 @@ describe("parseDrawioBlock", () => {
     [`${ID}\nCaption\nthird line`],
     [`${ID}\n${"c".repeat(301)}`],
     ["<mxfile></mxfile>"],
+    [`${ID}\npage: A\nCaption\nthird line`],
+    [`${ID}\npage: ${"p".repeat(201)}`],
+    [`page: A\n${ID}`],
   ])("refuses %j", (body) => {
     expect(parseDrawioBlock(body)).toBeNull();
   });
@@ -46,6 +104,7 @@ describe("parseDrawioBlock", () => {
     expect(drawioBlock(ID, "Flow")).toBe(`\`\`\`t3-drawio\n${ID}\nFlow\n\`\`\``);
     expect(parseDrawioBlock(drawioBlockBody(ID, "Flow"))).toEqual({
       diagramId: ID,
+      page: null,
       caption: "Flow",
     });
   });
@@ -131,5 +190,46 @@ describe("pictures", () => {
     expect(isPictureCurrent({ hasSource: true, version: 3, pictureVersion: 2 })).toBe(false);
     expect(isPictureCurrent({ hasSource: true, version: 1, pictureVersion: null })).toBe(false);
     expect(isPictureCurrent({ hasSource: false, version: 1, pictureVersion: null })).toBe(true);
+  });
+});
+
+describe("a block's page", () => {
+  const pages = ["Overview", "Sales  detail", null, "Overview"];
+
+  it("finds a page by name, the first of that name, with spaces collapsed", () => {
+    expect(pageIndexOf(pages, "Overview")).toBe(0);
+    expect(pageIndexOf(pages, "Sales detail")).toBe(1);
+    expect(pageIndexOf(pages, "overview")).toBe(-1);
+  });
+
+  it("picks the stored picture of the page, or says why there is none", () => {
+    expect(pagePicture({ picturePages: pages }, null)).toEqual({ kind: "picture", index: 0 });
+    expect(pagePicture({ picturePages: pages }, "Sales detail")).toEqual({
+      kind: "picture",
+      index: 1,
+    });
+    expect(pagePicture({ picturePages: pages }, "Gone")).toEqual({ kind: "not_found" });
+    // A picture from before pages shows the first page, and cannot tell any other.
+    expect(pagePicture({ picturePages: null }, null)).toEqual({ kind: "picture", index: 0 });
+    expect(pagePicture({ picturePages: null }, "Overview")).toEqual({ kind: "unknown" });
+    const many = Array.from({ length: MAX_DIAGRAM_PAGES + 1 }, (_, index) => `P${index}`);
+    expect(pagePicture({ picturePages: many }, `P${MAX_DIAGRAM_PAGES}`)).toEqual({
+      kind: "no_picture",
+    });
+  });
+
+  it("serves the first page at the address it always had, and other pages by number", () => {
+    expect(diagramPictureUrl("g1", "svg", 3)).toBe("/api/diagrams/g1/picture.svg?v=3");
+    expect(diagramPictureUrl("g1", "svg", 3, 2)).toBe("/api/diagrams/g1/picture.svg?page=2&v=3");
+    expect(diagramPictureUrl("g1", "png", null, 1)).toBe("/api/diagrams/g1/picture.png?page=1");
+  });
+
+  it("lists every block with its page", () => {
+    const markdown = [drawioBlock("one"), drawioBlock("two", "Caption", "Detail")].join("\n\n");
+    expect(drawioBlocks(markdown)).toEqual([
+      { diagramId: "one", page: null, caption: null },
+      { diagramId: "two", page: "Detail", caption: "Caption" },
+    ]);
+    expect(checkDrawioIn(markdown)).toBeNull();
   });
 });

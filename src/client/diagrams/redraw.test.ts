@@ -38,7 +38,7 @@ describe("redraw on demand", () => {
     expect(frames[0]!.posted.map((action) => action.action)).toEqual(["load", "export", "export"]);
     expect(frames[0]!.posted[0]).toEqual({ action: "load", xml: "<mxfile>3</mxfile>" });
     expect(api.calls).toEqual([
-      ["uploadPicture", "g1", { version: 3, svg: SVG, png: PNG_BASE64 }],
+      ["uploadPicture", "g1", { version: 3, svg: SVG, png: PNG_BASE64, pageNames: null, morePages: [] }],
     ]);
     expect(queue.isPending("g1")).toBe(false);
   });
@@ -67,7 +67,7 @@ describe("redraw on demand", () => {
   it("returns the same redraw when asked twice, and draws nothing for a current one", async () => {
     const { api, frames, queue } = setup([
       view({ id: "stale" }),
-      view({ id: "current", version: 2, pictureVersion: 2 }),
+      view({ id: "current", version: 2, pictureVersion: 2, picturePages: ["Page-1"] }),
       view({ id: "empty", xml: "", hasSource: false }),
     ]);
     const first = queue.request("stale");
@@ -77,6 +77,40 @@ describe("redraw on demand", () => {
     await queue.request("empty");
     expect(api.calls).toHaveLength(1);
     expect(frames[0]!.posted.filter((action) => action.action === "load")).toHaveLength(1);
+  });
+
+  it("draws each page on its own and uploads one picture per page with every page's name", async () => {
+    const page = (name: string, id: string) =>
+      `<diagram name="${name}" id="${id}"><mxGraphModel><root><mxCell id="0"/></root></mxGraphModel></diagram>`;
+    const xml = `<mxfile host="app.diagrams.net">${page("Overview", "o")}${page("Detail", "d")}</mxfile>`;
+    const { api, frames, queue } = setup([view({ id: "g1", version: 2, xml })]);
+    const redrawn = await queue.request("g1");
+
+    expect(redrawn).toMatchObject({ pictureVersion: 2, picturePages: ["Overview", "Detail"] });
+    const loads = frames[0]!.posted.flatMap((action) => (action.action === "load" ? [action.xml] : []));
+    expect(loads).toEqual([
+      `<mxfile host="app.diagrams.net">${page("Overview", "o")}</mxfile>`,
+      `<mxfile host="app.diagrams.net">${page("Detail", "d")}</mxfile>`,
+    ]);
+    expect(api.calls).toEqual([
+      [
+        "uploadPicture",
+        "g1",
+        {
+          version: 2,
+          svg: SVG,
+          png: PNG_BASE64,
+          pageNames: ["Overview", "Detail"],
+          morePages: [{ svg: SVG, png: PNG_BASE64 }],
+        },
+      ],
+    ]);
+  });
+
+  it("draws again a current picture from before pages, so blocks can name a page", async () => {
+    const { api, queue } = setup([view({ id: "g1", version: 2, pictureVersion: 2 })]);
+    expect(await queue.request("g1")).toMatchObject({ picturePages: [null] });
+    expect(api.calls).toHaveLength(1);
   });
 
   it("refuses someone who only views the diagram, without loading Draw.io", async () => {
@@ -91,7 +125,9 @@ describe("redraw on demand", () => {
     const redrawn = queue.request("g1");
     await vi.advanceTimersByTimeAsync(60_000);
     expect((await redrawn).pictureVersion).toBe(1);
-    expect(api.calls).toEqual([["uploadPicture", "g1", { version: 1, svg: SVG, png: null }]]);
+    expect(api.calls).toEqual([
+      ["uploadPicture", "g1", { version: 1, svg: SVG, png: null, pageNames: [null], morePages: [] }],
+    ]);
   });
 
   it("reports the diagram as it now is when it was saved again while drawing", async () => {

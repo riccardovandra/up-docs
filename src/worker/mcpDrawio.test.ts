@@ -4,7 +4,7 @@ import { drawioBlock, MAX_DIAGRAM_XML_BYTES } from "../shared/drawio.ts";
 import { readDrawio } from "../shared/drawioModel.ts";
 import * as Diagrams from "./diagrams.ts";
 import * as Docs from "./docs.ts";
-import { DRAWIO_EXAMPLE } from "./mcpGuide.ts";
+import { DRAWIO_EXAMPLE, DRAWIO_PAGES_EXAMPLE } from "./mcpGuide.ts";
 import { ORIGIN, OWNER } from "./testing/apiHarness.ts";
 import { makeMcpHarness } from "./testing/mcpHarness.ts";
 
@@ -72,6 +72,8 @@ describe("MCP Draw.io tools", () => {
       pages: [
         {
           name: null,
+          id: null,
+          compressed: false,
           shapes: ["Discovery call", "Proposal", "Signed?", "Kickoff"],
           connections: [
             "Discovery call -> Proposal",
@@ -197,6 +199,7 @@ describe("MCP Draw.io tools", () => {
       version: 1,
       updatedAt: expect.any(String),
       url: `${ORIGIN}/diagrams/${diagramId}`,
+      pageNames: [null],
       project: { projectId, key: expect.any(String), name: "Acme" },
       canEdit: true,
       usedIn: [expect.objectContaining({ docId: doc.docId, tabId: tab.tabId })],
@@ -236,12 +239,14 @@ describe("MCP Draw.io tools", () => {
     const saved = await Diagrams.saveDiagramPicture(mcp.api.db, mcp.api.deps.images, {
       diagramId,
       version: 1,
-      svg: SVG,
-      png: PNG.buffer as ArrayBuffer,
+      pages: [{ svg: SVG, png: PNG.buffer as ArrayBuffer }],
+      pageNames: null,
     });
     expect(saved.ok).toBe(true);
     const [text, image] = await content();
-    expect(JSON.parse(text!.text!).picture).toBe("Attached after this text as a PNG image.");
+    expect(JSON.parse(text!.text!).picture).toBe(
+      "Attached after this text as a PNG image (the first page).",
+    );
     expect(image).toEqual({
       type: "image",
       mimeType: "image/png",
@@ -252,8 +257,8 @@ describe("MCP Draw.io tools", () => {
     await Diagrams.saveDiagramPicture(mcp.api.db, mcp.api.deps.images, {
       diagramId,
       version: 1,
-      svg: SVG,
-      png: null,
+      pages: [{ svg: SVG, png: null }],
+      pageNames: null,
     });
     const svgOnly = await content();
     expect(svgOnly).toHaveLength(1);
@@ -263,8 +268,8 @@ describe("MCP Draw.io tools", () => {
     await Diagrams.saveDiagramPicture(mcp.api.db, mcp.api.deps.images, {
       diagramId,
       version: 1,
-      svg: SVG,
-      png: PNG.buffer as ArrayBuffer,
+      pages: [{ svg: SVG, png: PNG.buffer as ArrayBuffer }],
+      pageNames: null,
     });
     const updated = await mcp.tool("update_drawio", { diagramId, xml: FLOW2, baseVersion: 1 });
     expect(updated.body.picture).toContain("No current picture");
@@ -591,5 +596,218 @@ describe("Draw.io diagrams in docs over MCP", () => {
       markdown: tooMany,
     });
     expect(flood).toMatchObject({ isError: true, body: { error: "too_many_diagrams" } });
+  });
+});
+
+const page = (name: string, cells: string, id = name.toLowerCase().replace(/\s+/g, "-")) =>
+  `<diagram name="${name}" id="${id}">${model(cells)}</diagram>`;
+const file = (...pages: Array<string>) => `<mxfile>${pages.join("")}</mxfile>`;
+const OVERVIEW = page("Overview", box("s", "Sales") + box("d", "Delivery") + edge("e", "s", "d"));
+const DETAIL = page("Sales detail", box("l", "Lead") + box("c", "Call") + edge("e", "l", "c"));
+
+/** A diagram of two pages, by the admin's agent, and a doc tab of theirs. */
+async function twoPages() {
+  const mcp = await makeMcpHarness();
+  const seeded = await mcp.seedDoc("Intro");
+  const created = await mcp.tool("create_drawio", {
+    title: "Business map",
+    xml: file(OVERVIEW, DETAIL),
+  });
+  expect(created.isError).toBe(false);
+  return { mcp, ...seeded, diagramId: created.body.diagramId as string };
+}
+
+/** read_drawio through tools/call, as a client calls it: the JSON text and any image. */
+async function readContent(mcp: Harness, args: Record<string, unknown>) {
+  const { result } = await mcp.rpc("tools/call", { name: "read_drawio", arguments: args });
+  const content = result!.content as unknown as Array<Record<string, string>>;
+  return { body: JSON.parse(content[0]!.text!), images: content.slice(1) };
+}
+
+describe("Draw.io pages over MCP", () => {
+  it("creates, reads and updates a diagram of several pages through tools/call", async () => {
+    const mcp = await makeMcpHarness();
+    const { result } = await mcp.rpc("tools/call", {
+      name: "create_drawio",
+      arguments: { title: "Business map", xml: file(OVERVIEW, DETAIL) },
+    });
+    const created = JSON.parse((result!.content as Array<{ text: string }>)[0]!.text);
+    expect(created).toMatchObject({
+      pageNames: ["Overview", "Sales detail"],
+      pages: [
+        { name: "Overview", shapes: ["Sales", "Delivery"], connections: ["Sales -> Delivery"] },
+        { name: "Sales detail", shapes: ["Lead", "Call"], connections: ["Lead -> Call"] },
+      ],
+    });
+    expect(created.next).toContain("page: <page name>");
+    const { diagramId } = created as { diagramId: string };
+
+    const read = await readContent(mcp, { diagramId, includeXml: true });
+    expect(read.body.pageNames).toEqual(["Overview", "Sales detail"]);
+    expect(read.body.xml).toBe(file(OVERVIEW, DETAIL));
+    expect(read.body.xmlNote).toContain("all 2 pages");
+
+    // Change page 2, add page 3, keep page 1: the whole <mxfile> goes back.
+    const third = page("Delivery detail", box("k", "Kickoff"));
+    const changed = file(OVERVIEW, page("Sales detail", box("l", "Lead")), third);
+    const updated = await mcp.tool("update_drawio", { diagramId, xml: changed, baseVersion: 1 });
+    expect(updated.isError).toBe(false);
+    expect(updated.body).toMatchObject({
+      version: 2,
+      pageNames: ["Overview", "Sales detail", "Delivery detail"],
+    });
+    expect(updated.body.warnings).toBeUndefined();
+    expect((await Diagrams.getDiagram(mcp.api.db, diagramId)).xml).toBe(changed);
+
+    // A page left out is deleted, and the result says which.
+    const fewer = await mcp.tool("update_drawio", {
+      diagramId,
+      xml: file(OVERVIEW, third),
+      baseVersion: 2,
+    });
+    expect(fewer.body.pageNames).toEqual(["Overview", "Delivery detail"]);
+    expect(fewer.body.warnings).toEqual([
+      'Pages deleted: "Sales detail". A doc block that names one of them now shows "Page not found".',
+    ]);
+  });
+
+  it("refuses one <mxGraphModel> for a diagram of several pages, and saves nothing", async () => {
+    const { mcp, diagramId } = await twoPages();
+    const single = await mcp.tool("update_drawio", { diagramId, xml: FLOW, baseVersion: 1 });
+    expect(single).toMatchObject({
+      isError: true,
+      body: { error: "would_delete_pages", pageNames: ["Overview", "Sales detail"] },
+    });
+    expect(single.body.message).toContain("read_drawio {includeXml: true}");
+    expect(single.body.message).toContain("Nothing was saved.");
+    const stored = await Diagrams.getDiagram(mcp.api.db, diagramId);
+    expect(stored).toMatchObject({ version: 1, xml: file(OVERVIEW, DETAIL) });
+    // A stale version is a conflict first, before anything about pages.
+    const stale = await mcp.tool("update_drawio", { diagramId, xml: FLOW, baseVersion: 7 });
+    expect(stale.body).toMatchObject({ error: "version_conflict", currentVersion: 1 });
+    // A title alone is fine.
+    const renamed = await mcp.tool("update_drawio", { diagramId, title: "Map", baseVersion: 1 });
+    expect(renamed.body).toMatchObject({ title: "Map", pageNames: ["Overview", "Sales detail"] });
+  });
+
+  it("replaces the drawing of a one-page file with one model, keeping the page's name and id", async () => {
+    const mcp = await makeMcpHarness();
+    const created = await mcp.tool("create_drawio", { title: "One", xml: file(OVERVIEW) });
+    const { diagramId } = created.body as { diagramId: string };
+    const updated = await mcp.tool("update_drawio", { diagramId, xml: FLOW, baseVersion: 1 });
+    expect(updated.body).toMatchObject({ pageNames: ["Overview"], shapes: ["Discovery call", "Proposal"] });
+    const { xml } = await Diagrams.getDiagram(mcp.api.db, diagramId);
+    expect(xml).toBe(`<mxfile><diagram name="Overview" id="overview">${FLOW}</diagram></mxfile>`);
+    // A bare model stays a bare model.
+    const bare = await mcp.tool("create_drawio", { title: "Bare", xml: FLOW });
+    await mcp.tool("update_drawio", { diagramId: bare.body.diagramId, xml: FLOW2, baseVersion: 1 });
+    expect((await Diagrams.getDiagram(mcp.api.db, bare.body.diagramId)).xml).toBe(FLOW2);
+  });
+
+  it("reports the problems of every page and saves nothing", async () => {
+    const mcp = await makeMcpHarness();
+    const attempt = await mcp.tool("create_drawio", {
+      title: "Bad",
+      xml: file(OVERVIEW, page("Overview", box("x", "X"), "dup"), `<diagram id="n">${FLOW}</diagram>`),
+    });
+    expect(attempt).toMatchObject({ isError: true, body: { error: "invalid_pages" } });
+    expect(attempt.body.message).toBe("2 problems with the pages. Nothing was saved.");
+    expect(attempt.body.problems).toEqual([
+      'Page 2 ("Overview"): page 1 has the same name; give every page its own.',
+      "Page 3: give its <diagram> a name attribute; docs pick a page by name.",
+    ]);
+    const empty = await mcp.tool("create_drawio", { title: "Empty", xml: "<mxfile></mxfile>" });
+    expect(empty.body.error).toBe("invalid_pages");
+    expect((await mcp.tool("list_drawio", {})).body.diagrams).toEqual([]);
+  });
+
+  it("guides with a valid example of two pages", async () => {
+    const mcp = await makeMcpHarness();
+    const guide = (await mcp.tool("format_guide", { topic: "drawio" })).body.guide as string;
+    expect(guide).toContain(DRAWIO_PAGES_EXAMPLE);
+    expect(guide).toContain("page: Sales detail");
+    const created = await mcp.tool("create_drawio", { title: "Example", xml: DRAWIO_PAGES_EXAMPLE });
+    expect(created.isError).toBe(false);
+    expect(created.body.pageNames).toEqual(["Overview", "Sales detail"]);
+    expect(created.body.warnings).toBeUndefined();
+    const list = await mcp.rpc("tools/list");
+    const formatGuide = (list.result!.tools as Array<{ name: string; description: string }>).find(
+      (tool) => tool.name === "format_guide",
+    )!;
+    for (const topic of ["image (", "sheet ("]) expect(formatGuide.description).toContain(topic);
+  });
+
+  it("links a page in a doc, and refuses a page the diagram does not have", async () => {
+    const { mcp, tab, diagramId } = await twoPages();
+    const wrong = await mcp.tool("edit_tab", {
+      tabId: tab.tabId,
+      find: "Intro",
+      replace: `Intro\n\n${drawioBlock(diagramId, null, "Pricing")}`,
+    });
+    expect(wrong).toMatchObject({
+      isError: true,
+      body: { error: "drawio_page_not_found", pages: ["Overview", "Sales detail"] },
+    });
+    expect(await Docs.getTabMarkdown(mcp.api.db, tab.tabId)).toBe("Intro");
+
+    const right = await mcp.tool("edit_tab", {
+      tabId: tab.tabId,
+      find: "Intro",
+      replace: `Intro\n\n${drawioBlock(diagramId, "The sales steps", "Sales detail")}`,
+    });
+    expect(right.isError).toBe(false);
+    const read = await mcp.tool("read_doc", { docId: (await Docs.getTab(mcp.api.db, tab.tabId)).docId });
+    expect(read.body.drawioDiagrams[0]).toMatchObject({ diagramId, title: "Business map" });
+
+    // Once the page is gone, an edit elsewhere in the tab still goes through.
+    await mcp.tool("update_drawio", { diagramId, xml: file(OVERVIEW), baseVersion: 1 });
+    const later = await mcp.tool("edit_tab", { tabId: tab.tabId, find: "Intro", replace: "Start" });
+    expect(later.isError).toBe(false);
+  });
+
+  it("hands the agent the picture of the page it asks for", async () => {
+    const { mcp, diagramId } = await twoPages();
+    const PNG2 = new Uint8Array([...PNG, 2]);
+    await Diagrams.saveDiagramPicture(mcp.api.db, mcp.api.deps.images, {
+      diagramId,
+      version: 1,
+      pages: [
+        { svg: SVG, png: PNG.slice().buffer },
+        { svg: SVG, png: PNG2.slice().buffer },
+      ],
+      pageNames: ["Overview", "Sales detail"],
+    });
+    const first = await readContent(mcp, { diagramId });
+    expect(first.images[0]!.data).toBe(Buffer.from(PNG).toString("base64"));
+    const second = await readContent(mcp, { diagramId, page: "Sales detail" });
+    expect(second.body.picture).toBe('Attached after this text as a PNG image of page "Sales detail".');
+    expect(second.images[0]!.data).toBe(Buffer.from(PNG2).toString("base64"));
+    const missing = await readContent(mcp, { diagramId, page: "Nope" });
+    expect(missing.body.picture).toContain('no page "Nope"');
+    expect(missing.images).toEqual([]);
+  });
+
+  it("hands over compressed pages written out, so the agent can change them", async () => {
+    const mcp = await makeMcpHarness();
+    const inner = model(box("a", "Packed"));
+    const stream = new Blob([encodeURIComponent(inner)])
+      .stream()
+      .pipeThrough(new CompressionStream("deflate-raw"));
+    const packed = btoa(String.fromCharCode(...new Uint8Array(await new Response(stream).arrayBuffer())));
+    const stored = file(OVERVIEW, `<diagram name="Packed" id="p">${packed}</diagram>`);
+    const created = await mcp.tool("create_drawio", { title: "Packed", xml: FLOW });
+    const diagram = { id: created.body.diagramId as string };
+    // As the editor may save it.
+    await Diagrams.updateDiagram(mcp.api.db, { diagramId: diagram.id, xml: stored, now: 2 });
+    const read = await readContent(mcp, { diagramId: diagram.id, includeXml: true });
+    expect(read.body.xml).toBe(file(OVERVIEW, `<diagram name="Packed" id="p">${inner}</diagram>`));
+    expect(read.body.pages[1]).toMatchObject({ name: "Packed", shapes: ["Packed"] });
+    // And the agent's file goes back whole.
+    const back = await mcp.tool("update_drawio", {
+      diagramId: diagram.id,
+      xml: read.body.xml,
+      baseVersion: 2,
+    });
+    expect(back.isError).toBe(false);
   });
 });

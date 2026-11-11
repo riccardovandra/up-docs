@@ -6,6 +6,8 @@ import {
   DRAWIO_LANGUAGE,
   MAX_DIAGRAM_TITLE_LENGTH,
   drawioBlockBody,
+  pageIndexOf,
+  pageNameLine,
   type DiagramSummary,
   type DiagramUsage,
   type DiagramView,
@@ -123,12 +125,35 @@ export async function detachCopy(
   });
 }
 
-/** The node for a block that links `diagramId`, as the editor's JSON. */
-export const drawioNode = (diagramId: string, caption: string | null = null) => ({
+/** The node for a block that links `diagramId` (at `page`, null: the first), as the editor's JSON. */
+export const drawioNode = (
+  diagramId: string,
+  caption: string | null = null,
+  page: string | null = null,
+) => ({
   type: "codeBlock",
   attrs: { language: DRAWIO_LANGUAGE },
-  content: [{ type: "text", text: drawioBlockBody(diagramId, caption) }],
+  content: [{ type: "text", text: drawioBlockBody(diagramId, caption, page) }],
 });
+
+/**
+ * The pages a block can be pointed at: the named pages of the stored picture,
+ * once there are two or more. A page the block names that is gone stays on
+ * offer, so the choice shows what the block says.
+ */
+export function pageChoices(
+  diagram: Pick<DiagramSummary, "picturePages"> | null,
+  current: string | null,
+): ReadonlyArray<string> {
+  const named = (diagram?.picturePages ?? []).filter((name): name is string => name !== null);
+  const names = [...new Set(named.map(pageNameLine))];
+  // A block whose page is gone keeps the choice while any page is left to move it to.
+  const choices =
+    current !== null && names.length > 0 && pageIndexOf(names, current) === -1
+      ? [...names, current]
+      : names;
+  return choices.length < 2 ? [] : choices;
+}
 
 /**
  * A new diagram drawn from a doc: its block goes in on the first save, once.

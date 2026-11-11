@@ -966,6 +966,19 @@ export async function handleApi(
   }
 }
 
+/** One page's `{svg, png}` from a picture upload: the SVG text and the PNG in base64. */
+function pagePictureArg(value: unknown): Diagrams.PagePictureUpload | null {
+  if (!value || typeof value !== "object") return null;
+  const { svg, png } = value as { readonly svg?: unknown; readonly png?: unknown };
+  if (typeof svg !== "string" || (png != null && typeof png !== "string")) return null;
+  if (typeof png !== "string") return { svg, png: null };
+  try {
+    return { svg, png: Uint8Array.fromBase64(png).buffer as ArrayBuffer };
+  } catch {
+    return null;
+  }
+}
+
 const versionConflict = (conflict: { readonly version: number }) =>
   json({ error: "version_conflict", version: conflict.version, diagram: conflict }, 409);
 
@@ -1045,38 +1058,50 @@ async function handleDiagrams(
   // `picture.svg` is what people see, `picture.png` what agents are handed.
   const format = /^picture\.([a-z]+)$/.exec(sub ?? "")?.[1];
   if (isDiagramPictureFormat(format) && SAFE_METHODS.has(method)) {
+    // `?page=<n>`: page n, counted from 0. Without it, the first page.
+    const page = url.searchParams.get("page");
+    const pageIndex = page === null ? 0 : /^(0|[1-9]\d{0,3})$/.test(page) ? Number(page) : -1;
+    if (pageIndex < 0) return error(400, "invalid_page");
     const { diagram } = await need("view");
     return (
       (await Diagrams.diagramPictureResponse(deps.images, {
         diagram,
         format,
         request,
+        pageIndex,
       })) ?? error(404, "not_found")
     );
   }
 
-  // The picture Draw.io drew in the browser, for the source at `version`.
+  // The pictures Draw.io drew in the browser, for the source at `version`: `svg`
+  // and `png` for the first page, `pageNames` for every page and `morePages`
+  // ({svg, png}) for the second page on. Without `pageNames`, the first page only.
   if (sub === "picture" && method === "PUT") {
     const body = await readJson(request);
-    const { version, svg } = body;
+    const { version } = body;
     if (typeof version !== "number" || !Number.isInteger(version))
       return error(400, "invalid_version");
-    if (typeof svg !== "string" || (body.png != null && typeof body.png !== "string"))
+    const pageNames = body.pageNames;
+    const morePages = body.morePages ?? [];
+    if (
+      (pageNames != null &&
+        (!Array.isArray(pageNames) ||
+          !pageNames.every((name) => name === null || typeof name === "string"))) ||
+      !Array.isArray(morePages)
+    )
       return error(400, "invalid_picture");
-    await need("edit");
-    let png: ArrayBuffer | null = null;
-    if (typeof body.png === "string") {
-      try {
-        png = Uint8Array.fromBase64(body.png).buffer as ArrayBuffer;
-      } catch {
-        return error(400, "invalid_picture");
-      }
+    const pages: Array<Diagrams.PagePictureUpload> = [];
+    for (const each of [body, ...morePages]) {
+      const page = pagePictureArg(each);
+      if (!page) return error(400, "invalid_picture");
+      pages.push(page);
     }
+    await need("edit");
     const result = await Diagrams.saveDiagramPicture(deps.db, deps.images, {
       diagramId: id,
       version,
-      svg,
-      png,
+      pages,
+      pageNames: (pageNames as Array<string | null> | null | undefined) ?? null,
     });
     return result.ok ? json({ diagram: result.diagram }) : versionConflict(result.conflict);
   }

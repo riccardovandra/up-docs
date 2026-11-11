@@ -4,6 +4,9 @@
 // and the picture. Everything here works on a `DrawioFrame`, so tests drive it
 // with a stand-in for the frame.
 
+import { MAX_DIAGRAM_PAGES } from "../../shared/drawio.ts";
+import { drawioPageSources } from "../../shared/drawioModel.ts";
+
 export const DRAWIO_ORIGIN = "https://embed.diagrams.net";
 
 /** What the frame tells us. Anything it sends that we do not act on is dropped. */
@@ -250,4 +253,47 @@ export async function exportDrawioPicture(
     () => null,
   );
   return { svg: lightSvg(svg), png };
+}
+
+/** A picture of every page: the first page's at the top, as an upload sends it. */
+export interface DrawioPictures extends DrawioPicture {
+  /** Every page's name, in order; null when the source could not be split into pages. */
+  readonly pageNames: ReadonlyArray<string | null> | null;
+  /** The second page's picture on, up to MAX_DIAGRAM_PAGES pages in all. */
+  readonly morePages: ReadonlyArray<DrawioPicture>;
+}
+
+const LOAD_PAGE_MS = 20_000;
+
+/**
+ * Draws a picture of each page of `xml` in a frame that is ready for `load`:
+ * every page is loaded on its own and exported, so each picture shows that
+ * page alone. A source of one page, or one this app cannot split, is loaded
+ * whole and exported once.
+ */
+export async function drawDrawioPictures(
+  frame: DrawioFrame,
+  xml: string,
+  options: { readonly loadTimeoutMs?: number } = {},
+): Promise<DrawioPictures> {
+  const timeoutMs = options.loadTimeoutMs ?? LOAD_PAGE_MS;
+  const sources = drawioPageSources(xml);
+  const draw = async (source: string) => {
+    const loaded = nextDrawioEvent(frame, "load", { timeoutMs, what: "open the diagram" });
+    frame.post({ action: "load", xml: source });
+    await loaded;
+    return exportDrawioPicture(frame);
+  };
+  if (sources === null || sources.length <= 1) {
+    const picture = await draw(xml);
+    return {
+      ...picture,
+      pageNames: sources?.length === 1 ? [sources[0]!.name] : null,
+      morePages: [],
+    };
+  }
+  const pictures: Array<DrawioPicture> = [];
+  for (const source of sources.slice(0, MAX_DIAGRAM_PAGES)) pictures.push(await draw(source.xml));
+  const [first, ...morePages] = pictures;
+  return { ...first!, pageNames: sources.map((source) => source.name), morePages };
 }

@@ -15,8 +15,8 @@ export async function loadLinkedDiagrams(
   const found = await Promise.all(
     [...ids].map(async (id): Promise<ExportDiagram | null> => {
       try {
-        const { title, pictureVersion, hasSource } = await api.get(id);
-        return { id, title, pictureVersion, hasSource };
+        const { title, pictureVersion, picturePages, hasSource } = await api.get(id);
+        return { id, title, pictureVersion, picturePages, hasSource };
       } catch (cause) {
         if (cause instanceof ApiError && cause.status === 404) return null;
         throw cause;

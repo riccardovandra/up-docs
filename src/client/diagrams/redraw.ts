@@ -10,7 +10,7 @@ import { ApiError } from "../api.ts";
 import { diagramConflict, diagramsApi, type DiagramsApi } from "./diagramsApi.ts";
 import {
   DRAWIO_RENDERER_URL,
-  exportDrawioPicture,
+  drawDrawioPictures,
   mountDrawioFrame,
   nextDrawioEvent,
   type DrawioFrame,
@@ -19,6 +19,14 @@ import {
 /** Draw.io has to download itself before it says `init`. */
 const INIT_MS = 45_000;
 const LOAD_MS = 20_000;
+
+/**
+ * Whether the stored picture is all a page needs: it shows the current source
+ * and says which page is which. A picture from before pages shows the first
+ * page and is drawn again only when a block asks for another.
+ */
+const isDrawn = (diagram: DiagramSummary) =>
+  !diagram.hasSource || (isPictureCurrent(diagram) && diagram.picturePages !== null);
 /** The frame is kept this long after the queue empties, then removed. */
 const IDLE_MS = 30_000;
 
@@ -30,7 +38,8 @@ export interface RedrawDeps {
 
 export interface RedrawQueue {
   /**
-   * Draws and uploads the diagram's picture unless it is already current, and
+   * Draws and uploads a picture of each page of the diagram unless the stored
+   * one is current and names its pages, and
    * resolves with the diagram as it then is. Asking again while a redraw of the
    * same diagram is queued returns that redraw. Rejects when the caller cannot
    * manage the diagram, or Draw.io does not answer.
@@ -71,19 +80,13 @@ export function createRedrawQueue(deps: RedrawDeps): RedrawQueue {
 
   const draw = async (diagramId: string): Promise<DiagramSummary> => {
     const diagram = await deps.api.get(diagramId);
-    if (isPictureCurrent(diagram)) return diagram;
+    if (isDrawn(diagram)) return diagram;
     if (!diagram.canEdit || diagram.xml === null) {
       throw new Error("Only someone who manages the diagram can draw its picture.");
     }
     try {
       const port = await readyFrame();
-      const loaded = nextDrawioEvent(port, "load", {
-        timeoutMs: LOAD_MS,
-        what: "open the diagram",
-      });
-      port.post({ action: "load", xml: diagram.xml });
-      await loaded;
-      const picture = await exportDrawioPicture(port);
+      const picture = await drawDrawioPictures(port, diagram.xml, { loadTimeoutMs: LOAD_MS });
       try {
         return await deps.api.uploadPicture(diagramId, { version: diagram.version, ...picture });
       } catch (cause) {

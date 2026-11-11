@@ -1,8 +1,12 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  asNamedPage,
   describeDrawio,
+  drawioPageProblems,
+  drawioPageSources,
   drawioWarnings,
+  uncompressedDrawio,
   LOOSE_END,
   MAX_DRAWIO_LABEL_LENGTH,
   readDrawio,
@@ -55,6 +59,8 @@ describe("readDrawio", () => {
     );
     expect(page).toEqual({
       name: null,
+      id: null,
+      compressed: false,
       shapes: ["Discovery call", "Proposal", UNLABELLED_SHAPE],
       connections: ["Discovery call -> Proposal", `Proposal -[if signed]-> ${UNLABELLED_SHAPE}`],
       warnings: [],
@@ -94,6 +100,8 @@ describe("readDrawio", () => {
     expect(await pagesOf(xml)).toEqual([
       {
         name: "Page-1",
+        id: "kq3",
+        compressed: false,
         shapes: ["Signed?", "Kickoff"],
         connections: ["Signed? -[yes]-> Kickoff"],
         warnings: [],
@@ -262,6 +270,8 @@ describe("readDrawio", () => {
 describe("describeDrawio", () => {
   const page = (name: string, count: number): DrawioPage => ({
     name,
+    id: null,
+    compressed: false,
     shapes: Array.from({ length: count }, (_, index) => `${name} ${index}`),
     connections: Array.from({ length: count }, (_, index) => `${name} ${index} -> x`),
     warnings: [],
@@ -286,5 +296,88 @@ describe("describeDrawio", () => {
       shapes: ["One 0", "One 1"],
       connections: ["One 0 -> x", "One 1 -> x"],
     });
+  });
+});
+
+describe("pages", () => {
+  const page = (name: string, cells: string, id = name.toLowerCase()) =>
+    `<diagram name="${name}" id="${id}">${model(cells)}</diagram>`;
+
+  it("splits a file into one source per page, each copied as written", async () => {
+    const second = await compress(model(box("b", "Detail")));
+    const xml =
+      `<?xml version="1.0"?>\n<mxfile host="embed.diagrams.net">${page("Overview", box("a", "A"))}` +
+      `<diagram name="Detail" id="d">${second}</diagram></mxfile>`;
+    const sources = drawioPageSources(xml)!;
+    expect(sources.map(({ name, id }) => ({ name, id }))).toEqual([
+      { name: "Overview", id: "overview" },
+      { name: "Detail", id: "d" },
+    ]);
+    expect(sources[0]!.xml).toBe(
+      `<mxfile host="embed.diagrams.net">${page("Overview", box("a", "A"))}</mxfile>`,
+    );
+    expect(sources[1]!.xml).toBe(
+      `<mxfile host="embed.diagrams.net"><diagram name="Detail" id="d">${second}</diagram></mxfile>`,
+    );
+    // Each one reads back as that page alone.
+    expect((await pagesOf(sources[1]!.xml)).map((each) => each.shapes)).toEqual([["Detail"]]);
+    expect(drawioPageSources(model(box("a", "A")))).toEqual([
+      { name: null, id: null, xml: model(box("a", "A")) },
+    ]);
+    expect(drawioPageSources("")).toEqual([]);
+    expect(drawioPageSources("<mxfile><diagram></mxfile>")).toBeNull();
+  });
+
+  it("writes compressed pages out as their models and leaves the rest as they are", async () => {
+    const inner = model(box("b", "Detail"));
+    const xml =
+      `<mxfile>${page("Overview", box("a", "A"))}` +
+      `<diagram name="Detail" id="d">\n  ${await compress(inner)}\n</diagram>` +
+      `<diagram name="Broken">not base64!</diagram><diagram name="Blank"/></mxfile>`;
+    const open = await uncompressedDrawio(xml);
+    expect(open).toBe(
+      `<mxfile>${page("Overview", box("a", "A"))}<diagram name="Detail" id="d">${inner}</diagram>` +
+        `<diagram name="Broken">not base64!</diagram><diagram name="Blank"/></mxfile>`,
+    );
+    expect((await pagesOf(open))[1]).toMatchObject({ compressed: false, shapes: ["Detail"] });
+    expect(await uncompressedDrawio(model(box("a", "A")))).toBe(model(box("a", "A")));
+  });
+
+  it("wraps a bare model as a named page, escaping the name", async () => {
+    const xml = asNamedPage(`<?xml version="1.0"?>${model(box("a", "A"))}`, {
+      name: 'Q&A "flow"',
+      id: "p1",
+    });
+    expect(xml).toBe(
+      `<mxfile><diagram name="Q&amp;A &quot;flow&quot;" id="p1">${model(box("a", "A"))}</diagram></mxfile>`,
+    );
+    expect(await pagesOf(xml)).toMatchObject([{ name: 'Q&A "flow"', id: "p1", shapes: ["A"] }]);
+  });
+
+  it("reports every problem with the pages an agent sends, naming each page", async () => {
+    const problems = async (xml: string) =>
+      drawioPageProblems(await readDrawio(xml), xml.includes("<mxfile"));
+    expect(await problems(model(box("a", "A")))).toEqual([]);
+    expect(
+      await problems(`<mxfile>${page("One", box("a", "A"))}${page("Two", box("b", "B"))}</mxfile>`),
+    ).toEqual([]);
+    expect(await problems("<mxfile></mxfile>")).toEqual([
+      'The <mxfile> has no pages: put each page in a <diagram name="..."> element.',
+    ]);
+    expect(
+      await problems(
+        `<mxfile>${page("One", box("a", "A"))}<diagram id="x">${model("")}</diagram>` +
+          `${page("One", box("b", "B"), "again")}<diagram name="Bad">%%%</diagram></mxfile>`,
+      ),
+    ).toEqual([
+      "Page 2: give its <diagram> a name attribute; docs pick a page by name.",
+      'Page 3 ("One"): page 1 has the same name; give every page its own.',
+      'Page 4 ("Bad"): This page is saved compressed and could not be decoded.',
+    ]);
+    expect(await problems(`<mxfile>${page("One", box("a", "A"))}<diagram name="Two"><notAModel/></diagram></mxfile>`)).toEqual([
+      'Page 2 ("Two"): This page holds no <mxGraphModel>.',
+    ]);
+    const many = Array.from({ length: 21 }, (_, index) => page(`P${index}`, "")).join("");
+    expect((await problems(`<mxfile>${many}</mxfile>`))[0]).toContain("at most 20");
   });
 });

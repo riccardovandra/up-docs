@@ -9,6 +9,7 @@ import {
   checkDiagramXml,
   DIAGRAM_PICTURE_TYPES,
   DRAWIO_LANGUAGE,
+  MAX_DIAGRAM_PAGES,
   MAX_DIAGRAM_PICTURE_BYTES,
   parseDrawioBlock,
   type Diagram,
@@ -48,6 +49,7 @@ interface SummaryRow {
   title: string;
   version: number;
   picture_version: number | null;
+  picture_pages: string | null;
   has_source: number;
   created_by: string | null;
   created_at: number;
@@ -59,8 +61,22 @@ interface DiagramRow extends SummaryRow {
 }
 
 // The source can be a megabyte, so lists never read it.
-const SUMMARY_COLUMNS = `id, project_id, title, version, picture_version, (xml <> '') AS has_source,
-  created_by, created_at, updated_at`;
+const SUMMARY_COLUMNS = `id, project_id, title, version, picture_version, picture_pages,
+  (xml <> '') AS has_source, created_by, created_at, updated_at`;
+
+/** The stored page list; anything but an array of names and nulls reads as unknown. */
+function readPicturePages(raw: string | null): ReadonlyArray<string | null> | null {
+  if (raw === null) return null;
+  try {
+    const value: unknown = JSON.parse(raw);
+    return Array.isArray(value) &&
+      value.every((name) => name === null || typeof name === "string")
+      ? (value as Array<string | null>)
+      : null;
+  } catch {
+    return null;
+  }
+}
 
 const toSummary = (row: SummaryRow): DiagramSummary => ({
   id: row.id,
@@ -68,6 +84,7 @@ const toSummary = (row: SummaryRow): DiagramSummary => ({
   title: row.title,
   version: row.version,
   pictureVersion: row.picture_version,
+  picturePages: row.picture_version === null ? null : readPicturePages(row.picture_pages),
   hasSource: row.has_source === 1,
   createdBy: row.created_by,
   createdAt: row.created_at,
@@ -78,7 +95,7 @@ const toDiagram = (row: DiagramRow): Diagram => ({ ...toSummary(row), xml: row.x
 
 /** A diagram without its source, for a caller that already holds the whole one. */
 export function diagramSummary(diagram: DiagramSummary): DiagramSummary {
-  const { id, projectId, title, version, pictureVersion, hasSource } = diagram;
+  const { id, projectId, title, version, pictureVersion, picturePages, hasSource } = diagram;
   const { createdBy, createdAt, updatedAt } = diagram;
   return {
     id,
@@ -86,6 +103,7 @@ export function diagramSummary(diagram: DiagramSummary): DiagramSummary {
     title,
     version,
     pictureVersion,
+    picturePages,
     hasSource,
     createdBy,
     createdAt,
@@ -344,6 +362,7 @@ export async function createDiagram(
     xml,
     version: 1,
     pictureVersion: null,
+    picturePages: null,
     hasSource: xml !== "",
     createdBy: input.createdBy,
     createdAt: input.now,
@@ -439,7 +458,13 @@ export const diagramPictureKey = (
   diagramId: string,
   version: number,
   format: DiagramPictureFormat,
-) => `${diagramPicturesPrefix(diagramId)}${version}.${format}`;
+  /** Page 0 keeps the key every picture had before pages. */
+  pageIndex = 0,
+) => `${diagramPicturesPrefix(diagramId)}${version}${pageIndex > 0 ? `.p${pageIndex}` : ""}.${format}`;
+
+/** How many pages have a picture stored for a summary's picture. */
+const picturedPages = (pages: ReadonlyArray<string | null> | null) =>
+  pages === null ? 1 : Math.max(1, Math.min(pages.length, MAX_DIAGRAM_PAGES));
 
 /**
  * Deletes the diagram and its pictures. Docs that link it keep their block, which shows as missing.
@@ -465,26 +490,22 @@ export type DiagramPictureResult =
   /** The source changed since `version`: the picture is of an older drawing and is not kept. */
   | { readonly ok: false; readonly conflict: DiagramSummary };
 
-/**
- * Stores the picture Draw.io drew from the source at `version`: the SVG people
- * see, and the PNG agents are handed when the browser could make one. It is
- * kept only while `version` is still the current one.
- */
-export async function saveDiagramPicture(
-  db: D1Database,
-  images: ImageStore,
-  input: {
-    readonly diagramId: string;
-    readonly version: number;
-    readonly svg: string;
-    readonly png: ArrayBuffer | null;
-  },
-): Promise<DiagramPictureResult> {
-  const svg = new TextEncoder().encode(input.svg);
-  if (!SVG_START.test(input.svg)) {
+/** One page's picture: the SVG people see, and the PNG agents are handed when the browser made one. */
+export interface PagePictureUpload {
+  readonly svg: string;
+  readonly png: ArrayBuffer | null;
+}
+
+/** The most pages a picture may name, and the longest name it keeps, so the row stays small. */
+const MAX_NAMED_PAGES = 500;
+const MAX_STORED_PAGE_NAME = 500;
+
+function assertPicture(page: PagePictureUpload): Uint8Array {
+  const svg = new TextEncoder().encode(page.svg);
+  if (!SVG_START.test(page.svg)) {
     throw new InvalidDiagramError("invalid_picture", "The picture's SVG is not an SVG document.");
   }
-  const png = input.png;
+  const { png } = page;
   if (png && !matchesType(new Uint8Array(png, 0, Math.min(12, png.byteLength)), "image/png")) {
     throw new InvalidDiagramError("invalid_picture", "The picture's PNG is not a PNG image.");
   }
@@ -497,49 +518,99 @@ export async function saveDiagramPicture(
       `The diagram's picture is over the ${MAX_DIAGRAM_PICTURE_BYTES / (1024 * 1024)} MB limit.`,
     );
   }
-  const current = await getDiagram(db, input.diagramId);
-  if (current.version !== input.version) return { ok: false, conflict: diagramSummary(current) };
-  const key = (format: DiagramPictureFormat) =>
-    diagramPictureKey(input.diagramId, input.version, format);
-  await images.put(
-    key("svg"),
-    svg.buffer.slice(svg.byteOffset, svg.byteOffset + svg.byteLength) as ArrayBuffer,
-    DIAGRAM_PICTURE_TYPES.svg,
-  );
-  if (png) await images.put(key("png"), png, DIAGRAM_PICTURE_TYPES.png);
-  // A repeat upload for this version may come without the PNG the first one had.
-  else await images.delete(key("png"));
-  const row = await db
-    .prepare(
-      `UPDATE diagrams SET picture_version = ?1 WHERE id = ?2 AND version = ?1
-       RETURNING ${SUMMARY_COLUMNS}`,
-    )
-    .bind(input.version, input.diagramId)
-    .first<SummaryRow>();
-  if (!row) return { ok: false, conflict: diagramSummary(await getDiagram(db, input.diagramId)) };
-  // The picture this one replaces is no longer served.
-  const previous = current.pictureVersion;
-  if (previous !== null && previous !== input.version) {
-    await Promise.all(
-      (["svg", "png"] as const).map((format) =>
-        images.delete(diagramPictureKey(input.diagramId, previous, format)),
-      ),
+  return svg;
+}
+
+/**
+ * Stores the pictures Draw.io drew from the source at `version`, one per page
+ * in order: the SVG people see, and the PNG agents are handed when the browser
+ * could make one. `pageNames` names every page, also those past
+ * MAX_DIAGRAM_PAGES, which get no picture; null (an upload from before pages)
+ * stores the first page only, with the pages unknown. Kept only while
+ * `version` is still the current one.
+ */
+export async function saveDiagramPicture(
+  db: D1Database,
+  images: ImageStore,
+  input: {
+    readonly diagramId: string;
+    readonly version: number;
+    readonly pages: ReadonlyArray<PagePictureUpload>;
+    readonly pageNames: ReadonlyArray<string | null> | null;
+  },
+): Promise<DiagramPictureResult> {
+  const { pageNames } = input;
+  const expected = pageNames === null ? 1 : Math.min(pageNames.length, MAX_DIAGRAM_PAGES);
+  if (
+    (pageNames !== null &&
+      (pageNames.length === 0 ||
+        pageNames.length > MAX_NAMED_PAGES ||
+        pageNames.some((name) => name !== null && name.length > MAX_STORED_PAGE_NAME))) ||
+    input.pages.length !== expected
+  ) {
+    throw new InvalidDiagramError(
+      "invalid_picture",
+      "The pictures do not match the pages: send one picture per page, up to " +
+        `${MAX_DIAGRAM_PAGES}, and every page's name.`,
     );
   }
+  const svgs = input.pages.map(assertPicture);
+  const current = await getDiagram(db, input.diagramId);
+  if (current.version !== input.version) return { ok: false, conflict: diagramSummary(current) };
+  const key = (format: DiagramPictureFormat, page: number) =>
+    diagramPictureKey(input.diagramId, input.version, format, page);
+  for (const [page, picture] of input.pages.entries()) {
+    const svg = svgs[page]!;
+    await images.put(
+      key("svg", page),
+      svg.buffer.slice(svg.byteOffset, svg.byteOffset + svg.byteLength) as ArrayBuffer,
+      DIAGRAM_PICTURE_TYPES.svg,
+    );
+    if (picture.png) await images.put(key("png", page), picture.png, DIAGRAM_PICTURE_TYPES.png);
+    // A repeat upload for this version may come without the PNG the first one had.
+    else await images.delete(key("png", page));
+  }
+  const row = await db
+    .prepare(
+      `UPDATE diagrams SET picture_version = ?1, picture_pages = ?3
+       WHERE id = ?2 AND version = ?1
+       RETURNING ${SUMMARY_COLUMNS}`,
+    )
+    .bind(input.version, input.diagramId, pageNames === null ? null : JSON.stringify(pageNames))
+    .first<SummaryRow>();
+  if (!row) return { ok: false, conflict: diagramSummary(await getDiagram(db, input.diagramId)) };
+  // The pictures this one replaces are no longer served: an older version's, and
+  // the pages a repeat upload for this version no longer has.
+  const previous = current.pictureVersion;
+  const stale: Array<string> = [];
+  if (previous !== null) {
+    const from = previous === input.version ? input.pages.length : 0;
+    for (let page = from; page < picturedPages(current.picturePages); page += 1) {
+      for (const format of ["svg", "png"] as const) {
+        stale.push(diagramPictureKey(input.diagramId, previous, format, page));
+      }
+    }
+  }
+  await Promise.all(stale.map((each) => images.delete(each)));
   return { ok: true, diagram: toSummary(row) };
 }
 
 /**
- * The stored picture's bytes, or null when there is none in that format. Check
- * `pictureVersion` against `version` to know whether it shows the current source.
+ * The stored picture's bytes for one page (0, the first, by default), or null
+ * when there is none in that format. Check `pictureVersion` against `version`
+ * to know whether it shows the current source.
  */
 export async function diagramPicture(
   images: ImageStore,
-  diagram: Pick<DiagramSummary, "id" | "pictureVersion">,
+  diagram: Pick<DiagramSummary, "id" | "pictureVersion" | "picturePages">,
   format: DiagramPictureFormat,
+  pageIndex = 0,
 ): Promise<{ readonly body: ReadableStream | ArrayBuffer; readonly contentType: string } | null> {
   if (diagram.pictureVersion === null) return null;
-  const object = await images.get(diagramPictureKey(diagram.id, diagram.pictureVersion, format));
+  if (pageIndex !== 0 && pageIndex >= picturedPages(diagram.picturePages)) return null;
+  const object = await images.get(
+    diagramPictureKey(diagram.id, diagram.pictureVersion, format, pageIndex),
+  );
   return object ? { body: object.body, contentType: DIAGRAM_PICTURE_TYPES[format] } : null;
 }
 
@@ -562,14 +633,18 @@ const PICTURE_POLICY: Readonly<Record<DiagramPictureFormat, string>> = {
 export async function diagramPictureResponse(
   images: ImageStore,
   input: {
-    readonly diagram: Pick<DiagramSummary, "id" | "pictureVersion">;
+    readonly diagram: Pick<DiagramSummary, "id" | "pictureVersion" | "picturePages">;
     readonly format: DiagramPictureFormat;
     readonly request: Request;
+    /** Which page, counted from 0. */
+    readonly pageIndex?: number;
   },
 ): Promise<Response | null> {
   const { diagram, format, request } = input;
+  const pageIndex = input.pageIndex ?? 0;
   if (diagram.pictureVersion === null) return null;
-  const etag = `"${format}-${diagram.pictureVersion}"`;
+  const page = pageIndex === 0 ? "" : `-p${pageIndex}`;
+  const etag = `"${format}-${diagram.pictureVersion}${page}"`;
   const pinned = new URL(request.url).searchParams.get("v") === String(diagram.pictureVersion);
   const headers = {
     "Content-Type": DIAGRAM_PICTURE_TYPES[format],
@@ -581,6 +656,6 @@ export async function diagramPictureResponse(
   if (request.headers.get("If-None-Match") === etag) {
     return new Response(null, { status: 304, headers });
   }
-  const picture = await diagramPicture(images, diagram, format);
+  const picture = await diagramPicture(images, diagram, format, pageIndex);
   return picture ? new Response(picture.body, { headers }) : null;
 }

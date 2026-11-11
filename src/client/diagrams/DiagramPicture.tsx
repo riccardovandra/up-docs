@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import {
   diagramPictureUrl,
   isPictureCurrent,
+  pagePicture,
   type DiagramSummary,
 } from "../../shared/drawio.ts";
 import { diagramsApi, subscribeDiagram } from "./diagramsApi.ts";
@@ -12,7 +13,7 @@ import "./diagrams.css";
 /** What a picture needs to know about its diagram. A list item and a `DiagramView` both fit. */
 export type DiagramPictureInfo = Pick<
   DiagramSummary,
-  "id" | "title" | "version" | "pictureVersion" | "hasSource"
+  "id" | "title" | "version" | "pictureVersion" | "picturePages" | "hasSource"
 > & { readonly canEdit: boolean };
 
 export type DiagramPictureState =
@@ -27,7 +28,11 @@ export type DiagramPictureState =
   /** Being drawn in this browser; `src` is the older picture, when there is one. */
   | { readonly status: "rendering"; readonly src: string | null }
   /** Behind or absent, and this person cannot draw it (or the drawing failed). */
-  | { readonly status: "stale"; readonly src: string | null };
+  | { readonly status: "stale"; readonly src: string | null }
+  /** The diagram has no page of the name the block gives. */
+  | { readonly status: "page_missing" }
+  /** The page exists but is past the pages that get a picture. */
+  | { readonly status: "page_unpictured" };
 
 const pick = (
   diagram: DiagramSummary | DiagramPictureInfo,
@@ -37,6 +42,7 @@ const pick = (
   title: diagram.title,
   version: diagram.version,
   pictureVersion: diagram.pictureVersion,
+  picturePages: diagram.picturePages,
   hasSource: diagram.hasSource,
   canEdit: "canEdit" in diagram ? diagram.canEdit : canEdit,
 });
@@ -57,6 +63,8 @@ const later = (a: DiagramPictureInfo, b: DiagramPictureInfo) =>
 export function useDiagramPicture(
   diagramId: string,
   known?: DiagramPictureInfo,
+  /** The page to show, by name; null or absent for the first page. */
+  page: string | null = null,
 ): { readonly state: DiagramPictureState; readonly title: string | null } {
   const [heard, setHeard] = useState<DiagramPictureInfo | "missing" | null>(null);
   /** The `id:version` a redraw was last asked for, and the one that failed. */
@@ -99,7 +107,10 @@ export function useDiagramPicture(
       : known && heard
         ? later(known, heard)
         : (heard ?? (known?.id === diagramId ? known : null));
-  const behind = info !== null && !isPictureCurrent(info);
+  const shown = info === null ? null : pagePicture(info, page);
+  // A picture that does not say which page is which is drawn again for a block that names one.
+  const behind =
+    info !== null && info.hasSource && (!isPictureCurrent(info) || shown?.kind === "unknown");
   const attempt = info ? `${info.id}:${info.version}` : null;
 
   const canDraw = behind && info.canEdit;
@@ -118,8 +129,14 @@ export function useDiagramPicture(
   if (!info) return { state: { status: "loading" }, title: null };
   const { title } = info;
   if (!info.hasSource) return { state: { status: "empty" }, title };
+  if (!behind && shown?.kind === "not_found") return { state: { status: "page_missing" }, title };
+  if (!behind && shown?.kind === "no_picture") {
+    return { state: { status: "page_unpictured" }, title };
+  }
   const src =
-    info.pictureVersion === null ? null : diagramPictureUrl(info.id, "svg", info.pictureVersion);
+    info.pictureVersion === null || shown?.kind !== "picture"
+      ? null
+      : diagramPictureUrl(info.id, "svg", info.pictureVersion, shown.index);
   if (!behind && src !== null) return { state: { status: "ready", src }, title };
   const drawing = info.canEdit && failed !== attempt;
   return { state: { status: drawing ? "rendering" : "stale", src }, title };
@@ -132,6 +149,8 @@ const NOTES: Readonly<Record<DiagramPictureState["status"], string | null>> = {
   ready: null,
   rendering: "Rendering diagram",
   stale: "Picture not ready yet",
+  page_missing: "Page not found",
+  page_unpictured: "No picture of this page",
 };
 
 /**
@@ -144,11 +163,13 @@ const NOTES: Readonly<Record<DiagramPictureState["status"], string | null>> = {
 export function DiagramPicture(props: {
   readonly diagramId: string;
   readonly diagram?: DiagramPictureInfo;
+  /** The page to show, by name; absent or null for the first page. */
+  readonly page?: string | null;
   /** Defaults to the diagram's title. */
   readonly alt?: string;
   readonly className?: string;
 }) {
-  const { state, title } = useDiagramPicture(props.diagramId, props.diagram);
+  const { state, title } = useDiagramPicture(props.diagramId, props.diagram, props.page ?? null);
   const [broken, setBroken] = useState<string | null>(null);
   const src = "src" in state && state.src !== broken ? state.src : null;
   // An older picture is better than a note; "Rendering diagram" shows over it all the same.
