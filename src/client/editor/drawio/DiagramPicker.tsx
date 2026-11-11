@@ -6,6 +6,7 @@ import type { Project } from "../../../shared/protocol.ts";
 import { api } from "../../api.ts";
 import { DiagramPicture } from "../../diagrams/DiagramPicture.tsx";
 import { diagramsApi } from "../../diagrams/diagramsApi.ts";
+import { useDiagramChanges } from "../../diagrams/drawioEditing.ts";
 import { CloseIcon, PlusIcon } from "../../home/icons.tsx";
 import { NoProjectBadge, ProjectBadge } from "../../home/ProjectSwitcher.tsx";
 import { pickerLists, type PickerScope } from "./blockLogic.ts";
@@ -48,6 +49,8 @@ export function DiagramPicker(props: {
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const [diagrams, setDiagrams] = useState<ReadonlyArray<DiagramListItem> | null>(null);
+  /** False on a phone or tablet: link an existing diagram, but no New diagram (it opens Draw.io). */
+  const changesHere = useDiagramChanges();
   const [failed, setFailed] = useState(false);
   const [projects, setProjects] = useState<ReadonlyArray<Project>>([]);
   const [scope, setScope] = useState<PickerScope>("project");
@@ -184,19 +187,21 @@ export function DiagramPicker(props: {
       ) : null}
 
       <div className="drawio-picker-grid" hidden={choosing !== null}>
-        <button
-          type="button"
-          className="drawio-pick"
-          onClick={() => props.onNew(props.projectId === null ? "no project" : home)}
-        >
-          <span className="drawio-pick-preview drawio-pick-new" aria-hidden="true">
-            <PlusIcon size={34} />
-          </span>
-          <span className="drawio-pick-text">
-            New diagram
-            <span>{props.projectId === null ? "In no project" : `In ${home}`}, opens Draw.io</span>
-          </span>
-        </button>
+        {changesHere ? (
+          <button
+            type="button"
+            className="drawio-pick"
+            onClick={() => props.onNew(props.projectId === null ? "no project" : home)}
+          >
+            <span className="drawio-pick-preview drawio-pick-new" aria-hidden="true">
+              <PlusIcon size={34} />
+            </span>
+            <span className="drawio-pick-text">
+              New diagram
+              <span>{props.projectId === null ? "In no project" : `In ${home}`}, opens Draw.io</span>
+            </span>
+          </button>
+        ) : null}
         {lists.shown.map((diagram) => (
           <button
             key={diagram.id}

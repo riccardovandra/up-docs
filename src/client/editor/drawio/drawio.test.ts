@@ -268,22 +268,25 @@ describe("a change of the right to edit", () => {
 
 describe("block actions", () => {
   const ids = (actions: ReturnType<typeof blockActions>) => actions.map((action) => action.id);
+  /** On a computer, where the Draw.io editor can open. */
+  const onDesktop = (input: Omit<Parameters<typeof blockActions>[0], "drawioEditor">) =>
+    blockActions({ ...input, drawioEditor: true });
 
   it("gives someone who only reads the doc no actions, even on their own diagram", () => {
-    expect(blockActions({ docEditable: false, diagram: { canEdit: true }, hosted: true })).toEqual(
+    expect(onDesktop({ docEditable: false, diagram: { canEdit: true }, hosted: true })).toEqual(
       [],
     );
-    expect(blockActions({ docEditable: false, diagram: null, hosted: true })).toEqual([]);
+    expect(onDesktop({ docEditable: false, diagram: null, hosted: true })).toEqual([]);
   });
 
   it("gives an editor who manages the diagram all four, in order", () => {
-    const actions = blockActions({ docEditable: true, diagram: { canEdit: true }, hosted: true });
+    const actions = onDesktop({ docEditable: true, diagram: { canEdit: true }, hosted: true });
     expect(ids(actions)).toEqual(["edit", "open", "detach", "remove"]);
     expect(actions.every((action) => action.disabled === null)).toBe(true);
   });
 
   it("greys out Edit and Detach a copy, with the reason, for an editor who only views it", () => {
-    const actions = blockActions({ docEditable: true, diagram: { canEdit: false }, hosted: true });
+    const actions = onDesktop({ docEditable: true, diagram: { canEdit: false }, hosted: true });
     expect(actions).toEqual([
       { id: "edit", label: "Edit", disabled: "Only the diagram's creator can edit it." },
       { id: "open", label: "Open in Diagrams", disabled: null },
@@ -293,14 +296,24 @@ describe("block actions", () => {
   });
 
   it("offers only Remove for a diagram that is gone or not loaded", () => {
-    expect(ids(blockActions({ docEditable: true, diagram: null, hosted: true }))).toEqual([
+    expect(ids(onDesktop({ docEditable: true, diagram: null, hosted: true }))).toEqual([
       "remove",
     ]);
   });
 
   it("offers no Edit or Detach where no page hosts the editor", () => {
-    const actions = blockActions({ docEditable: true, diagram: { canEdit: true }, hosted: false });
+    const actions = onDesktop({ docEditable: true, diagram: { canEdit: true }, hosted: false });
     expect(ids(actions)).toEqual(["open", "remove"]);
+  });
+
+  it("offers no Edit on a phone or tablet, where diagrams are for reading", () => {
+    const actions = blockActions({
+      docEditable: true,
+      diagram: { canEdit: true },
+      hosted: true,
+      drawioEditor: false,
+    });
+    expect(ids(actions)).toEqual(["open", "detach", "remove"]);
   });
 });
 
