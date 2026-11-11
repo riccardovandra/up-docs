@@ -454,6 +454,12 @@ button.diagram-canvas:hover {
   .diagram-page .doc-header .diagram-chip {
     display: none;
   }
+
+  /* Review, Rename, Delete and Edit wrap rather than push the page wider than the phone. */
+  .diagram-page .doc-header-actions {
+    flex: 1 1 100%;
+    flex-wrap: wrap;
+  }
 }
 
 /* Diagram themes: the header control, the restyle dialog, Settings */
@@ -915,27 +921,72 @@ button.diagram-canvas:hover {
   color: var(--accent);
 }
 
-.diagram-pages {
+/* Page tabs along the bottom, as a sheet's tabs (sheets.css): same height, type and raised tab. */
+.diagram-page-tabs {
+  position: sticky;
+  bottom: 0;
+  z-index: 5;
   display: flex;
-  flex-wrap: wrap;
-  gap: 0.25rem;
-  margin-bottom: 0.75rem;
+  align-items: stretch;
+  gap: 2px;
+  height: 38px;
+  padding: 0 0.5rem;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  border-top: 1px solid var(--border);
+  background: var(--bg);
+  scrollbar-width: thin;
 }
 
 .diagram-page-tab {
-  padding: 0.2rem 0.7rem;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  background: var(--surface);
-  color: var(--muted);
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0 0.85rem;
   font: inherit;
-  font-size: 0.85rem;
+  font-size: 13px;
+  color: var(--muted);
+  background: none;
+  border: none;
+  border-top: 2px solid transparent;
   cursor: pointer;
+  white-space: nowrap;
+}
+
+.diagram-page-tab:hover {
+  color: var(--text);
+  background: var(--hover);
 }
 
 .diagram-page-tab[aria-selected="true"] {
-  border-color: var(--accent);
+  color: var(--text);
+  font-weight: 600;
+  background: var(--surface);
+  border-top-color: var(--accent);
+}
+
+.diagram-page-tab-count {
+  min-width: 1.1rem;
+  padding: 0 0.3rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
   color: var(--accent);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.1rem;
+  text-align: center;
+}
+
+/* The bar takes its height from the view, so the page still fits the window. */
+.diagram-page:has(.diagram-page-tabs) .diagram-viewer {
+  min-height: calc(100vh - 3.5rem - 38px - var(--open-tabs-height));
+}
+
+@media (max-width: 800px) {
+  .diagram-page:has(.diagram-page-tabs) .diagram-viewer {
+    min-height: 0;
+  }
 }
 
 .diagram-chip.comments {
