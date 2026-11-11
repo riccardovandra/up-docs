@@ -275,7 +275,10 @@ export function DiagramPage(props: { readonly diagramId: string }) {
               In {plural(linkedDocs, "doc")}
             </span>
           ) : null}
-          <ThemeMenu diagramId={diagramId} canEdit={canEdit} />
+          {/* Its own line below the title at narrow widths (diagrams.css). */}
+          <span className="diagram-theme-slot">
+            <ThemeMenu diagramId={diagramId} canEdit={canEdit} />
+          </span>
         </div>
         <div className="doc-header-actions">
           {canEdit || threads.length > 0 ? (

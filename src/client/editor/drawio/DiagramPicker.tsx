@@ -42,7 +42,8 @@ export function DiagramPicker(props: {
   readonly locked: boolean;
   /** `page` is the page picked for a diagram of several; null for one of one page. */
   readonly onPick: (diagram: DiagramListItem, page: string | null) => void;
-  readonly onNew: () => void;
+  /** `createIn`: where the new diagram is filed, in words ("Acme", "no project"). */
+  readonly onNew: (createIn: string) => void;
   readonly onClose: () => void;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
@@ -183,7 +184,11 @@ export function DiagramPicker(props: {
       ) : null}
 
       <div className="drawio-picker-grid" hidden={choosing !== null}>
-        <button type="button" className="drawio-pick" onClick={props.onNew}>
+        <button
+          type="button"
+          className="drawio-pick"
+          onClick={() => props.onNew(props.projectId === null ? "no project" : home)}
+        >
           <span className="drawio-pick-preview drawio-pick-new" aria-hidden="true">
             <PlusIcon size={34} />
           </span>

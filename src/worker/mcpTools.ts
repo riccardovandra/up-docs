@@ -3236,6 +3236,8 @@ const handlers: Record<
     const diagramId = drawioIdArg(args);
     const { diagram } = await drawioWith(ctx, diagramId, "edit");
     if (themeId !== null) await usable(themeId);
+    // The theme the drawing was in before, so its boxes keep their roles on a restyle.
+    const previous = (await DiagramThemes.effectiveDiagramTheme(db, diagramId)).theme;
     await DiagramThemes.setDiagramTheme(db, { diagramId, themeId });
     const effective = await DiagramThemes.effectiveDiagramTheme(db, diagramId);
     const theme = effectiveThemeBrief(effective);
@@ -3247,9 +3249,15 @@ const handlers: Record<
         note: 'No drawing was changed. Pass restyle: true to restyle it to the theme, or write new cells with theme.styleGuide.',
       };
     }
+    // As the REST restyle: the caller's themes and the diagram's, before and now.
+    const { themes } = await DiagramThemes.listDiagramThemes(db, userId);
+    const knownThemes = [previous, effective.theme, ...themes].filter(
+      (each, index, all) => !each.builtIn && all.findIndex((other) => other.id === each.id) === index,
+    );
     const result = await DiagramThemes.restyleStoredDiagram(db, {
       diagram,
       theme: effective.theme,
+      knownThemes,
       baseVersion: diagram.version,
       now: ctx.deps.now(),
     });

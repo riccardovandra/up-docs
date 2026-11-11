@@ -3,9 +3,10 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import type { DiagramSummary } from "../../../shared/drawio.ts";
 import { DiagramEditor, type DiagramEditorTarget } from "../../diagrams/DiagramEditor.tsx";
+import { NewDiagramDialog } from "../../diagrams/NewDiagramDialog.tsx";
 import { registerInsertAction } from "../../doc/toolbar/insertActions.ts";
 import { DiagramPicker } from "./DiagramPicker.tsx";
-import { insertOnFirstSave } from "./blockLogic.ts";
+import { insertOnFirstSave, newDiagramTarget } from "./blockLogic.ts";
 import { type DrawioContext, insertDrawioBlock } from "./drawioSupport.ts";
 
 /** The insert action a doc page registers; the toolbar shows its button while it is there. */
@@ -42,6 +43,10 @@ export function useDocDiagrams(input: {
   const { docId, projectId, editable, locked } = input;
   /** The editor the picked diagram goes into: the one "Draw.io diagram" was pressed in. */
   const [picking, setPicking] = useState<Editor | null>(null);
+  /** A new diagram's theme step, between the picker and Draw.io, as in the library. */
+  const [starting, setStarting] = useState<{ readonly editor: Editor; readonly createIn: string } | null>(
+    null,
+  );
   const [sitting, setSitting] = useState<Sitting | null>(null);
   const sittings = useRef(0);
   const notify = useRef(input.onNotice);
@@ -87,11 +92,10 @@ export function useDocDiagrams(input: {
     );
   };
 
-  const startNew = (editor: Editor) => {
-    setPicking(null);
+  const startNew = (editor: Editor, themeId: string | undefined) => {
     setSitting({
       key: (sittings.current += 1),
-      target: { kind: "new", projectId },
+      target: newDiagramTarget(projectId, themeId),
       // The diagram exists from its first save, so its block goes in then. Exit
       // without saving leaves no diagram and no block.
       // The overlay is still open then, so the keyboard stays with the drawing.
@@ -109,8 +113,19 @@ export function useDocDiagrams(input: {
             setPicking(null);
             link(picking, diagram, true, page);
           }}
-          onNew={() => startNew(picking)}
+          onNew={(createIn) => {
+            setPicking(null);
+            setStarting({ editor: picking, createIn });
+          }}
           onClose={() => setPicking(null)}
+        />
+      ) : null}
+      {starting ? (
+        <NewDiagramDialog
+          projectId={projectId}
+          createIn={starting.createIn}
+          onOpen={(themeId) => startNew(starting.editor, themeId)}
+          onClose={() => setStarting(null)}
         />
       ) : null}
       {sitting ? (
