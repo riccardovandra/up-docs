@@ -616,13 +616,14 @@ export async function diagramPicture(
 
 /**
  * The policy doc images are served with, so a picture opened on its own runs
- * nothing. Draw.io lays its labels out with inline styles and embeds pasted
- * pictures as data URIs; a browser that applies this policy to an SVG shown in
- * an <img> would otherwise drop both, so the SVG alone may use them.
+ * nothing. Draw.io lays its labels out with inline styles, embeds pasted
+ * pictures as data URIs, and embeds a theme's Google fonts as data URIs; a
+ * browser that applies this policy to an SVG shown in an <img> would otherwise
+ * drop them, so the SVG alone may use them.
  */
 const PICTURE_POLICY: Readonly<Record<DiagramPictureFormat, string>> = {
   png: "default-src 'none'; sandbox",
-  svg: "default-src 'none'; style-src 'unsafe-inline'; img-src data:; sandbox",
+  svg: "default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:; sandbox",
 };
 
 /**

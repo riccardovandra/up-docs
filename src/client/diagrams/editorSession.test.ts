@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { NEUTRAL_THEME, themeToDrawioConfig, UPLIFTED_THEME } from "../../shared/diagramTheme.ts";
 import type { DiagramSummary } from "../../shared/drawio.ts";
 import { ApiError } from "../api.ts";
 import { subscribeDiagram } from "./diagramsApi.ts";
@@ -41,6 +42,56 @@ function open(
 }
 
 const existing: DiagramEditorTarget = { kind: "existing", diagramId: "g1" };
+
+describe("the theme", () => {
+  it("answers Draw.io's configure with the diagram's theme, then loads", async () => {
+    const api = fakeApi([view({ id: "g1", xml: "<mxGraphModel/>" })]);
+    api.themes.set("g1", UPLIFTED_THEME);
+    const drawio = fakeDrawio();
+    startEditorSession({
+      frame: drawio.frame,
+      api,
+      target: existing,
+      onState: () => undefined,
+      onClose: () => undefined,
+    });
+    drawio.emit({ event: "configure" });
+    await settle();
+    expect(drawio.posted).toEqual([
+      { action: "configure", config: themeToDrawioConfig(UPLIFTED_THEME) },
+    ]);
+    drawio.emit({ event: "init" });
+    await settle();
+    expect(drawio.posted.at(-1)).toMatchObject({ action: "load" });
+  });
+
+  it("gives a new diagram its project's theme, and Neutral when the lookup fails", async () => {
+    const { drawio } = open({ kind: "new", projectId: null });
+    drawio.emit({ event: "configure" });
+    await settle();
+    expect(drawio.posted).toEqual([
+      { action: "configure", config: themeToDrawioConfig(NEUTRAL_THEME) },
+    ]);
+
+    const failing = fakeApi([view({ id: "g1" })]);
+    failing.theme = async () => {
+      throw new ApiError(500, { error: "boom" });
+    };
+    const frame = fakeDrawio();
+    startEditorSession({
+      frame: frame.frame,
+      api: failing,
+      target: existing,
+      onState: () => undefined,
+      onClose: () => undefined,
+    });
+    frame.emit({ event: "configure" });
+    await settle();
+    expect(frame.posted).toEqual([
+      { action: "configure", config: themeToDrawioConfig(NEUTRAL_THEME) },
+    ]);
+  });
+});
 
 describe("editing a diagram", () => {
   it("loads the stored source once Draw.io is ready", async () => {

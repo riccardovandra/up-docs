@@ -46,6 +46,13 @@ import * as Embeds from "./embeds.ts";
 import { matchEmbed } from "../shared/embeds.ts";
 import * as DiagramComments from "./diagramComments.ts";
 import * as Diagrams from "./diagrams.ts";
+import * as DiagramThemes from "./diagramThemes.ts";
+import {
+  isDiagramThemeId,
+  parseDiagramThemeName,
+  parseDiagramThemeTokens,
+  restyleDiagram,
+} from "../shared/diagramTheme.ts";
 import {
   DEFAULT_DIAGRAM_TITLE,
   isDiagramId,
@@ -322,6 +329,7 @@ async function handleProject(
     readonly sub: string | undefined;
     readonly method: string;
     readonly segments: ReadonlyArray<string>;
+    readonly userId: string;
   },
   deps: ApiDeps,
 ): Promise<Response | null> {
@@ -348,6 +356,20 @@ async function handleProject(
     await Diagrams.moveProjectDiagrams(deps.db, { from: id, to: projectId });
     await Sheets.moveProjectSheets(deps.db, { from: id, to: projectId });
     return json({ moved: docIds.length });
+  }
+  // `{themeId}`: the default theme of the project's diagrams; null falls back to Neutral.
+  if (sub === "diagram-theme" && route.segments.length === 3 && method === "PUT") {
+    const themeId = themeIdArg((await readJson(request)).themeId);
+    if (themeId === false || themeId === undefined) return error(400, "invalid_theme_id");
+    await Docs.getProject(deps.db, id);
+    if (themeId !== null) {
+      await DiagramThemes.requireUsableDiagramTheme(deps.db, {
+        themeId,
+        userId: route.userId,
+      });
+    }
+    await DiagramThemes.setProjectDiagramTheme(deps.db, { projectId: id, themeId });
+    return json(await DiagramThemes.effectiveProjectTheme(deps.db, id));
   }
   if (!sub && method === "DELETE") {
     await Docs.deleteEmptyProject(deps.db, id);
@@ -527,7 +549,7 @@ export async function handleApi(
       if (!Access.isAdmin(principal.userId)) return error(403, "forbidden");
       const response = await handleProject(
         request,
-        { id, sub, method, segments },
+        { id, sub, method, segments, userId: principal.userId },
         deps,
       );
       if (response) return response;
@@ -917,6 +939,15 @@ export async function handleApi(
       return json({ tabIds });
     }
 
+    if (resource === "diagram-themes" && segments.length <= 2) {
+      const response = await handleDiagramThemes(
+        request,
+        { id, method, url, principal },
+        deps,
+      );
+      if (response) return response;
+    }
+
     if (resource === "diagrams" && segments.length <= 3) {
       const response = await handleDiagrams(
         request,
@@ -948,6 +979,9 @@ export async function handleApi(
     if (cause instanceof Docs.NotFoundError) return error(404, "not_found");
     if (cause instanceof Diagrams.DiagramForbiddenError)
       return error(403, "forbidden");
+    if (cause instanceof DiagramThemes.DiagramThemeError) {
+      return json({ error: cause.code, message: cause.message }, cause.status);
+    }
     if (cause instanceof Diagrams.InvalidDiagramError) {
       const tooLarge = cause.code === "too_large";
       return json(
@@ -975,6 +1009,93 @@ export async function handleApi(
       return error(409, "project_not_empty");
     throw cause;
   }
+}
+
+/** A theme id, null, or undefined when absent; `false` when malformed. */
+function themeIdArg(value: unknown): string | null | undefined | false {
+  if (value === undefined || value === null) return value;
+  return isDiagramThemeId(value) ? value : false;
+}
+
+/**
+ * Diagram themes, under `/api/diagram-themes`. Everyone signed in lists the
+ * built-ins and their own custom themes (the admin: all) and makes custom
+ * themes; a custom theme's creator and the admin change and delete it.
+ * `effective?projectId=<id>|none` is the theme a new diagram there starts with.
+ */
+async function handleDiagramThemes(
+  request: Request,
+  route: {
+    readonly id: string | undefined;
+    readonly method: string;
+    readonly url: URL;
+    readonly principal: Auth.Principal;
+  },
+  deps: ApiDeps,
+): Promise<Response | null> {
+  const { id, method, url } = route;
+  const userId = route.principal.userId;
+  const now = deps.now();
+  const invalid = (message: string) => json({ error: "invalid_theme", message }, 400);
+
+  if (!id && method === "GET") return json(await DiagramThemes.listDiagramThemes(deps.db, userId));
+
+  if (!id && method === "POST") {
+    const body = await readJson(request);
+    const name = parseDiagramThemeName(body.name);
+    if (!name.ok) return invalid(name.error);
+    const tokens = parseDiagramThemeTokens(body.tokens);
+    if (!tokens.ok) return invalid(tokens.error);
+    const theme = await DiagramThemes.createDiagramTheme(deps.db, {
+      name: name.value,
+      tokens: tokens.value,
+      createdBy: userId,
+      now,
+    });
+    return json({ theme }, 201);
+  }
+
+  if (id === "effective" && method === "GET") {
+    const param = url.searchParams.get("projectId");
+    const projectId = param === null || param === "none" ? null : param;
+    if (projectId !== null && !(await Access.canSeeProject(deps.db, projectId, userId))) {
+      return error(404, "not_found");
+    }
+    return json(await DiagramThemes.effectiveProjectTheme(deps.db, projectId));
+  }
+
+  if (!id) return null;
+  if (!isDiagramThemeId(id)) return error(404, "not_found");
+
+  if (method === "GET") {
+    return json({
+      theme: await DiagramThemes.requireUsableDiagramTheme(deps.db, { themeId: id, userId }),
+    });
+  }
+
+  if (method === "PATCH") {
+    const body = await readJson(request);
+    const name = body.name === undefined ? undefined : parseDiagramThemeName(body.name);
+    if (name && !name.ok) return invalid(name.error);
+    const tokens = body.tokens === undefined ? undefined : parseDiagramThemeTokens(body.tokens);
+    if (tokens && !tokens.ok) return invalid(tokens.error);
+    if (!name && !tokens) return error(400, "empty_write");
+    const theme = await DiagramThemes.updateDiagramTheme(deps.db, {
+      themeId: id,
+      userId,
+      name: name?.ok ? name.value : undefined,
+      tokens: tokens?.ok ? tokens.value : undefined,
+      now,
+    });
+    return json({ theme });
+  }
+
+  if (method === "DELETE") {
+    await DiagramThemes.deleteDiagramTheme(deps.db, { themeId: id, userId });
+    return json({ ok: true });
+  }
+
+  return null;
 }
 
 /** One page's `{svg, png}` from a picture upload: the SVG text and the PNG in base64. */
@@ -1150,6 +1271,62 @@ async function handleDiagrams(
   if (sub === "uses" && method === "GET") {
     await need("edit");
     return json(await Diagrams.diagramUsage(deps.db, { diagramId: id, userId }));
+  }
+
+  // The theme the diagram is drawn with: its own, else its project's, else Neutral.
+  if (sub === "theme" && method === "GET") {
+    await need("view");
+    return json(await DiagramThemes.effectiveDiagramTheme(deps.db, id));
+  }
+
+  // `{themeId}`: the diagram's own theme; null follows its project. Changes no drawing.
+  if (sub === "theme" && method === "PUT") {
+    const themeId = themeIdArg((await readJson(request)).themeId);
+    if (themeId === false || themeId === undefined) return error(400, "invalid_theme_id");
+    await need("edit");
+    if (themeId !== null) {
+      await DiagramThemes.requireUsableDiagramTheme(deps.db, { themeId, userId });
+    }
+    await DiagramThemes.setDiagramTheme(deps.db, { diagramId: id, themeId });
+    return json(await DiagramThemes.effectiveDiagramTheme(deps.db, id));
+  }
+
+  // `{baseVersion, themeId?}`: restyles the source to the theme (the effective one
+  // when none is named) and saves it as a new version, whose picture the next
+  // browser that shows the diagram draws. The diagram's theme setting is unchanged.
+  if (sub === "restyle" && method === "POST") {
+    const body = await readJson(request);
+    const { baseVersion } = body;
+    if (typeof baseVersion !== "number" || !Number.isInteger(baseVersion))
+      return error(400, "invalid_base_version");
+    const themeId = themeIdArg(body.themeId);
+    if (themeId === false || themeId === null) return error(400, "invalid_theme_id");
+    const { diagram } = await need("edit");
+    const theme =
+      themeId === undefined
+        ? (await DiagramThemes.effectiveDiagramTheme(deps.db, id)).theme
+        : await DiagramThemes.requireUsableDiagramTheme(deps.db, { themeId, userId });
+    if (diagram.version !== baseVersion) return versionConflict(Diagrams.diagramSummary(diagram));
+    const restyled = await restyleDiagram(diagram.xml, theme);
+    if (!restyled.ok) {
+      return json(
+        { error: "invalid_xml", message: `The diagram's XML could not be read: ${restyled.error}.` },
+        400,
+      );
+    }
+    const result = await Diagrams.updateDiagram(deps.db, {
+      diagramId: id,
+      xml: restyled.xml,
+      baseVersion,
+      now,
+    });
+    return result.ok
+      ? json({
+          diagram: Diagrams.diagramView(result.diagram, true),
+          themeId: theme.id,
+          summary: restyled.summary,
+        })
+      : versionConflict(result.conflict);
   }
 
   if (sub) return null;

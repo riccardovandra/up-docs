@@ -797,3 +797,160 @@ export function drawioPageProblems(model: DrawioModel, isFile: boolean): Readonl
   }
   return problems;
 }
+
+/** One cell as a rewrite sees it: what it is and its style. */
+export interface DrawioCellTarget {
+  readonly vertex: boolean;
+  readonly edge: boolean;
+  readonly style: string;
+  /** A label placed along a connection: a vertex whose parent is an edge. */
+  readonly parentIsEdge: boolean;
+}
+
+/** What `rewriteDrawio` changes: each cell's style, and each page's model attributes. */
+export interface DrawioRewrite {
+  /** The cell's new style, or null to leave the cell exactly as written. */
+  readonly cell: (cell: DrawioCellTarget) => string | null;
+  /** Attributes to set on a page's `<mxGraphModel>`, or null to leave it. */
+  readonly model?: (attributes: ReadonlyMap<string, string>) => Readonly<
+    Record<string, string>
+  > | null;
+}
+
+export type DrawioRewriteResult =
+  | {
+      readonly ok: true;
+      readonly xml: string;
+      /** Pages rewritten, and pages left as they were because they could not be read. */
+      readonly pages: number;
+      readonly unreadablePages: number;
+    }
+  | { readonly ok: false; readonly error: string };
+
+/** The opening tag `tag` with `key` set to `value`, in place when it has one, else appended. */
+function setTagAttribute(tag: string, key: string, value: string): string {
+  const written = `${key}="${escapeAttribute(value)}"`;
+  TAG_NAME.lastIndex = 1;
+  TAG_NAME.exec(tag);
+  let at = TAG_NAME.lastIndex;
+  for (;;) {
+    ATTRIBUTE.lastIndex = at;
+    const attribute = ATTRIBUTE.exec(tag);
+    if (!attribute) break;
+    if (attribute[1] === key) {
+      const start = attribute.index + attribute[0].indexOf(key);
+      return `${tag.slice(0, start)}${written}${tag.slice(ATTRIBUTE.lastIndex)}`;
+    }
+    at = ATTRIBUTE.lastIndex;
+  }
+  const end = tag.endsWith("/>") ? tag.length - 2 : tag.length - 1;
+  return `${tag.slice(0, end).replace(/\s+$/, "")} ${written}${tag.slice(end)}`;
+}
+
+/** One model's source with the rewrite applied to its cells' and its own opening tags. */
+function rewriteModel(xml: string, model: XmlElement, rewrite: DrawioRewrite): string {
+  const edits: Array<{ start: number; end: number; text: string }> = [];
+  const setAll = (target: XmlElement, values: Readonly<Record<string, string>>) => {
+    let tag = xml.slice(target.start, target.openEnd);
+    for (const [key, value] of Object.entries(values)) tag = setTagAttribute(tag, key, value);
+    edits.push({ start: target.start, end: target.openEnd, text: tag });
+  };
+  const modelValues = rewrite.model?.(model.attributes);
+  if (modelValues) setAll(model, modelValues);
+  const root = model.children.find((child) => child.name === "root");
+  const cells = (root?.children ?? []).flatMap((element) => {
+    const cell =
+      element.name === "mxCell"
+        ? element
+        : element.children.find((child) => child.name === "mxCell");
+    return cell ? [{ id: element.attributes.get("id"), cell }] : [];
+  });
+  const edgeIds = new Set(
+    cells.filter(({ cell }) => cell.attributes.get("edge") === "1").map(({ id }) => id),
+  );
+  for (const { cell } of cells) {
+    const parent = cell.attributes.get("parent");
+    const style = rewrite.cell({
+      vertex: cell.attributes.get("vertex") === "1",
+      edge: cell.attributes.get("edge") === "1",
+      style: cell.attributes.get("style") ?? "",
+      parentIsEdge: parent !== undefined && edgeIds.has(parent),
+    });
+    if (style !== null) setAll(cell, { style });
+  }
+  let result = xml.slice(model.start, model.end);
+  for (const edit of edits.toSorted((a, b) => b.start - a.start)) {
+    result =
+      result.slice(0, edit.start - model.start) + edit.text + result.slice(edit.end - model.start);
+  }
+  return result;
+}
+
+/**
+ * Rewrites the cells of every page of a source, keeping everything else as
+ * written: ids, geometry, labels, the attributes the rewrite does not set. A
+ * compressed page comes back written out as its `<mxGraphModel>`. A page that
+ * cannot be read is left as it is and counted.
+ */
+export async function rewriteDrawio(
+  xml: string,
+  rewrite: DrawioRewrite,
+): Promise<DrawioRewriteResult> {
+  if (xml.trim() === "") return { ok: true, xml, pages: 0, unreadablePages: 0 };
+  let root: XmlElement;
+  try {
+    root = parseXml(xml);
+  } catch (cause) {
+    if (cause instanceof XmlError) return { ok: false, error: cause.message };
+    throw cause;
+  }
+  if (root.name === "mxGraphModel") {
+    const rewritten = rewriteModel(xml, root, rewrite);
+    return {
+      ok: true,
+      xml: xml.slice(0, root.start) + rewritten + xml.slice(root.end),
+      pages: 1,
+      unreadablePages: 0,
+    };
+  }
+  if (root.name !== "mxfile") {
+    return { ok: false, error: "the root element must be <mxfile> or <mxGraphModel>" };
+  }
+  const budget = { left: MAX_INFLATED_BYTES };
+  let result = xml;
+  let pages = 0;
+  let unreadablePages = 0;
+  // From the last page back, so the offsets of the pages before stay right.
+  const diagrams = root.children.filter((child) => child.name === "diagram").reverse();
+  for (const diagram of diagrams) {
+    const model = diagram.children.find((child) => child.name === "mxGraphModel");
+    if (model) {
+      result = result.slice(0, model.start) + rewriteModel(xml, model, rewrite) + result.slice(model.end);
+      pages += 1;
+      continue;
+    }
+    const content = diagram.text.trim();
+    if (content === "" || diagram.children.length > 0) {
+      if (content === "" && diagram.children.length === 0) pages += 1;
+      else unreadablePages += 1;
+      continue;
+    }
+    const inner = await inflatePage(content, budget);
+    let innerRoot: XmlElement | null = null;
+    if (inner !== null) {
+      try {
+        innerRoot = parseXml(inner);
+      } catch (cause) {
+        if (!(cause instanceof XmlError)) throw cause;
+      }
+    }
+    if (inner === null || innerRoot?.name !== "mxGraphModel") {
+      unreadablePages += 1;
+      continue;
+    }
+    const close = diagram.end - "</diagram>".length;
+    result = `${result.slice(0, diagram.openEnd)}${rewriteModel(inner, innerRoot, rewrite)}${result.slice(close)}`;
+    pages += 1;
+  }
+  return { ok: true, xml: result, pages, unreadablePages };
+}

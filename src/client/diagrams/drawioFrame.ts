@@ -4,6 +4,7 @@
 // and the picture. Everything here works on a `DrawioFrame`, so tests drive it
 // with a stand-in for the frame.
 
+import type { DrawioThemeConfig } from "../../shared/diagramTheme.ts";
 import { MAX_DIAGRAM_PAGES } from "../../shared/drawio.ts";
 import { drawioPageSources } from "../../shared/drawioModel.ts";
 
@@ -11,6 +12,8 @@ export const DRAWIO_ORIGIN = "https://embed.diagrams.net";
 
 /** What the frame tells us. Anything it sends that we do not act on is dropped. */
 export type DrawioEvent =
+  /** The editor (opened with `configure=1`) waits for `configure` before it starts. */
+  | { readonly event: "configure" }
   /** The frame is ready for `load`. */
   | { readonly event: "init" }
   /** The source given with `load` is on the canvas. */
@@ -23,6 +26,8 @@ export type DrawioEvent =
   | { readonly event: "exit" };
 
 export type DrawioAction =
+  /** The answer to `configure`: the editor's defaults, here a diagram theme's. */
+  | { readonly action: "configure"; readonly config: DrawioThemeConfig }
   | { readonly action: "load"; readonly xml: string; readonly title?: string }
   | {
       readonly action: "export";
@@ -52,6 +57,7 @@ export function parseDrawioMessage(data: unknown): DrawioEvent | null {
   if (!message || typeof message !== "object") return null;
   const fields = message as Record<string, unknown>;
   switch (fields.event) {
+    case "configure":
     case "init":
     case "load":
     case "exit":
@@ -76,7 +82,11 @@ export function parseDrawioMessage(data: unknown): DrawioEvent | null {
   }
 }
 
-/** The editor people draw in: Save & Exit and Exit, no separate Save button. */
+/**
+ * The editor people draw in: Save & Exit and Exit, no separate Save button. It
+ * asks for its configuration first (`configure=1`): the session answers with
+ * the diagram's theme, so new shapes and connections come out styled.
+ */
 export function drawioEditorUrl(options: { readonly dark: boolean }): string {
   const query = new URLSearchParams({
     embed: "1",
@@ -84,7 +94,7 @@ export function drawioEditorUrl(options: { readonly dark: boolean }): string {
     spin: "1",
     libraries: "1",
     ui: "kennedy",
-    configure: "0",
+    configure: "1",
     saveAndExit: "1",
     noSaveBtn: "1",
     // Said either way, so the editor follows this app and not the system.

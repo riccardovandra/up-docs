@@ -127,3 +127,35 @@ describe("0015_diagrams", () => {
     expect(sqlite.prepare("SELECT count(*) AS n FROM diagram_chunks").get()).toEqual({ n: 0 });
   });
 });
+
+describe("0018_diagram_themes", () => {
+  it("applies on top of seeded data, keeps diagrams and projects, and a theme outlives its creator", () => {
+    const sqlite = new NodeSqlite.DatabaseSync(":memory:");
+    sqlite.exec("PRAGMA foreign_keys = ON");
+    const index = files.indexOf("0018_diagram_themes.sql");
+    expect(index).toBeGreaterThan(0);
+    for (const file of files.slice(0, index)) apply(sqlite, file);
+    sqlite.exec(`
+      INSERT INTO projects (id, key, name, created_at) VALUES ('p1', 'title:work', 'Work', 1);
+      INSERT INTO users (id, email, name, created_at) VALUES ('u1', 'guest@x.test', '', 1);
+      INSERT INTO diagrams (id, project_id, title, created_by, created_at, updated_at)
+        VALUES ('g1', 'p1', 'Flow', 'u1', 1, 1);
+    `);
+    for (const file of files.slice(index)) apply(sqlite, file);
+
+    expect(sqlite.prepare("SELECT theme_id FROM diagrams").get()).toEqual({ theme_id: null });
+    expect(sqlite.prepare("SELECT diagram_theme_id FROM projects").get()).toEqual({
+      diagram_theme_id: null,
+    });
+    sqlite.exec(`
+      INSERT INTO diagram_themes VALUES ('t1', 'Mine', '{}', 'u1', 1, 1);
+      UPDATE diagrams SET theme_id = 'uplifted';
+      UPDATE projects SET diagram_theme_id = 't1';
+    `);
+    sqlite.exec("DELETE FROM users WHERE id = 'u1'");
+    expect(sqlite.prepare("SELECT id, created_by FROM diagram_themes").all()).toEqual([
+      { id: "t1", created_by: null },
+    ]);
+    expect(sqlite.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
+  });
+});

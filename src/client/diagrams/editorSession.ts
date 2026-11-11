@@ -4,6 +4,11 @@
 // picture. A new diagram is created by its first save, so Exit without saving
 // leaves nothing behind.
 
+import {
+  NEUTRAL_THEME,
+  themeToDrawioConfig,
+  type DrawioThemeConfig,
+} from "../../shared/diagramTheme.ts";
 import { DEFAULT_DIAGRAM_TITLE, type DiagramSummary } from "../../shared/drawio.ts";
 import { ApiError } from "../api.ts";
 import {
@@ -44,9 +49,15 @@ export interface EditorSession {
   dispose(): void;
 }
 
+/** How long the editor waits on the theme before it opens with Neutral. */
+const THEME_MS = 5_000;
+
 export function startEditorSession(options: {
   readonly frame: DrawioFrame;
-  readonly api: Pick<DiagramsApi, "get" | "create" | "update" | "uploadPicture">;
+  readonly api: Pick<
+    DiagramsApi,
+    "get" | "create" | "update" | "uploadPicture" | "theme" | "projectTheme"
+  >;
   readonly target: DiagramEditorTarget;
   readonly onState: (state: EditorSessionState) => void;
   /** After every save that reached the server. */
@@ -97,6 +108,25 @@ export function startEditorSession(options: {
           return diagram.xml;
         });
   source.catch(() => undefined);
+
+  // The theme's editor defaults, asked for at once so they are ready when
+  // Draw.io asks. Draw.io waits for the answer, so a slow or failed lookup
+  // falls back to Neutral rather than leave the editor blank.
+  const themeConfig = new Promise<DrawioThemeConfig>((resolve) => {
+    const neutral = () => resolve(themeToDrawioConfig(NEUTRAL_THEME));
+    const timer = setTimeout(neutral, THEME_MS);
+    const lookup =
+      target.kind === "new" ? api.projectTheme(target.projectId) : api.theme(target.diagramId);
+    lookup.then(
+      (effective) => resolve(themeToDrawioConfig(effective.theme)),
+      neutral,
+    ).finally(() => clearTimeout(timer));
+  });
+
+  const configure = async () => {
+    const config = await themeConfig;
+    if (!disposed) frame.post({ action: "configure", config });
+  };
 
   const open = async () => {
     try {
@@ -165,7 +195,8 @@ export function startEditorSession(options: {
   };
 
   const stop = frame.listen((event) => {
-    if (event.event === "init") void open();
+    if (event.event === "configure") void configure();
+    else if (event.event === "init") void open();
     else if (event.event === "load") {
       if (state.phase === "opening") set({ phase: "ready" });
     } else if (event.event === "save") void save(event.xml, event.exit);

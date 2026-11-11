@@ -12,6 +12,7 @@ import {
   type DiagramUsage,
   type DiagramView,
 } from "../../shared/drawio.ts";
+import type { EffectiveDiagramTheme } from "../../shared/diagramTheme.ts";
 import { ApiError, request } from "../api.ts";
 
 type DiagramListener = (diagram: DiagramSummary | null) => void;
@@ -151,6 +152,15 @@ export const diagramsApi = {
     changes += 1;
     announce(diagramId, null);
   },
+  /** The theme the diagram is drawn with: its own, else its project's, else Neutral. */
+  theme: (diagramId: string) =>
+    request<EffectiveDiagramTheme>("GET", `/api/diagrams/${diagramId}/theme`),
+  /** The theme a new diagram in the project (null: no project) starts with. */
+  projectTheme: (projectId: string | null) =>
+    request<EffectiveDiagramTheme>(
+      "GET",
+      `/api/diagram-themes/effective?projectId=${encodeURIComponent(projectId ?? "none")}`,
+    ),
   /** The docs and tabs that link the diagram. Only for someone who manages it. */
   uses: (diagramId: string) => request<DiagramUsage>("GET", `/api/diagrams/${diagramId}/uses`),
   /** Stores the picture drawn from `version`. Refused with a 409 when the source has moved on. */
