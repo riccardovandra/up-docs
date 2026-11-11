@@ -4,6 +4,8 @@ import {
   parseSheetClientMessage,
   presenceColorIndex,
   PRESENCE_COLORS,
+  PRESENCE_EXPIRY_MS,
+  PRESENCE_HEARTBEAT_MS,
   type SheetRoomMessage,
 } from "../shared/sheets.ts";
 import {
@@ -188,6 +190,66 @@ describe("sheet presence", () => {
     r.tick(PRESENCE_WINDOW_MS);
     await r.say(ann, at("Z9"));
     expect(bob.take()).toEqual([expect.objectContaining({ range: "Z9" })]);
+  });
+
+  it("drops a page that went silent without a close, and keeps one that heartbeats", async () => {
+    const r = room();
+    const dead = await r.open("ann"); // its page unloaded without a close frame: it never speaks again
+    await r.say(dead, at("F9"));
+    const deadId = (dead.sent[0] as Extract<SheetRoomMessage, { type: "sheet.presence.snapshot" }>).self.connectionId;
+    const bob = await r.open("bob");
+    expect(bob.take()[0]).toMatchObject({ presences: [{ connectionId: deadId, range: "F9" }] });
+    // Bob's heartbeats keep him live and sweep the room; ann's page is gone past the expiry.
+    let elapsed = 0;
+    while (elapsed + PRESENCE_HEARTBEAT_MS < PRESENCE_EXPIRY_MS) {
+      r.tick(PRESENCE_HEARTBEAT_MS);
+      elapsed += PRESENCE_HEARTBEAT_MS;
+      await r.say(bob, at("A1"));
+      expect(bob.take()).toEqual([]);
+    }
+    r.tick(PRESENCE_EXPIRY_MS - elapsed);
+    await r.say(bob, at("A1"));
+    expect(bob.take()).toEqual([{ type: "sheet.presence.left", connectionId: deadId }]);
+    // A newcomer's snapshot holds only live pages, and the left is not announced twice.
+    const carol = await r.open("ann");
+    expect(carol.take()[0]).toMatchObject({ presences: [{ userId: "bob" }] });
+    bob.take();
+    r.tick(PRESENCE_HEARTBEAT_MS);
+    await r.say(bob, at("A2"));
+    expect(bob.take()).toEqual([]);
+  });
+
+  it("sweeps silent pages when someone joins, so the snapshot holds none", async () => {
+    const r = room();
+    const dead = await r.open("ann");
+    await r.say(dead, at("F9"));
+    r.tick(PRESENCE_EXPIRY_MS);
+    const bob = await r.open("bob");
+    expect(bob.take()[0]).toMatchObject({ type: "sheet.presence.snapshot", presences: [] });
+  });
+
+  it("lets a page that was only quiet past the expiry join again when it speaks", async () => {
+    const r = room();
+    const ann = await r.open("ann");
+    const bob = await r.open("bob");
+    const annId = (ann.sent[0] as Extract<SheetRoomMessage, { type: "sheet.presence.snapshot" }>).self.connectionId;
+    ann.take();
+    r.tick(PRESENCE_EXPIRY_MS / 2);
+    await r.say(bob, at("B2"));
+    bob.take();
+    ann.take();
+    r.tick(PRESENCE_EXPIRY_MS / 2);
+    await r.say(ann, at("C3"));
+    const [snapshot] = ann.take();
+    expect(snapshot).toMatchObject({ type: "sheet.presence.snapshot", presences: [{ userId: "bob", range: "B2" }] });
+    if (snapshot?.type !== "sheet.presence.snapshot") throw new Error("no snapshot");
+    expect(snapshot.self.connectionId).not.toBe(annId);
+    // Bob, still live, hears ann leave and come back as a new connection.
+    expect(bob.take()).toEqual([
+      { type: "sheet.presence.left", connectionId: annId },
+      expect.objectContaining({ connectionId: snapshot.self.connectionId, range: null }),
+      expect.objectContaining({ connectionId: snapshot.self.connectionId, range: "C3" }),
+    ]);
   });
 
   it("drops messages that are not presence, or malformed", async () => {

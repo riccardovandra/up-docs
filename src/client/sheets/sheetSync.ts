@@ -37,6 +37,9 @@ interface Pending {
 export interface RemoteChange {
   readonly by: SheetAuthor;
   readonly changed: Changes;
+  /** The list that made it, and the workbook it landed on. */
+  readonly edits: ReadonlyArray<Edit>;
+  readonly workbook: Workbook;
 }
 
 export interface SheetSyncDeps {
@@ -173,7 +176,12 @@ export class SheetSync {
     this.settleAcked();
     this.rebuild();
     if (message.origin !== this.deps.clientId) {
-      this.deps.onRemote?.({ by: message.by, changed: applied.changed });
+      this.deps.onRemote?.({
+        by: message.by,
+        changed: applied.changed,
+        edits: message.edits,
+        workbook: applied.workbook,
+      });
     }
   }
 

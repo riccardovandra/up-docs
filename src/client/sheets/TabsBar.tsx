@@ -49,6 +49,8 @@ export function TabsBar(props: {
             className="sheet-tab-rename"
             aria-label="Tab name"
             autoFocus
+            // The whole name is selected, so typing replaces it.
+            onFocus={(event) => event.currentTarget.select()}
             maxLength={100}
             value={renaming.name}
             onChange={(event) => setRenaming({ id: sheet.id, name: event.target.value })}

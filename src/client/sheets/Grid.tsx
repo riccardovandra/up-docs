@@ -39,6 +39,8 @@ export interface GridOverlay {
   readonly rect: Rect;
   readonly color: string;
   readonly label?: string;
+  /** The label shows now; otherwise only while the pointer is over the outlined range. */
+  readonly labelShown?: boolean;
 }
 
 export type GridTarget =
@@ -215,6 +217,8 @@ export function Grid(props: GridProps) {
     scroll.current = { x: el.scrollLeft, y: el.scrollTop };
     placeMovers();
     refresh();
+    // The cells move under a still mouse.
+    if (pointer.current) updateHover();
   };
 
   // Keep the cell the keyboard moved to in sight.
@@ -271,7 +275,23 @@ export function Grid(props: GridProps) {
     props.onPointer(target, "down", info(event));
     viewportRef.current?.setPointerCapture(event.pointerId);
   };
+  // The cell under the mouse, tracked while some overlay has a label it may show on hover.
+  const [hover, setHover] = useState<{ row: number; col: number } | null>(null);
+  const pointer = useRef<{ x: number; y: number } | null>(null);
+  const hoverMatters = props.overlays.some((overlay) => overlay.label);
+  const updateHover = () => {
+    const at = pointer.current;
+    const target = at && hoverMatters ? targetAt(at.x, at.y) : null;
+    const next = target?.kind === "cell" ? { row: target.row, col: target.col } : null;
+    setHover((current) => (current?.row === next?.row && current?.col === next?.col ? current : next));
+  };
+  const trackHover = (event: PointerEvent<HTMLDivElement>) => {
+    if (event.pointerType !== "mouse") return;
+    pointer.current = { x: event.clientX, y: event.clientY };
+    updateHover();
+  };
   const onPointerMove = (event: PointerEvent<HTMLDivElement>) => {
+    trackHover(event);
     const current = drag.current;
     if (!current || current.pointerId !== event.pointerId || current.touch) return;
     const el = scrollerRef.current;
@@ -479,7 +499,13 @@ export function Grid(props: GridProps) {
           }
           style={{ ...boxStyle(overlay.rect, pane), borderColor: overlay.color }}
         >
-          {overlay.label ? (
+          {overlay.label &&
+          (overlay.labelShown ||
+            (hover !== null &&
+              hover.row >= overlay.rect.r1 &&
+              hover.row <= overlay.rect.r2 &&
+              hover.col >= overlay.rect.c1 &&
+              hover.col <= overlay.rect.c2)) ? (
             <span className="sheet-overlay-label" style={{ background: overlay.color }}>
               {overlay.label}
             </span>
@@ -577,6 +603,10 @@ export function Grid(props: GridProps) {
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
         onPointerCancel={() => (drag.current = null)}
+        onPointerLeave={() => {
+          pointer.current = null;
+          setHover(null);
+        }}
         onDoubleClick={(event) => {
           if ((event.target as HTMLElement).closest(".sheet-editor-box, .sheet-col-resize")) return;
           const target = targetAt(event.clientX, event.clientY);

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type MouseEvent } from "react";
 
 import { workbookFromRecords } from "../../shared/sheet/serialize.ts";
-import type { SheetMeta } from "../../shared/sheets.ts";
+import { PRESENCE_HEARTBEAT_MS, type SheetMeta } from "../../shared/sheets.ts";
 import { ApiError, clientId } from "../api.ts";
 import { HomeLink } from "../home/HomeLink.tsx";
 import { TitleDialog } from "../home/TitleDialog.tsx";
@@ -10,7 +10,9 @@ import { navigate } from "../router.ts";
 import type { GridOverlay } from "./Grid.tsx";
 import {
   agentOverlays,
+  changedCells,
   EMPTY_PRESENCE,
+  nextTagChange,
   presenceAvatars,
   presenceMessage,
   presenceOverlays,
@@ -31,6 +33,8 @@ const FLASH_MS = 2400;
 const AGENT_TAG_MS = 4000;
 /** At most one selection update to the room per this many ms (the last one always goes). */
 const PRESENCE_THROTTLE_MS = 100; // keeps a page within the room's PRESENCE_BURST per second
+/** How often cursors not heard of within the expiry are dropped. */
+const PRESENCE_PRUNE_MS = 5000;
 
 const follow = (path: string) => (event: MouseEvent) => {
   if (event.metaKey || event.ctrlKey) return;
@@ -99,8 +103,9 @@ export function SheetPage(props: { readonly sheetId: string; readonly tabId: str
           onRemote: (change) => {
             // People see where an agent's edits land.
             if (change.by.kind !== "agent") return;
-            flash(change.changed.cells);
-            const tags = agentOverlays(String(++agentTagSeq.current), change.by, change.changed.cells);
+            const cells = changedCells(change.edits, change.workbook, change.changed);
+            flash(cells);
+            const tags = agentOverlays(String(++agentTagSeq.current), change.by, cells);
             if (tags.length === 0) return;
             setAgentTags((current) => [...current, ...tags]);
             window.setTimeout(
@@ -134,7 +139,7 @@ export function SheetPage(props: { readonly sheetId: string; readonly tabId: str
       else if (message.type === "sheet.meta") setMeta(message.sheet);
       else if (message.type === "sheet.deleted") setMissing(true);
       else {
-        dispatchPresence(message);
+        dispatchPresence({ kind: "message", message, at: Date.now() });
         // A (re)connected socket is a new presence: tell the room where this page is.
         if (message.type === "sheet.presence.snapshot") publish.current.flush(true);
       }
@@ -163,7 +168,11 @@ export function SheetPage(props: { readonly sheetId: string; readonly tabId: str
       this.dirty = false;
       const latest = this.latest;
       const tab = syncRef.current?.view.sheets.find((sheet) => sheet.id === latest?.tabId);
-      if (!latest || !tab) return;
+      if (!latest || !tab) {
+        // Nothing selected yet: still tell the room this page is here.
+        if (force) sendRef.current({ type: "presence.clear" });
+        return;
+      }
       sendRef.current(
         presenceMessage(latest.tabId, latest.selection, { rows: tab.rowCount, cols: tab.columnCount }),
       );
@@ -173,10 +182,26 @@ export function SheetPage(props: { readonly sheetId: string; readonly tabId: str
   sendRef.current = room.send;
   useEffect(() => {
     const state = publish.current;
+    // Heartbeat: the room drops a page it has not heard from in PRESENCE_EXPIRY_MS.
+    const heartbeat = setInterval(() => state.flush(true), PRESENCE_HEARTBEAT_MS);
+    // And this page drops cursors it has not heard of as long, in case a "left" was missed.
+    const prune = setInterval(() => dispatchPresence({ kind: "prune", now: Date.now() }), PRESENCE_PRUNE_MS);
     return () => {
       if (state.timer) clearTimeout(state.timer);
+      clearInterval(heartbeat);
+      clearInterval(prune);
     };
   }, []);
+
+  // Re-renders when the next remote name tag is due to hide.
+  const [clock, setClock] = useState(() => Date.now());
+  useEffect(() => {
+    const now = Date.now();
+    const next = nextTagChange(presence, now);
+    if (next === null) return;
+    const timer = setTimeout(() => setClock(Date.now()), next - now + 20);
+    return () => clearTimeout(timer);
+  }, [presence, clock]);
   const onSelectionChange = useCallback((nextTab: string, selection: Selection) => {
     const state = publish.current;
     state.latest = { tabId: nextTab, selection };
@@ -198,10 +223,10 @@ export function SheetPage(props: { readonly sheetId: string; readonly tabId: str
   const overlays = useMemo(() => {
     const tabs = sync?.view.sheets ?? [];
     const remote = tabs.flatMap((tab) =>
-      presenceOverlays(presence, tab.id, { rows: tab.rowCount, cols: tab.columnCount }),
+      presenceOverlays(presence, tab.id, { rows: tab.rowCount, cols: tab.columnCount }, Math.max(clock, Date.now())),
     );
     return [...remote, ...agentTags];
-  }, [presence, agentTags, sync]);
+  }, [presence, agentTags, sync, clock]);
   const avatars = useMemo(() => presenceAvatars(presence), [presence]);
 
   const back = (label: string) => (

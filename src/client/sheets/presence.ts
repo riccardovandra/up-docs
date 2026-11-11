@@ -3,22 +3,58 @@
 // Pure, so it is tested without a socket or a browser.
 
 import { formatCellAddress } from "../../shared/sheet/address.ts";
-import type { CellPosition } from "../../shared/sheet/types.ts";
-import type { SheetAuthor, SheetPresence, SheetRoomMessage } from "../../shared/sheets.ts";
+import type { CellPosition, Changes, Edit, Workbook } from "../../shared/sheet/types.ts";
+import { findSheet } from "../../shared/sheet/workbook.ts";
+import { PRESENCE_EXPIRY_MS, type SheetAuthor, type SheetPresence, type SheetRoomMessage } from "../../shared/sheets.ts";
 import type { GridOverlay } from "./Grid.tsx";
+import { touched } from "./undo.ts";
 import { selectionFromLabel, selectionLabel, selectionRect, type Dims, type Rect, type Selection } from "./selection.ts";
+
+/** Another page's presence, with when this page last heard of it and saw it move (local clock). */
+export type RemotePresence = SheetPresence & {
+  readonly heardAt: number;
+  readonly movedAt: number;
+};
 
 export interface PresenceState {
   /** This page, as the room knows it; null before the first snapshot. */
   readonly self: SheetPresence | null;
   /** Every other open page, by connection id. */
-  readonly others: ReadonlyMap<string, SheetPresence>;
+  readonly others: ReadonlyMap<string, RemotePresence>;
 }
 
 export const EMPTY_PRESENCE: PresenceState = { self: null, others: new Map() };
 
-/** Folds one room message into the state; messages that are not presence leave it as it is. */
-export function presenceReducer(state: PresenceState, message: SheetRoomMessage): PresenceState {
+/** A room message as it arrived (at `at`, local ms), or a clock tick that drops cursors gone silent. */
+export type PresenceAction =
+  | { readonly kind: "message"; readonly message: SheetRoomMessage; readonly at: number }
+  | { readonly kind: "prune"; readonly now: number };
+
+/** How long a remote cursor shows its name tag after it moves. */
+export const PRESENCE_TAG_MS = 2500;
+
+function stamped(previous: RemotePresence | undefined, presence: SheetPresence, at: number): RemotePresence {
+  const still = previous && previous.tabId === presence.tabId && previous.range === presence.range;
+  return { ...presence, heardAt: at, movedAt: still ? previous.movedAt : at };
+}
+
+/**
+ * Folds one action into the state. Messages that are not presence leave it as
+ * it is. A heartbeat (the same place again) refreshes `heardAt` but not
+ * `movedAt`. Pruning drops pages not heard of for `PRESENCE_EXPIRY_MS`, so a
+ * missed `left` cannot strand a cursor.
+ */
+export function presenceReducer(state: PresenceState, action: PresenceAction): PresenceState {
+  if (action.kind === "prune") {
+    let others: Map<string, RemotePresence> | null = null;
+    for (const [id, presence] of state.others) {
+      if (action.now - presence.heardAt < PRESENCE_EXPIRY_MS) continue;
+      others ??= new Map(state.others);
+      others.delete(id);
+    }
+    return others ? { ...state, others } : state;
+  }
+  const { message, at } = action;
   switch (message.type) {
     case "sheet.presence.snapshot":
       // A snapshot comes with every (re)connect and replaces what was known.
@@ -27,14 +63,17 @@ export function presenceReducer(state: PresenceState, message: SheetRoomMessage)
         others: new Map(
           message.presences
             .filter((presence) => presence.connectionId !== message.self.connectionId)
-            .map((presence) => [presence.connectionId, presence]),
+            .map((presence) => [
+              presence.connectionId,
+              stamped(state.others.get(presence.connectionId), presence, at),
+            ]),
         ),
       };
     case "sheet.presence": {
       const { type: _type, ...presence } = message;
       if (presence.connectionId === state.self?.connectionId) return state;
       const others = new Map(state.others);
-      others.set(presence.connectionId, presence);
+      others.set(presence.connectionId, stamped(state.others.get(presence.connectionId), presence, at));
       return { ...state, others };
     }
     case "sheet.presence.left": {
@@ -48,13 +87,27 @@ export function presenceReducer(state: PresenceState, message: SheetRoomMessage)
   }
 }
 
+/** When the next name tag hides, or null when none is showing. */
+export function nextTagChange(state: PresenceState, now: number): number | null {
+  let next: number | null = null;
+  for (const presence of state.others.values()) {
+    const hideAt = presence.movedAt + PRESENCE_TAG_MS;
+    if (hideAt > now && (next === null || hideAt < next)) next = hideAt;
+  }
+  return next;
+}
+
 /** A palette colour from the theme tokens in sheets.css. */
 export const presenceColor = (colorIndex: number) => `var(--sheet-person-${colorIndex})`;
 
 export const personLabel = (name: string) => name.trim() || "Someone";
 
-/** Outlines with name tags for everyone else's selection on tab `tabId`. */
-export function presenceOverlays(state: PresenceState, tabId: string, dims: Dims): GridOverlay[] {
+/**
+ * Outlines with name tags for everyone else's selection on tab `tabId`. A tag
+ * shows for `PRESENCE_TAG_MS` after its cursor moves, then only on hover, so it
+ * does not hide the cell above.
+ */
+export function presenceOverlays(state: PresenceState, tabId: string, dims: Dims, now: number): GridOverlay[] {
   const overlays: GridOverlay[] = [];
   for (const presence of state.others.values()) {
     if (presence.tabId !== tabId || !presence.range) continue;
@@ -66,6 +119,7 @@ export function presenceOverlays(state: PresenceState, tabId: string, dims: Dims
       rect: selectionRect(selection, dims),
       color: presenceColor(presence.colorIndex),
       label: personLabel(presence.name),
+      labelShown: now - presence.movedAt < PRESENCE_TAG_MS,
     });
   }
   return overlays;
@@ -144,6 +198,54 @@ export function cellRects(cells: ReadonlyArray<{ readonly row: number; readonly 
   ];
 }
 
+/** Edits after which a tab's earlier addresses no longer point at the same cells. */
+const RESHAPING: ReadonlySet<Edit["kind"]> = new Set([
+  "insertRows",
+  "insertColumns",
+  "deleteRows",
+  "deleteColumns",
+  "sortRows",
+  "deleteSheet",
+]);
+
+/**
+ * The cells an edit list changed, to flash and tag. The engine reports no cells
+ * for a tab it rebuilt (rows or columns moved), so for those the list itself
+ * says: its writes and formats after the tab's last reshaping edit, whose
+ * addresses are final. Earlier ones are skipped: their cells have moved.
+ */
+export function changedCells(
+  edits: ReadonlyArray<Edit>,
+  workbook: Workbook,
+  changed: Pick<Changes, "cells" | "rebuiltSheets">,
+): CellPosition[] {
+  const rebuilt = new Set(changed.rebuiltSheets);
+  if (rebuilt.size === 0) return [...changed.cells];
+  const cells = changed.cells.filter((cell) => !rebuilt.has(cell.sheetId));
+  const sheetOf = (edit: Edit) => ("sheet" in edit && typeof edit.sheet === "string" ? findSheet(workbook, edit.sheet) : undefined);
+  const lastReshape = new Map<string, number>();
+  edits.forEach((edit, index) => {
+    const sheet = RESHAPING.has(edit.kind) ? sheetOf(edit) : undefined;
+    if (sheet) lastReshape.set(sheet.id, index);
+  });
+  const seen = new Set<string>();
+  edits.forEach((edit, index) => {
+    const area = touched(workbook, edit);
+    if (!area || !rebuilt.has(area.sheetId) || index < (lastReshape.get(area.sheetId) ?? -1)) return;
+    for (const rect of area.rects) {
+      for (let row = rect.r1; row <= rect.r2; row++) {
+        for (let col = rect.c1; col <= rect.c2; col++) {
+          const key = `${area.sheetId}:${row}:${col}`;
+          if (seen.has(key)) continue;
+          seen.add(key);
+          cells.push({ sheetId: area.sheetId, row, col });
+        }
+      }
+    }
+  });
+  return cells;
+}
+
 /** Outlines for an agent's changed cells, its name tag on the first one of each tab. */
 export function agentOverlays(id: string, by: SheetAuthor, cells: ReadonlyArray<CellPosition>): GridOverlay[] {
   const byTab = new Map<string, CellPosition[]>();
@@ -161,7 +263,7 @@ export function agentOverlays(id: string, by: SheetAuthor, cells: ReadonlyArray<
         sheetId: tabId,
         rect,
         color: "var(--sheet-agent)",
-        ...(index === 0 ? { label } : {}),
+        ...(index === 0 ? { label, labelShown: true } : {}),
       });
     });
   }

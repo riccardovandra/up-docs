@@ -253,6 +253,56 @@ describe("inserting and deleting rows and columns", () => {
     expect(r.changed.cells.map((c) => c.sheetId)).toEqual(["s1-0"]);
   });
 
+  it("gives inserted rows the formats of the row above, never its inputs", () => {
+    const money = { numberFormat: { pattern: "$#,##0.00" } };
+    const wb = apply(fresh(), [
+      { kind: "writeCells", sheet: "Sheet1", topLeft: "A1", rows: [["Item", "Cost"], ["Rent", 6600], ["Fees", 120]] },
+      { kind: "formatCells", sheet: "Sheet1", ranges: ["A1:B1"], format: { font: { bold: true } } },
+      { kind: "formatCells", sheet: "Sheet1", ranges: ["B2:B3"], format: money },
+    ]).workbook;
+    const below = apply(wb, [
+      { kind: "insertRows", sheet: "Sheet1", besideRow: 2, side: "after", count: 2 },
+      { kind: "writeCells", sheet: "Sheet1", topLeft: "B3", rows: [[6600]] },
+    ]).workbook;
+    expect(shownAt(below, "Sheet1", "B3")).toBe("$6,600.00");
+    expect(inputAt(below, "Sheet1", "B4")).toBe("");
+    expect(viewCell(below, "s0-0", 3, 1).format).toEqual(money);
+    expect(viewCell(below, "s0-0", 3, 0).format).toBeUndefined();
+    expect(shownAt(below, "Sheet1", "B5")).toBe("$120.00");
+    // Inserted before row 3: still the row above (row 2), not the header.
+    const before = apply(wb, [{ kind: "insertRows", sheet: "Sheet1", besideRow: 3, side: "before", count: 1 }]).workbook;
+    expect(viewCell(before, "s0-0", 2, 1).format).toEqual(money);
+    // Above row 1 there is no row above: the row below (the old row 1) gives its formats.
+    const top = apply(wb, [{ kind: "insertRows", sheet: "Sheet1", besideRow: 1, side: "before", count: 1 }]).workbook;
+    expect(viewCell(top, "s0-0", 0, 0).format).toEqual({ font: { bold: true } });
+    expect(inputAt(top, "Sheet1", "A1")).toBe("");
+    expect(inputAt(top, "Sheet1", "A2")).toBe("Item");
+  });
+
+  it("gives inserted columns the formats of the column before, or after at column A", () => {
+    const pct = { numberFormat: { pattern: "0.0%" } };
+    const wb = apply(fresh(), [
+      { kind: "writeCells", sheet: "Sheet1", topLeft: "A1", rows: [["x", 0.1]] },
+      { kind: "formatCells", sheet: "Sheet1", ranges: ["B1:B2"], format: pct },
+    ]).workbook;
+    const after = apply(wb, [{ kind: "insertColumns", sheet: "Sheet1", besideColumn: "B", side: "after", count: 1 }]).workbook;
+    expect(viewCell(after, "s0-0", 0, 2).format).toEqual(pct);
+    expect(viewCell(after, "s0-0", 1, 2).format).toEqual(pct);
+    expect(inputAt(after, "Sheet1", "C1")).toBe("");
+    const first = apply(wb, [{ kind: "insertColumns", sheet: "Sheet1", besideColumn: "A", side: "before", count: 1 }]).workbook;
+    expect(viewCell(first, "s0-0", 0, 0).format).toBeUndefined();
+    expect(viewCell(first, "s0-0", 0, 2).format).toEqual(pct);
+  });
+
+  it("inserts without copying formats when the copies would pass the cell limit", () => {
+    const wb = apply(fresh(), [
+      { kind: "formatCells", sheet: "Sheet1", ranges: ["A1:Z7692"], format: { font: { bold: true } } },
+    ]).workbook;
+    const r = apply(wb, [{ kind: "insertRows", sheet: "Sheet1", besideRow: 1, side: "after", count: 1 }]);
+    expect(viewCell(r.workbook, "s0-0", 1, 0).format).toBeUndefined();
+    expect(viewCell(r.workbook, "s0-0", 2, 0).format).toEqual({ font: { bold: true } });
+  });
+
   it("inserts columns after a column", () => {
     const wb = apply(grid(), [{ kind: "insertColumns", sheet: "Sheet1", besideColumn: "A", side: "after", count: 1 }]).workbook;
     expect(inputAt(wb, "Sheet1", "C4")).toBe("=C2");

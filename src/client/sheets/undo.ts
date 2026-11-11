@@ -16,7 +16,7 @@ import {
 import type { Rect } from "./selection.ts";
 
 /** The rectangles an edit writes or formats, on which tab; null for other kinds. */
-function touched(workbook: Workbook, edit: Edit): { sheetId: string; rects: Rect[] } | null {
+export function touched(workbook: Workbook, edit: Edit): { sheetId: string; rects: Rect[] } | null {
   if (edit.kind !== "writeCells" && edit.kind !== "formatCells") return null;
   const sheet = findSheet(workbook, edit.sheet);
   if (!sheet) return null;
