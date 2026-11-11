@@ -257,26 +257,29 @@ interface Cell {
 function cellsOf(model: XmlElement): ReadonlyArray<Cell> {
   const root = model.children.find((child) => child.name === "root");
   return (root?.children ?? []).flatMap((element) => {
-    const cell =
-      element.name === "mxCell"
-        ? element
-        : element.children.find((child) => child.name === "mxCell");
-    if (!cell) return [];
-    const style = cell.attributes.get("style") ?? "";
-    const value = element.attributes.get(element === cell ? "value" : "label") ?? "";
-    return [
-      {
-        id: element.attributes.get("id"),
-        label: labelText(value, style),
-        vertex: cell.attributes.get("vertex") === "1",
-        edge: cell.attributes.get("edge") === "1",
-        parent: cell.attributes.get("parent"),
-        source: cell.attributes.get("source"),
-        target: cell.attributes.get("target"),
-        style,
-      },
-    ];
+    const cell = cellOf(element);
+    return cell ? [cell] : [];
   });
+}
+
+/** One child of `<root>` as a cell, with its `<mxGeometry>`; null when it holds no `<mxCell>`. */
+function cellOf(element: XmlElement): (Cell & { readonly geometry: XmlElement | undefined }) | null {
+  const cell =
+    element.name === "mxCell" ? element : element.children.find((child) => child.name === "mxCell");
+  if (!cell) return null;
+  const style = cell.attributes.get("style") ?? "";
+  const value = element.attributes.get(element === cell ? "value" : "label") ?? "";
+  return {
+    id: element.attributes.get("id"),
+    label: labelText(value, style),
+    vertex: cell.attributes.get("vertex") === "1",
+    edge: cell.attributes.get("edge") === "1",
+    parent: cell.attributes.get("parent"),
+    source: cell.attributes.get("source"),
+    target: cell.attributes.get("target"),
+    style,
+    geometry: cell.children.find((child) => child.name === "mxGeometry"),
+  };
 }
 
 /** The line between two shapes, with the arrowheads Draw.io draws for the style. */
@@ -415,33 +418,42 @@ async function inflatePage(content: string, budget: { left: number }): Promise<s
   }
 }
 
-async function readDiagramElement(
+/** Reads one page's model into T, or says why the page is unreadable. */
+interface PageReader<T> {
+  readonly read: (head: PageHead, model: XmlElement) => T;
+  readonly empty: (head: PageHead, unreadable?: string | null) => T;
+}
+
+const PAGE_READER: PageReader<DrawioPage> = { read: readPage, empty: emptyPage };
+
+async function readDiagramElement<T>(
   diagram: XmlElement,
   budget: { left: number },
-): Promise<DrawioPage> {
+  reader: PageReader<T>,
+): Promise<T> {
   const name = diagram.attributes.get("name") ?? null;
   const id = diagram.attributes.get("id") ?? null;
   const model = diagram.children.find((child) => child.name === "mxGraphModel");
-  if (model) return readPage({ name, id, compressed: false }, model);
+  if (model) return reader.read({ name, id, compressed: false }, model);
   const content = diagram.text.trim();
   if (content === "") {
     // A page with elements but no model is not one Draw.io would draw.
     return diagram.children.length > 0
-      ? emptyPage({ name, id, compressed: false }, "This page holds no <mxGraphModel>.")
-      : emptyPage({ name, id, compressed: false });
+      ? reader.empty({ name, id, compressed: false }, "This page holds no <mxGraphModel>.")
+      : reader.empty({ name, id, compressed: false });
   }
   const head = { name, id, compressed: true };
   const inner = await inflatePage(content, budget);
   if (inner === null) {
-    return emptyPage(head, "This page is saved compressed and could not be decoded.");
+    return reader.empty(head, "This page is saved compressed and could not be decoded.");
   }
   try {
     const root = parseXml(inner);
-    if (root.name === "mxGraphModel") return readPage(head, root);
+    if (root.name === "mxGraphModel") return reader.read(head, root);
   } catch (cause) {
     if (!(cause instanceof XmlError)) throw cause;
   }
-  return emptyPage(head, "This page is saved compressed and its content is not a Draw.io model.");
+  return reader.empty(head, "This page is saved compressed and its content is not a Draw.io model.");
 }
 
 /**
@@ -466,9 +478,136 @@ export async function readDrawio(xml: string): Promise<DrawioModel> {
   const pages: Array<DrawioPage> = [];
   const budget = { left: MAX_INFLATED_BYTES };
   for (const diagram of root.children) {
-    if (diagram.name === "diagram") pages.push(await readDiagramElement(diagram, budget));
+    if (diagram.name === "diagram") pages.push(await readDiagramElement(diagram, budget, PAGE_READER));
   }
   return { ok: true, pages };
+}
+
+/** A shape's box on its page, in diagram coordinates (what Draw.io's geometry says, parents added). */
+export interface DrawioShapeBox {
+  readonly id: string;
+  /** Its label as plain words, or "" when it has none. */
+  readonly label: string;
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+}
+
+export interface DrawioPageLayout {
+  readonly name: string | null;
+  readonly id: string | null;
+  /** The shapes (vertices) with a box, in file order: later ones are drawn on top. */
+  readonly shapes: ReadonlyArray<DrawioShapeBox>;
+  /** Every shape box and connection point, or null for a page with nothing drawn. */
+  readonly bounds: { readonly x: number; readonly y: number; readonly width: number; readonly height: number } | null;
+}
+
+const numberAttribute = (element: XmlElement, key: string) => {
+  const value = Number(element.attributes.get(key) ?? "0");
+  return Number.isFinite(value) ? value : 0;
+};
+
+function readLayout(head: PageHead, model: XmlElement): DrawioPageLayout {
+  const root = model.children.find((child) => child.name === "root");
+  interface Placed {
+    readonly cell: Cell;
+    readonly geometry: XmlElement | undefined;
+  }
+  const placed = new Map<string, Placed>();
+  const order: Array<Placed> = [];
+  for (const element of root?.children ?? []) {
+    const cell = cellOf(element);
+    if (!cell) continue;
+    const entry = { cell, geometry: cell.geometry };
+    order.push(entry);
+    if (cell.id !== undefined && !placed.has(cell.id)) placed.set(cell.id, entry);
+  }
+  // A shape inside a group or container is placed relative to it.
+  const originOf = (id: string | undefined, depth = 0): { x: number; y: number } => {
+    const parent = id === undefined ? undefined : placed.get(id);
+    if (!parent || !parent.cell.vertex || !parent.geometry || depth > 50) return { x: 0, y: 0 };
+    const above = originOf(parent.cell.parent, depth + 1);
+    return {
+      x: above.x + numberAttribute(parent.geometry, "x"),
+      y: above.y + numberAttribute(parent.geometry, "y"),
+    };
+  };
+  const shapes: Array<DrawioShapeBox> = [];
+  const points: Array<{ x: number; y: number }> = [];
+  for (const { cell, geometry } of order) {
+    if (!geometry || geometry.attributes.get("relative") === "1") continue;
+    const parent = cell.parent === undefined ? undefined : placed.get(cell.parent);
+    if (parent?.cell.edge) continue;
+    const origin = originOf(cell.parent);
+    if (cell.vertex && cell.id !== undefined) {
+      const box = {
+        id: cell.id,
+        label: cell.label,
+        x: origin.x + numberAttribute(geometry, "x"),
+        y: origin.y + numberAttribute(geometry, "y"),
+        width: numberAttribute(geometry, "width"),
+        height: numberAttribute(geometry, "height"),
+      };
+      shapes.push(box);
+      points.push({ x: box.x, y: box.y }, { x: box.x + box.width, y: box.y + box.height });
+    } else if (cell.edge) {
+      const all = [
+        ...geometry.children,
+        ...geometry.children.filter((child) => child.name === "Array").flatMap((list) => list.children),
+      ];
+      for (const point of all) {
+        if (point.name !== "mxPoint") continue;
+        points.push({
+          x: origin.x + numberAttribute(point, "x"),
+          y: origin.y + numberAttribute(point, "y"),
+        });
+      }
+    }
+  }
+  if (points.length === 0) return { name: head.name, id: head.id, shapes, bounds: null };
+  const xs = points.map((point) => point.x);
+  const ys = points.map((point) => point.y);
+  const x = Math.min(...xs);
+  const y = Math.min(...ys);
+  return {
+    name: head.name,
+    id: head.id,
+    shapes,
+    bounds: { x, y, width: Math.max(...xs) - x, height: Math.max(...ys) - y },
+  };
+}
+
+const LAYOUT_READER: PageReader<DrawioPageLayout> = {
+  read: readLayout,
+  empty: (head) => ({ name: head.name, id: head.id, shapes: [], bounds: null }),
+};
+
+/**
+ * Where each page's shapes sit, for placing comment pins: one layout per page,
+ * in order. Null when the source is not XML Draw.io can open.
+ */
+export async function readDrawioLayout(
+  xml: string,
+): Promise<ReadonlyArray<DrawioPageLayout> | null> {
+  if (xml.trim() === "") return [];
+  let root: XmlElement;
+  try {
+    root = parseXml(xml);
+  } catch (cause) {
+    if (cause instanceof XmlError) return null;
+    throw cause;
+  }
+  if (root.name === "mxGraphModel") return [readLayout(BARE_PAGE, root)];
+  if (root.name !== "mxfile") return null;
+  const budget = { left: MAX_INFLATED_BYTES };
+  const pages: Array<DrawioPageLayout> = [];
+  for (const diagram of root.children) {
+    if (diagram.name === "diagram") {
+      pages.push(await readDiagramElement(diagram, budget, LAYOUT_READER));
+    }
+  }
+  return pages;
 }
 
 export interface DrawioPageDescription {

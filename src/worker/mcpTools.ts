@@ -75,6 +75,14 @@ import {
 } from "../shared/drawioModel.ts";
 import { IMAGE_TYPES, MAX_IMAGE_BYTES } from "../shared/images.ts";
 import { groupThreads } from "../shared/threads.ts";
+import {
+  layoutPage,
+  MAX_DIAGRAM_COMMENT_LENGTH,
+  pinPlacement,
+  type DiagramComment,
+  type DiagramThread,
+} from "../shared/diagramComments.ts";
+import { readDrawioLayout, type DrawioPageLayout } from "../shared/drawioModel.ts";
 import { describeWidgetProblems } from "../shared/widget/check.ts";
 import { findWidgetFences, spliceFenceSource } from "../shared/widget/fence.ts";
 import { MAX_LABEL_LENGTH, rewriteLabel } from "../shared/widget/rewrite.ts";
@@ -83,6 +91,7 @@ import * as Access from "./access.ts";
 import { importDeps, inviteByEmail, type ApiDeps } from "./api.ts";
 import type { Principal } from "./auth.ts";
 import * as Comments from "./comments.ts";
+import * as DiagramComments from "./diagramComments.ts";
 import * as Diagrams from "./diagrams.ts";
 import * as DocThreads from "./docThreads.ts";
 import * as Docs from "./docs.ts";
@@ -864,6 +873,84 @@ async function drawioWith(
   }
 }
 
+const diagramReplySummary = (comment: DiagramComment) => ({
+  commentId: comment.id,
+  author: comment.author,
+  authorKind: comment.authorKind,
+  body: comment.body,
+  createdAt: new Date(comment.createdAt).toISOString(),
+});
+
+/**
+ * A diagram thread for an agent: where it is pinned (page, shape id, the
+ * shape's label then and now) and whether the shape is still there.
+ */
+function diagramThreadSummary(
+  ctx: ToolContext,
+  thread: DiagramThread,
+  layouts: ReadonlyArray<DrawioPageLayout>,
+) {
+  const { anchor } = thread;
+  const pin = pinPlacement(anchor, layoutPage(layouts, anchor.page));
+  return {
+    ...diagramReplySummary(thread),
+    diagramId: thread.diagramId,
+    url: drawioUrl(ctx, thread.diagramId),
+    page: anchor.page,
+    shapeId: anchor.shapeId,
+    // The label when the thread started; `shapeLabel` is what the shape says now.
+    quote: thread.quote,
+    ...(pin.shape ? { shapeLabel: pin.shape.label } : {}),
+    point: { x: Math.round(anchor.x), y: Math.round(anchor.y) },
+    status: pin.status,
+    resolved: thread.resolvedAt !== null,
+    replies: thread.replies.map(diagramReplySummary),
+  };
+}
+
+async function diagramThreads(ctx: ToolContext, diagram: Diagram, includeResolved: boolean) {
+  const [threads, layouts] = await Promise.all([
+    DiagramComments.listDiagramThreads(ctx.deps.db, diagram.id),
+    readDrawioLayout(diagram.xml),
+  ]);
+  return threads
+    .filter((thread) => includeResolved || thread.resolvedAt === null)
+    .map((thread) => diagramThreadSummary(ctx, thread, layouts ?? []));
+}
+
+/**
+ * The diagram comment a reply_comment or resolve_comment names: always when
+ * `diagramId` is given, else when `commentId` is no doc comment. Null for a
+ * doc comment. The token user must manage the diagram.
+ */
+async function diagramCommentArg(
+  ctx: ToolContext,
+  args: Args,
+  commentId: string,
+): Promise<{ readonly comment: DiagramComment; readonly diagram: Diagram } | null> {
+  const diagramId = args.diagramId === undefined ? null : drawioIdArg(args);
+  if (diagramId === null) {
+    try {
+      await Comments.getComment(ctx.deps.db, commentId);
+      return null;
+    } catch (cause) {
+      if (!(cause instanceof Docs.NotFoundError)) throw cause;
+    }
+  }
+  let comment: DiagramComment;
+  try {
+    comment = await DiagramComments.getDiagramComment(ctx.deps.db, commentId);
+  } catch (cause) {
+    if (!(cause instanceof Docs.NotFoundError)) throw cause;
+    return fail("not_found", "No comment with that id.");
+  }
+  if (diagramId !== null && comment.diagramId !== diagramId) {
+    fail("not_found", "No comment with that id on this diagram.");
+  }
+  const { diagram } = await drawioWith(ctx, comment.diagramId, "edit");
+  return { comment, diagram };
+}
+
 /**
  * The `xml` argument: Draw.io XML that the store accepts and the editor can
  * open, as one bare `<mxGraphModel>` (one page) or an `<mxfile>` of named
@@ -1524,25 +1611,26 @@ export const TOOLS = [
   {
     name: "list_comments",
     description:
-      'List comment threads on a doc (optionally one tab): the quoted passage, the structured `anchor` for a table cell ({kind:"cell",blockId,rowId,colId}) or diagram label, whether the thread still has its place (`status`: "anchored", "text_removed" for a quote whose text is gone, "orphaned" for a deleted cell or label), and every reply. Resolved threads are left out unless includeResolved is true.',
+      'List comment threads on a doc (optionally one tab): the quoted passage, the structured `anchor` for a table cell ({kind:"cell",blockId,rowId,colId}) or diagram label, whether the thread still has its place (`status`: "anchored", "text_removed" for a quote whose text is gone, "orphaned" for a deleted cell or label), and every reply. Resolved threads are left out unless includeResolved is true. Pass diagramId (id or link) instead of docId for a Draw.io diagram\'s threads: each has page, shapeId, quote (the shape label), point and status ("shape", "point", "shape_removed").',
     inputSchema: {
       type: "object",
       properties: {
         docId: { type: "string" },
         tabId: { type: "string" },
+        diagramId: { type: "string" },
         includeResolved: { type: "boolean" },
       },
-      required: ["docId"],
     },
   },
   {
     name: "create_comment",
     description:
-      'Start a comment thread on a passage. `quote` is exact text from the tab (markdown syntax is ignored) and must appear exactly once; include more surrounding words if it repeats. To comment on a ```t3-table cell, pass `anchor` {"kind":"cell","blockId":<table id>,"rowId","colId"} instead of a quote.',
+      'Start a comment thread on a passage. `quote` is exact text from the tab (markdown syntax is ignored) and must appear exactly once; include more surrounding words if it repeats. To comment on a ```t3-table cell, pass `anchor` {"kind":"cell","blockId":<table id>,"rowId","colId"} instead of a quote. On a Draw.io diagram, pass diagramId instead of tabId and anchor {page, shapeId} or {page, x, y}.',
     inputSchema: {
       type: "object",
       properties: {
         tabId: { type: "string" },
+        diagramId: { type: "string" },
         quote: { type: "string" },
         anchor: {
           type: "object",
@@ -1551,15 +1639,19 @@ export const TOOLS = [
         },
         body: { type: "string", description: "The comment, in markdown." },
       },
-      required: ["tabId", "body"],
+      required: ["body"],
     },
   },
   {
     name: "reply_comment",
-    description: "Reply in a comment thread.",
+    description: "Reply in a comment thread, on a doc or (with diagramId) a Draw.io diagram.",
     inputSchema: {
       type: "object",
-      properties: { commentId: { type: "string" }, body: { type: "string" } },
+      properties: {
+        commentId: { type: "string" },
+        body: { type: "string" },
+        diagramId: { type: "string" },
+      },
       required: ["commentId", "body"],
     },
   },
@@ -1571,6 +1663,7 @@ export const TOOLS = [
       type: "object",
       properties: {
         commentId: { type: "string" },
+        diagramId: { type: "string" },
         lesson: {
           type: "string",
           description:
@@ -1658,7 +1751,7 @@ export const TOOLS = [
   {
     name: "read_drawio",
     description:
-      'Read one Draw.io diagram from the library, by its id (the first line of a ```t3-drawio block) or its link (<origin>/diagrams/<id>): title, project, the docs that use it, pageNames (its pages, in order), its shapes and its connections ("A -> B", "A -[label]-> B"), per page when the file has several, and its version. The current picture of the first page, or of `page`, comes attached as a PNG image when there is one. Pass includeXml: true for the Draw.io XML (an <mxfile> holding every page when there are several), which only the diagram\'s creator and the workspace admin get; you need it to change the diagram with update_drawio.',
+      'Read one Draw.io diagram from the library, by its id (the first line of a ```t3-drawio block) or its link (<origin>/diagrams/<id>): title, project, the docs that use it, pageNames (its pages, in order), its shapes and its connections ("A -> B", "A -[label]-> B"), per page when the file has several, its version, and openComments (open comment threads with page, shapeId and quote). The current picture of the first page, or of `page`, comes attached as a PNG image when there is one. Pass includeXml: true for the Draw.io XML (an <mxfile> holding every page when there are several), which only the diagram\'s creator and the workspace admin get; you need it to change the diagram with update_drawio.',
     inputSchema: {
       type: "object",
       properties: {
@@ -2372,6 +2465,18 @@ const handlers: Record<
   },
 
   list_comments: async (args, ctx) => {
+    if (args.diagramId !== undefined) {
+      const { diagram } = await drawioWith(ctx, drawioIdArg(args), "view");
+      return {
+        diagramId: diagram.id,
+        title: diagram.title,
+        url: drawioUrl(ctx, diagram.id),
+        threads: await diagramThreads(ctx, diagram, args.includeResolved === true),
+      };
+    }
+    if (args.docId === undefined) {
+      fail("invalid_argument", 'Pass "docId" for a doc\'s comments, or "diagramId" for a diagram\'s.');
+    }
     const docId = requireString(args, "docId");
     const tabId = optionalString(args, "tabId");
     const includeResolved = args.includeResolved === true;
@@ -2409,6 +2514,28 @@ const handlers: Record<
   },
 
   create_comment: async (args, ctx) => {
+    if (args.diagramId !== undefined) {
+      const body = requireString(args, "body", MAX_DIAGRAM_COMMENT_LENGTH);
+      const { diagram } = await drawioWith(ctx, drawioIdArg(args), "edit");
+      let placed: Awaited<ReturnType<typeof DiagramComments.resolveNewAnchor>>;
+      try {
+        placed = await DiagramComments.resolveNewAnchor(diagram.xml, args.anchor ?? {});
+      } catch (cause) {
+        if (cause instanceof DiagramComments.InvalidDiagramCommentError) {
+          return fail(cause.code, `${cause.message} read_drawio lists the pages and shape ids.`);
+        }
+        throw cause;
+      }
+      const thread = await DiagramComments.createDiagramThread(ctx.deps.db, {
+        diagramId: diagram.id,
+        ...placed,
+        body,
+        author: commentAuthor(ctx),
+        now: ctx.deps.now(),
+      });
+      const layouts = (await readDrawioLayout(diagram.xml)) ?? [];
+      return { comment: diagramThreadSummary(ctx, thread, layouts) };
+    }
     const tabId = requireString(args, "tabId");
     const body = requireString(args, "body", Comments.MAX_COMMENT_LENGTH);
     if (args.anchor !== undefined && args.anchor !== null) {
@@ -2554,6 +2681,19 @@ const handlers: Record<
   reply_comment: async (args, ctx) => {
     const commentId = requireString(args, "commentId");
     const body = requireString(args, "body", Comments.MAX_COMMENT_LENGTH);
+    const onDiagram = await diagramCommentArg(ctx, args, commentId);
+    if (onDiagram) {
+      const reply = await DiagramComments.replyDiagramThread(ctx.deps.db, {
+        commentId,
+        body,
+        author: commentAuthor(ctx),
+        now: ctx.deps.now(),
+      });
+      return {
+        reply: { ...diagramReplySummary(reply), threadId: reply.parentId },
+        diagramId: onDiagram.diagram.id,
+      };
+    }
     const target = await load(
       Comments.getComment(ctx.deps.db, commentId),
       "comment",
@@ -2570,6 +2710,41 @@ const handlers: Record<
 
   resolve_comment: async (args, ctx) => {
     const commentId = requireString(args, "commentId");
+    const onDiagram = await diagramCommentArg(ctx, args, commentId);
+    if (onDiagram) {
+      const lesson = args.lesson === undefined ? undefined : factTextArg(args, "lesson");
+      const projectId = onDiagram.diagram.projectId;
+      if (lesson !== undefined) {
+        if (projectId === null) {
+          fail("no_project", "This diagram is in no project, so the lesson has nowhere to live.");
+        }
+        await requireFactEditor(ctx, projectId);
+      }
+      const thread = await DiagramComments.resolveDiagramThread(ctx.deps.db, {
+        commentId,
+        resolved: true,
+        now: ctx.deps.now(),
+      });
+      if (lesson === undefined || projectId === null) {
+        return { threadId: thread.id, diagramId: thread.diagramId, resolved: true };
+      }
+      const fact = await load(
+        Facts.addFact(ctx.deps.db, {
+          projectId,
+          text: lesson,
+          createdBy: ctx.principal.userId,
+          sourceCommentId: thread.id,
+          now: ctx.deps.now(),
+        }),
+        "project",
+      );
+      return {
+        threadId: thread.id,
+        diagramId: thread.diagramId,
+        resolved: true,
+        fact: { factId: fact.factId, text: fact.text },
+      };
+    }
     const target = await load(
       Comments.getComment(ctx.deps.db, commentId),
       "comment",
@@ -2793,7 +2968,7 @@ const handlers: Record<
         "Only the diagram's creator and the workspace admin get its Draw.io XML. Call read_drawio without includeXml for its shapes, connections and picture.",
       );
     }
-    const [project, usage, picture, model] = await Promise.all([
+    const [project, usage, picture, model, comments] = await Promise.all([
       drawioProject(ctx, diagram.projectId),
       Diagrams.diagramUsage(ctx.deps.db, {
         diagramId,
@@ -2801,6 +2976,7 @@ const handlers: Record<
       }),
       drawioPicture(ctx, diagram, page),
       readDrawio(diagram.xml),
+      diagramThreads(ctx, diagram, false),
     ]);
     const names = pageNames(model);
     const body = {
@@ -2814,6 +2990,8 @@ const handlers: Record<
         ? { usedInOtherDocs: usage.otherDocs }
         : {}),
       ...describeDrawio(model, FULL_DRAWIO),
+      // Open comment threads, pinned to a shape (shapeId) or a point on a page.
+      ...(comments.length > 0 ? { openComments: comments } : {}),
       picture: picture.note,
       ...(args.includeXml === true
         ? {

@@ -15,8 +15,10 @@
  * `copy-to-claude-doc` (recreate the doc in Claude Docs), `start-work`,
  * `resolve-threads`, `open-thread`, `thread-linked` (the link-thread record is
  * stored), `add-comment-to-chat` (put a comment in the open conversation's
- * composer) and `send-to` (copy the doc into Notion through T3 Code's MCP
- * hub). Frame actions are only offered once a parent has said hello and listed
+ * composer; with `add-diagram-comment-to-chat`, also a comment on a Draw.io
+ * diagram, which carries `diagramId`, `diagramTitle` and `diagramPage`, empty
+ * `docId` and `tabId`, and the diagram's link as `url`) and `send-to` (copy the
+ * doc into Notion through T3 Code's MCP hub). Frame actions are only offered once a parent has said hello and listed
  * the feature. Every message is additive: an older peer ignores unknown types.
  *
  * With `local-files`, the frame also opens the T3 project's markdown files:
@@ -32,6 +34,7 @@
  */
 import { normalizeProjectKey } from "../host/docsCloudProjects.ts";
 import type { StructuredAnchor } from "./anchors.ts";
+import type { DiagramCommentChat } from "./diagramComments.ts";
 import { docGroupArg } from "./protocol.ts";
 import {
   LOCAL_COMMENTS_CHANGED_TYPE,
@@ -54,6 +57,7 @@ export const MAX_EMBED_GROUPS = 12;
 export type EmbedFeature =
   | "start-work"
   | "add-to-chat"
+  | "add-diagram-comment-to-chat"
   | "send-to"
   | "local-files"
   | "local-comments"
@@ -165,7 +169,31 @@ export interface EmbedCommentForChat {
   readonly body: string;
   /** The cell or diagram label the comment is on, when it is not on a passage. */
   readonly anchor: StructuredAnchor | null;
+  /**
+   * Set for a comment on a Draw.io diagram (only to a T3 Code that lists
+   * `add-diagram-comment-to-chat`): `docId` and `tabId` are then "", `url` is
+   * `<origin>/diagrams/<diagramId>`, `quote` the shape's label and `anchor` null.
+   */
+  readonly diagramId?: string;
+  readonly diagramTitle?: string;
+  /** The diagram page's name, or null when it has none. */
+  readonly diagramPage?: string | null;
 }
+
+/** A diagram comment or reply as the add-to-chat message carries it. */
+export const diagramCommentForChat = (chat: DiagramCommentChat): EmbedCommentForChat => ({
+  docId: "",
+  tabId: "",
+  docTitle: chat.diagramTitle,
+  url: chat.url,
+  commentId: chat.commentId,
+  quote: chat.quote,
+  body: chat.body,
+  anchor: null,
+  diagramId: chat.diagramId,
+  diagramTitle: chat.diagramTitle,
+  diagramPage: chat.page,
+});
 
 export type EmbedFrameMessage =
   | EmbedLocationMessage
@@ -195,6 +223,7 @@ export type EmbedFrameMessage =
 const FEATURES: ReadonlyArray<EmbedFeature> = [
   "start-work",
   "add-to-chat",
+  "add-diagram-comment-to-chat",
   "send-to",
   "local-files",
   "local-comments",

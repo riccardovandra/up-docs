@@ -80,6 +80,14 @@ function UsedChip(props: { readonly docs: number }) {
   ) : null;
 }
 
+function CommentsChip(props: { readonly open: number }) {
+  return props.open > 0 ? (
+    <span className="diagram-chip comments" title={`${plural(props.open, "open comment")}`}>
+      {plural(props.open, "comment")}
+    </span>
+  ) : null;
+}
+
 /** Which diagrams a project scope shows: all, those in no project, or one project's. */
 export function diagramsInScope<A extends { readonly projectId: string | null }>(
   diagrams: ReadonlyArray<A>,
@@ -236,6 +244,7 @@ export function DiagramsView(props: {
                     <span className="doc-card-title">{diagram.title}</span>
                     <span className="doc-card-meta diagram-card-meta">
                       <UsedChip docs={linkedDocs(diagram).length} />
+                      <CommentsChip open={diagram.openComments} />
                       <span>{formatDay(diagram.updatedAt)}</span>
                     </span>
                   </span>
@@ -284,6 +293,7 @@ export function DiagramsView(props: {
                       <span className="doc-row-title-text">
                         <span>{diagram.title}</span>
                       </span>
+                      <CommentsChip open={diagram.openComments} />
                     </a>
                   </td>
                   <td>
