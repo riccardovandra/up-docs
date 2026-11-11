@@ -23,6 +23,7 @@ import { NoProjectBadge, ProjectBadge } from "../home/ProjectSwitcher.tsx";
 import { navigate } from "../router.ts";
 import { SheetIcon } from "../sheets/SheetIcon.tsx";
 import { DiagramEditor, type DiagramEditorTarget } from "./DiagramEditor.tsx";
+import { useDiagramChanges } from "./drawioEditing.ts";
 import { DiagramPicture } from "./DiagramPicture.tsx";
 import { subscribeRefresh } from "./diagramRefresh.ts";
 import { diagramsApi } from "./diagramsApi.ts";
@@ -127,6 +128,8 @@ export function DiagramsView(props: {
   const [failed, setFailed] = useState(false);
   const [view, setView] = useState<HomeView>(storedView);
   const [editing, setEditing] = useState<DiagramEditorTarget | null>(null);
+  /** False on a phone or tablet: the library is for reading there, with no New diagram or Edit. */
+  const changesHere = useDiagramChanges();
   /** A new diagram whose theme is being shown, before Draw.io opens. */
   const [starting, setStarting] = useState<{ readonly projectId: string | null } | null>(null);
 
@@ -204,29 +207,33 @@ export function DiagramsView(props: {
           >
             {view === "grid" ? <ListIcon /> : <GridIcon />}
           </button>
-          <button type="button" className="button diagram-new-button" onClick={startNew}>
-            <PlusIcon size={16} />
-            New diagram
-          </button>
+          {changesHere ? (
+            <button type="button" className="button diagram-new-button" onClick={startNew}>
+              <PlusIcon size={16} />
+              New diagram
+            </button>
+          ) : null}
         </div>
       </div>
 
       {view === "grid" ? (
         <div className="doc-grid">
-          <button type="button" className="doc-card doc-card-new" onClick={startNew}>
-            <span className="doc-card-paper doc-card-new-paper" aria-hidden="true">
-              <PlusIcon size={46} />
-            </span>
-            <span className="doc-card-footer">
-              <span className="doc-card-icon">
-                <DiagramIcon size={18} />
+          {changesHere ? (
+            <button type="button" className="doc-card doc-card-new" onClick={startNew}>
+              <span className="doc-card-paper doc-card-new-paper" aria-hidden="true">
+                <PlusIcon size={46} />
               </span>
-              <span className="doc-card-text">
-                <span className="doc-card-title">New diagram</span>
-                <span className="doc-card-meta">{newDetail}</span>
+              <span className="doc-card-footer">
+                <span className="doc-card-icon">
+                  <DiagramIcon size={18} />
+                </span>
+                <span className="doc-card-text">
+                  <span className="doc-card-title">New diagram</span>
+                  <span className="doc-card-meta">{newDetail}</span>
+                </span>
               </span>
-            </span>
-          </button>
+            </button>
+          ) : null}
           {shown.map((diagram) => (
             <article key={diagram.id} className="doc-card">
               <a
@@ -268,15 +275,17 @@ export function DiagramsView(props: {
             </tr>
           </thead>
           <tbody>
-            <tr className="doc-row doc-row-new">
-              <td className="doc-row-title" colSpan={5}>
-                <button type="button" onClick={startNew}>
-                  <PlusIcon size={16} />
-                  <span>New diagram</span>
-                  <span className="doc-row-muted">{newDetail}</span>
-                </button>
-              </td>
-            </tr>
+            {changesHere ? (
+              <tr className="doc-row doc-row-new">
+                <td className="doc-row-title" colSpan={5}>
+                  <button type="button" onClick={startNew}>
+                    <PlusIcon size={16} />
+                    <span>New diagram</span>
+                    <span className="doc-row-muted">{newDetail}</span>
+                  </button>
+                </td>
+              </tr>
+            ) : null}
             {shown.map((diagram) => {
               const project = diagram.projectId ? projectOf.get(diagram.projectId) : undefined;
               const docs = linkedDocs(diagram);
@@ -310,17 +319,19 @@ export function DiagramsView(props: {
                   </td>
                   <td className="doc-row-muted">{formatDay(diagram.updatedAt)}</td>
                   <td className="doc-row-actions diagram-row-actions">
-                    <button
-                      type="button"
-                      className="button secondary small"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        setEditing({ kind: "existing", diagramId: diagram.id });
-                      }}
-                    >
-                      <PenIcon size={14} />
-                      Edit
-                    </button>
+                    {changesHere ? (
+                      <button
+                        type="button"
+                        className="button secondary small"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          setEditing({ kind: "existing", diagramId: diagram.id });
+                        }}
+                      >
+                        <PenIcon size={14} />
+                        Edit
+                      </button>
+                    ) : null}
                   </td>
                 </tr>
               );
@@ -333,7 +344,9 @@ export function DiagramsView(props: {
         <p className="home-empty">
           {props.scopeLabel
             ? `No diagrams in ${props.scopeLabel} yet.`
-            : "No diagrams yet. Start one with New diagram."}
+            : changesHere
+              ? "No diagrams yet. Start one with New diagram."
+              : "No diagrams yet."}
         </p>
       ) : null}
 
@@ -351,7 +364,7 @@ export function DiagramsView(props: {
           onClose={() => setStarting(null)}
         />
       ) : null}
-      {editing ? (
+      {editing && changesHere ? (
         <DiagramEditor
           target={editing}
           onClose={() => {

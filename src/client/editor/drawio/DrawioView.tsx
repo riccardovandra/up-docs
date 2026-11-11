@@ -16,6 +16,7 @@ import { ApiError } from "../../api.ts";
 import { DiagramPicture } from "../../diagrams/DiagramPicture.tsx";
 import { subscribeRefresh, watchDiagram } from "../../diagrams/diagramRefresh.ts";
 import { diagramErrorMessage, diagramsApi, subscribeDiagram } from "../../diagrams/diagramsApi.ts";
+import { useDiagramChanges } from "../../diagrams/drawioEditing.ts";
 import { DiagramIcon, LinkIcon } from "../../home/icons.tsx";
 import { navigate } from "../../router.ts";
 import {
@@ -101,6 +102,8 @@ function LinkedFigure(props: {
   const docId = context?.docId ?? null;
   const [usage, setUsage] = useState<DiagramUsage | null>(null);
   const [busy, setBusy] = useState(false);
+  /** False on a phone or tablet: no Edit, and tapping the picture does not open Draw.io. */
+  const changesHere = useDiagramChanges();
 
   // Only someone who manages the diagram may know which docs link it.
   const manages = diagram?.canEdit === true;
@@ -128,6 +131,7 @@ function LinkedFigure(props: {
     docEditable: props.editable,
     diagram,
     hosted: context !== null,
+    drawioEditor: changesHere,
   });
   const canEdit = actions.some((action) => action.id === "edit" && action.disabled === null);
 

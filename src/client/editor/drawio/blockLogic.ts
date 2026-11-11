@@ -61,7 +61,8 @@ export interface BlockAction {
 /**
  * The actions on a block. Someone who only reads the doc gets none. Someone who
  * edits the doc but only views the diagram sees Edit and Detach a copy greyed
- * out with the reason: both need the diagram's source.
+ * out with the reason: both need the diagram's source. On a phone or tablet
+ * there is no Edit at all: diagrams are for reading there.
  */
 export function blockActions(input: {
   /** Whether the person can edit the doc. */
@@ -70,6 +71,8 @@ export function blockActions(input: {
   readonly diagram: { readonly canEdit: boolean } | null;
   /** Whether the page can open the Draw.io editor and file a copy (a doc page can). */
   readonly hosted: boolean;
+  /** Whether this device may open the Draw.io editor; false on a phone or tablet. */
+  readonly drawioEditor: boolean;
 }): ReadonlyArray<BlockAction> {
   if (!input.docEditable) return [];
   const remove: BlockAction = { id: "remove", label: "Remove", disabled: null };
@@ -77,7 +80,7 @@ export function blockActions(input: {
   const reason = (what: string) =>
     input.diagram?.canEdit ? null : `Only the diagram's creator can ${what} it.`;
   return [
-    ...(input.hosted
+    ...(input.hosted && input.drawioEditor
       ? [{ id: "edit", label: "Edit", disabled: reason("edit") } satisfies BlockAction]
       : []),
     { id: "open", label: "Open in Diagrams", disabled: null },

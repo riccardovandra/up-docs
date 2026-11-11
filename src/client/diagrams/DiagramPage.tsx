@@ -19,6 +19,7 @@ import { useLockedProject } from "../lockedProject.ts";
 import { postToEmbedParent, useEmbedFeatures } from "../embedBridge.ts";
 import { docPath, navigate } from "../router.ts";
 import { DiagramEditor } from "./DiagramEditor.tsx";
+import { useDiagramChanges } from "./drawioEditing.ts";
 import { type DiagramComments, diagramCommentsApi } from "./diagramCommentsApi.ts";
 import { DiagramReviewCanvas } from "./DiagramReview.tsx";
 import { PageTabs, usePreloadedPages, useUrlPage } from "./PageTabs.tsx";
@@ -107,6 +108,7 @@ export function DiagramPage(props: { readonly diagramId: string }) {
   const [usage, setUsage] = useState<DiagramUsage | null>(null);
   const [projects, setProjects] = useState<ReadonlyArray<Project>>([]);
   const [editing, setEditing] = useState(false);
+  const changesHere = useDiagramChanges();
   const [renaming, setRenaming] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [review, setReview] = useState(false);
@@ -197,6 +199,8 @@ export function DiagramPage(props: { readonly diagramId: string }) {
   }
 
   const { canEdit } = diagram;
+  // On a phone or tablet the diagram is for reading: no Draw.io, rename, delete or theme change.
+  const canChange = canEdit && changesHere;
   const pageName = pageNames[shownPage] ?? null;
   const threads = comments?.threads ?? [];
   const openCount = threads.filter((thread) => thread.resolvedAt === null).length;
@@ -277,7 +281,7 @@ export function DiagramPage(props: { readonly diagramId: string }) {
           ) : null}
           {/* Its own line below the title at narrow widths (diagrams.css). */}
           <span className="diagram-theme-slot">
-            <ThemeMenu diagramId={diagramId} canEdit={canEdit} />
+            <ThemeMenu diagramId={diagramId} canEdit={canChange} />
           </span>
         </div>
         <div className="doc-header-actions">
@@ -291,7 +295,7 @@ export function DiagramPage(props: { readonly diagramId: string }) {
               {review ? "Exit review" : "Review"} · {openCount} open
             </button>
           ) : null}
-        {canEdit ? (
+        {canChange ? (
           <>
             <button
               type="button"
@@ -369,7 +373,7 @@ export function DiagramPage(props: { readonly diagramId: string }) {
               />
             );
             // Click to edit, unless pins are showing: then clicks are theirs.
-            return canEdit && !review && !openOnPage ? (
+            return canChange && !review && !openOnPage ? (
               <button
                 type="button"
                 className="diagram-canvas"
@@ -443,7 +447,7 @@ export function DiagramPage(props: { readonly diagramId: string }) {
         keys={!editing && !renaming}
       />
 
-      {editing ? (
+      {editing && canChange ? (
         <DiagramEditor
           target={{ kind: "existing", diagramId }}
           startPage={shownPage}
