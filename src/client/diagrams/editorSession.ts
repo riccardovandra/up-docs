@@ -21,6 +21,7 @@ import {
 import { drawioPageSources } from "../../shared/drawioModel.ts";
 import {
   exportDrawioPicture,
+  pictureBorder,
   type DrawioFrame,
   type DrawioPictures,
 } from "./drawioFrame.ts";
@@ -197,7 +198,10 @@ export function startEditorSession(options: {
     const picture =
       pages !== null && pages.length > 1
         ? null
-        : await exportDrawioPicture(frame, { spinKey: "saving" }).then(
+        : await exportDrawioPicture(frame, {
+            spinKey: "saving",
+            border: await pictureBorder(xml),
+          }).then(
             (drawn): DrawioPictures => ({
               ...drawn,
               pageNames: pages?.length === 1 ? [pages[0]!.name] : null,

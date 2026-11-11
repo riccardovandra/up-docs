@@ -14,6 +14,7 @@ import {
 } from "../../../shared/drawio.ts";
 import { ApiError } from "../../api.ts";
 import type { DiagramsApi } from "../../diagrams/diagramsApi.ts";
+import type { DiagramEditorTarget } from "../../diagrams/editorSession.ts";
 
 /** A diagram as a block knows it: no source, and whether this person manages it. */
 export type BlockDiagram = DiagramSummary & { readonly canEdit: boolean };
@@ -160,6 +161,17 @@ export function pageChoices(
  * Give the result to the editor overlay's `onSaved` and `onClose`. Exit without
  * saving reports null, so no block is added (and no diagram was created).
  */
+/**
+ * The editor target for a diagram started from a doc: filed in the doc's
+ * project, in the theme picked in the new-diagram dialog (absent: the project's).
+ */
+export function newDiagramTarget(
+  projectId: string | null,
+  themeId: string | undefined,
+): DiagramEditorTarget {
+  return { kind: "new", projectId, ...(themeId === undefined ? {} : { themeId }) };
+}
+
 export function insertOnFirstSave(
   insert: (diagram: DiagramSummary) => void,
 ): (saved: DiagramSummary | null) => void {

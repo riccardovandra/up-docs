@@ -194,6 +194,43 @@ describe("MCP diagram themes", () => {
     expect(unknown).toMatchObject({ isError: true, body: { error: "not_found" } });
   });
 
+  it("set_diagram_theme restyles from one custom theme to another role to role", async () => {
+    const { mcp, projectId } = await setup();
+    const roleTheme = async (name: string, primary: { fill: string; stroke: string; font: string }) => {
+      const response = await mcp.api.call("POST", "/api/diagram-themes", {
+        body: {
+          name,
+          tokens: { ...UPLIFTED_THEME.tokens, roles: { ...UPLIFTED_THEME.tokens.roles, primary } },
+        },
+        headers: { Cookie: mcp.cookie },
+      });
+      expect(response.status).toBe(201);
+      return ((await response.json()) as { theme: { id: string } }).theme.id;
+    };
+    // Orange sits nearest Uplifted's amber warning by hue; only a role match keeps it primary.
+    const orange = await roleTheme("Acme Orange", { fill: "#ffe1c2", stroke: "#e8701a", font: "#14131b" });
+    const teal = await roleTheme("Teal", { fill: "#d2f1ee", stroke: "#138a80", font: "#14131b" });
+    const created = await mcp.tool("create_drawio", { projectId, title: "Flow", xml: PLAIN });
+    const diagramId = created.body.diagramId as string;
+
+    const first = await mcp.tool("set_diagram_theme", { diagramId, themeId: orange, restyle: true });
+    expect(first.body.restyle.roles.primary).toBe(2);
+    expect(await stored(mcp, diagramId)).toContain("fillColor=#ffe1c2");
+
+    const second = await mcp.tool("set_diagram_theme", { diagramId, themeId: teal, restyle: true });
+    expect(second.isError).toBe(false);
+    expect(second.body.restyle.roles).toMatchObject({ primary: 2, warning: 0 });
+    const xml = await stored(mcp, diagramId);
+    expect(xml).toContain("fillColor=#d2f1ee");
+    expect(xml).toContain("strokeColor=#138a80");
+    expect(xml).not.toContain("#ffe1c2");
+
+    // Back to a built-in: the previous custom theme still maps role to role.
+    const back = await mcp.tool("set_diagram_theme", { diagramId, themeId: "uplifted", restyle: true });
+    expect(back.body.restyle.roles).toMatchObject({ primary: 2, warning: 0 });
+    expect(await stored(mcp, diagramId)).toContain("fillColor=#dbe5f7");
+  });
+
   it("sets a project's default for the admin, and new diagrams follow it", async () => {
     const { mcp, projectId } = await setup();
     const set = await mcp.tool("set_diagram_theme", { projectId, themeId: "uplifted" });

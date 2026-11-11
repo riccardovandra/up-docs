@@ -17,6 +17,7 @@ import {
   drawioNode,
   insertOnFirstSave,
   mergeDiagram,
+  newDiagramTarget,
   otherDocs,
   pageChoices,
   pickerLists,
@@ -407,7 +408,7 @@ describe("Detach a copy", () => {
 
 describe("a new diagram drawn from a doc", () => {
   /** The overlay's session, wired the way the doc page wires it. */
-  function draw() {
+  function draw(themeId?: string) {
     const drawio = fakeDrawio();
     const api = fakeApi();
     const linked: Array<string> = [];
@@ -416,7 +417,7 @@ describe("a new diagram drawn from a doc", () => {
     startEditorSession({
       frame: drawio.frame,
       api,
-      target: { kind: "new", projectId: "doc-project" },
+      target: newDiagramTarget("doc-project", themeId),
       onState: () => undefined,
       onSaved: saved,
       onClose: (diagram) => {
@@ -454,6 +455,25 @@ describe("a new diagram drawn from a doc", () => {
     expect(closed).toHaveLength(1);
     // `onSaved` and `onClose` both report the save; the block still goes in once.
     expect(linked).toEqual([closed[0]!.id]);
+  });
+
+  it("follows the project when no theme is picked, and sets a picked one on the first save", async () => {
+    expect(newDiagramTarget("doc-project", undefined)).toEqual({ kind: "new", projectId: "doc-project" });
+
+    const plain = draw();
+    await settle();
+    plain.drawio.emit({ event: "save", xml: "<mxGraphModel/>", exit: true });
+    await settle();
+    expect(plain.api.calls[0]![0]).toBe("create");
+    expect(plain.api.calls.some((call) => call[0] === "setTheme")).toBe(false);
+
+    const picked = draw("uplifted");
+    await settle();
+    picked.drawio.emit({ event: "save", xml: "<mxGraphModel/>", exit: true });
+    await settle();
+    const created = picked.closed[0]!;
+    expect(picked.api.calls).toContainEqual(["setTheme", created.id, "uplifted"]);
+    expect(picked.linked).toEqual([created.id]);
   });
 
   it("links on the first Save and not again on later saves or the exit", async () => {

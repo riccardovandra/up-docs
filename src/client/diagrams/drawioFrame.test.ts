@@ -5,6 +5,7 @@ import {
   DRAWIO_RENDERER_URL,
   drawioEditorUrl,
   exportDrawioPicture,
+  pictureBorder,
   lightSvg,
   nextDrawioEvent,
   parseDrawioMessage,
@@ -107,6 +108,21 @@ describe("export data", () => {
   });
 });
 
+describe("pictureBorder", () => {
+  const cell = (style: string) =>
+    `<mxGraphModel><root><mxCell id="0"/><mxCell id="1" parent="0"/>` +
+    `<mxCell id="a" style="${style}" vertex="1" parent="1"/></root></mxGraphModel>`;
+
+  it("leaves room for half the widest line, at least 1 px and at most 8", async () => {
+    expect(await pictureBorder(cell("rounded=1;"))).toBe(1);
+    expect(await pictureBorder(cell("rounded=1;strokeWidth=1.5;"))).toBe(1);
+    expect(await pictureBorder(cell("strokeWidth=3;"))).toBe(2);
+    expect(await pictureBorder(cell("strokeWidth=4.5;"))).toBe(3);
+    expect(await pictureBorder(cell("strokeWidth=40;"))).toBe(8);
+    expect(await pictureBorder("not xml")).toBe(1);
+  });
+});
+
 describe("exportDrawioPicture", () => {
   it("asks for the SVG, then the PNG on white", async () => {
     const drawio = fakeDrawio();
@@ -117,6 +133,15 @@ describe("exportDrawioPicture", () => {
       { action: "export", format: "png", background: "#ffffff", spinKey: "saving" },
     ]);
     expect(drawio.listening()).toBe(0);
+  });
+
+  it("asks for the border it is given on both pictures", async () => {
+    const drawio = fakeDrawio();
+    await exportDrawioPicture(drawio.frame, { border: 2 });
+    expect(drawio.posted).toEqual([
+      { action: "export", format: "svg", border: 2 },
+      { action: "export", format: "png", background: "#ffffff", border: 2 },
+    ]);
   });
 
   it("goes on without a PNG when the browser makes none", async () => {

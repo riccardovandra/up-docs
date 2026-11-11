@@ -6,7 +6,7 @@
 
 import type { DrawioThemeConfig } from "../../shared/diagramTheme.ts";
 import { MAX_DIAGRAM_PAGES } from "../../shared/drawio.ts";
-import { drawioPageSources } from "../../shared/drawioModel.ts";
+import { drawioPageSources, uncompressedDrawio } from "../../shared/drawioModel.ts";
 import { trimSvgFonts } from "./svgFonts.ts";
 
 export const DRAWIO_ORIGIN = "https://embed.diagrams.net";
@@ -35,6 +35,8 @@ export type DrawioAction =
       readonly format: "svg" | "png";
       readonly spinKey?: string;
       readonly background?: string;
+      /** Space around the drawing, in pixels. Draw.io crops to the shapes' geometry otherwise. */
+      readonly border?: number;
     }
   /** Clears the frame's "unsaved changes" state after a save. */
   | { readonly action: "status"; readonly modified: boolean };
@@ -232,6 +234,22 @@ export interface DrawioPicture {
   readonly png: string | null;
 }
 
+const MAX_PICTURE_BORDER = 8;
+
+/**
+ * The space a picture of `xml` needs around its shapes: half its widest line,
+ * rounded up, so the outer half of a border is not cut off. Draw.io crops a
+ * picture to the shapes' geometry, and a line is drawn centred on it: at line
+ * width 1.5 the leftmost box lost 0.75 px of its left and top border.
+ */
+export async function pictureBorder(xml: string): Promise<number> {
+  let widest = 1;
+  for (const match of (await uncompressedDrawio(xml)).matchAll(/strokeWidth=(\d+(?:\.\d+)?)/g)) {
+    widest = Math.max(widest, Number(match[1]));
+  }
+  return Math.min(MAX_PICTURE_BORDER, Math.ceil(widest / 2));
+}
+
 const SVG_EXPORT_MS = 20_000;
 const PNG_EXPORT_MS = 15_000;
 
@@ -242,9 +260,16 @@ const PNG_EXPORT_MS = 15_000;
  */
 export async function exportDrawioPicture(
   frame: DrawioFrame,
-  options: { readonly spinKey?: string } = {},
+  options: {
+    readonly spinKey?: string;
+    /** See `pictureBorder`. */
+    readonly border?: number;
+  } = {},
 ): Promise<DrawioPicture> {
-  const spin = options.spinKey === undefined ? {} : { spinKey: options.spinKey };
+  const spin = {
+    ...(options.spinKey === undefined ? {} : { spinKey: options.spinKey }),
+    ...(options.border === undefined ? {} : { border: options.border }),
+  };
   const answered = nextDrawioEvent(frame, "export", {
     timeoutMs: SVG_EXPORT_MS,
     what: "draw the picture",
@@ -294,7 +319,7 @@ export async function drawDrawioPictures(
     const loaded = nextDrawioEvent(frame, "load", { timeoutMs, what: "open the diagram" });
     frame.post({ action: "load", xml: source });
     await loaded;
-    return exportDrawioPicture(frame);
+    return exportDrawioPicture(frame, { border: await pictureBorder(source) });
   };
   if (sources === null || sources.length <= 1) {
     const picture = await draw(xml);
