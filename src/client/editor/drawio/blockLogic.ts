@@ -146,9 +146,13 @@ export function pageChoices(
   current: string | null,
 ): ReadonlyArray<string> {
   const named = (diagram?.picturePages ?? []).filter((name): name is string => name !== null);
-  if (named.length < 2) return [];
   const names = [...new Set(named.map(pageNameLine))];
-  return current !== null && pageIndexOf(names, current) === -1 ? [...names, current] : names;
+  // A block whose page is gone keeps the choice while any page is left to move it to.
+  const choices =
+    current !== null && names.length > 0 && pageIndexOf(names, current) === -1
+      ? [...names, current]
+      : names;
+  return choices.length < 2 ? [] : choices;
 }
 
 /**

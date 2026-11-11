@@ -374,6 +374,9 @@ describe("pages", () => {
       'Page 3 ("One"): page 1 has the same name; give every page its own.',
       'Page 4 ("Bad"): This page is saved compressed and could not be decoded.',
     ]);
+    expect(await problems(`<mxfile>${page("One", box("a", "A"))}<diagram name="Two"><notAModel/></diagram></mxfile>`)).toEqual([
+      'Page 2 ("Two"): This page holds no <mxGraphModel>.',
+    ]);
     const many = Array.from({ length: 21 }, (_, index) => page(`P${index}`, "")).join("");
     expect((await problems(`<mxfile>${many}</mxfile>`))[0]).toContain("at most 20");
   });

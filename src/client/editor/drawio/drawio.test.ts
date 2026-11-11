@@ -206,6 +206,8 @@ describe("linking, relinking and removing a block", () => {
     expect(pageChoices({ picturePages: null }, "A")).toEqual([]);
     expect(pageChoices({ picturePages: ["A", null, "B"] }, null)).toEqual(["A", "B"]);
     expect(pageChoices({ picturePages: ["A", "B"] }, "Gone")).toEqual(["A", "B", "Gone"]);
+    // One page left after the block's page was deleted: still a way back to it.
+    expect(pageChoices({ picturePages: ["A"] }, "Gone")).toEqual(["A", "Gone"]);
   });
 
   it("removes only the block, and leaves an empty line when it was the whole tab", () => {

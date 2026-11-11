@@ -424,7 +424,12 @@ async function readDiagramElement(
   const model = diagram.children.find((child) => child.name === "mxGraphModel");
   if (model) return readPage({ name, id, compressed: false }, model);
   const content = diagram.text.trim();
-  if (content === "") return emptyPage({ name, id, compressed: false });
+  if (content === "") {
+    // A page with elements but no model is not one Draw.io would draw.
+    return diagram.children.length > 0
+      ? emptyPage({ name, id, compressed: false }, "This page holds no <mxGraphModel>.")
+      : emptyPage({ name, id, compressed: false });
+  }
   const head = { name, id, compressed: true };
   const inner = await inflatePage(content, budget);
   if (inner === null) {
