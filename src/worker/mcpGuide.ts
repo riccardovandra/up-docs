@@ -128,7 +128,7 @@ Edit kinds (exact keys; rows are 1-based numbers or "3:5" spans, columns letters
 - writeCells {sheet, topLeft: "A1", rows: [[...], [...]]}: a block of rows from topLeft. Writing past the edge grows the tab.
 - formatCells {sheet, ranges: ["A1:D1"], format}. format keys: numberFormat {pattern}, alignment {horizontal: left|center|right, wrap}, fillColor "#rrggbb", font {bold, italic, underline, strikethrough, color "#rrggbb", size}. A key sets, null removes, groups merge.
 - addSheet {name}, renameSheet {sheet, name} (formulas follow the new name), moveSheets {sheets: [..], afterSheet: name or null for the front}, deleteSheet {sheet} (references to it turn #REF!).
-- insertRows {sheet, besideRow: 3, side: "before"|"after", count}, insertColumns {sheet, besideColumn: "C", side, count}, deleteRows {sheet, rows: [4, "7:9"]}, deleteColumns {sheet, columns: ["C", "E:F"]}. References shift; a deleted target turns #REF!.
+- insertRows {sheet, besideRow: 3, side: "before"|"after", count}, insertColumns {sheet, besideColumn: "C", side, count}, deleteRows {sheet, rows: [4, "7:9"]}, deleteColumns {sheet, columns: ["C", "E:F"]}. References shift; a deleted target turns #REF!. New rows and columns copy the formats (not the values) of the one before them, or after for row 1 and column A.
 - setColumnWidths {sheet, columns, widthInPixels 1-2000} (default 104), setRowHeights {sheet, rows, heightInPixels} (default 28).
 - setSheetSettings {sheet, settings: {lastFrozenRow, lastFrozenColumn, areGridlinesHidden}}: lastFrozenRow 1 freezes the header row, 0 unfreezes.
 - sortRows {sheet, rows: ["2:20"], byColumn: "C", direction: "ascending"|"descending"}: by computed value, blanks last. Leave the header out of rows.

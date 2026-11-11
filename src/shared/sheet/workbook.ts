@@ -595,6 +595,7 @@ function insert(draft: Draft, sheet: MutableSheet, axis: Axis, at: number, count
   );
   const shift = (i: number) => (i >= at ? i + count : i);
   draft.replaceCells(sheet, moveCells(sheet, axis, shift));
+  copyNeighbourFormats(draft, sheet, axis, at, count);
   if (axis === "row") {
     sheet.rowCount += count;
     sheet.rowHeights = shiftSparse(sheet.rowHeights, shift);
@@ -609,6 +610,27 @@ function insert(draft: Draft, sheet: MutableSheet, axis: Axis, at: number, count
     }
   }
   draft.markMeta(sheet);
+}
+
+/**
+ * New rows or columns take the formats (never the inputs) of their neighbour,
+ * as spreadsheets do: the one before them, or the one after when they open
+ * the sheet. Skipped whole when the copies would pass the workbook's cell limit.
+ */
+function copyNeighbourFormats(draft: Draft, sheet: MutableSheet, axis: Axis, at: number, count: number): void {
+  const source = at > 0 ? at - 1 : at + count;
+  const formats: Array<{ readonly other: number; readonly format: CellFormat }> = [];
+  for (const [key, cell] of sheet.cells) {
+    if (!cell.format) continue;
+    if ((axis === "row" ? keyRow(key) : keyCol(key)) !== source) continue;
+    formats.push({ other: axis === "row" ? keyCol(key) : keyRow(key), format: cell.format });
+  }
+  if (formats.length === 0 || draft.cellCount + formats.length * count > MAX_WORKBOOK_CELLS) return;
+  for (let i = at; i < at + count; i++) {
+    for (const { other, format } of formats) {
+      draft.setCell(sheet, axis === "row" ? cellKey(i, other) : cellKey(other, i), { input: "", format });
+    }
+  }
 }
 
 function remove(draft: Draft, sheet: MutableSheet, axis: Axis, indices: ReadonlyArray<number>): void {

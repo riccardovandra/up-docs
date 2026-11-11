@@ -142,6 +142,16 @@ export interface SheetPresence {
   readonly activeCell: string | null;
 }
 
+/**
+ * Liveness: a page re-sends its presence every `PRESENCE_HEARTBEAT_MS`. A page
+ * the room has not heard from for `PRESENCE_EXPIRY_MS` is gone (a closed
+ * laptop, a page unloaded without a close frame): the room announces it left,
+ * and pages drop a cursor they have not heard of for as long. The expiry
+ * outlasts a background tab, whose timers a browser may run once a minute.
+ */
+export const PRESENCE_HEARTBEAT_MS = 20_000;
+export const PRESENCE_EXPIRY_MS = 75_000;
+
 /** Colours a presence can take; `colorIndex` is below this. */
 export const PRESENCE_COLORS = 8;
 

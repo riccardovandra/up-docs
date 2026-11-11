@@ -67,8 +67,23 @@ export function useSheetRoom(
     };
     connect();
 
+    // An unloading page may drop its socket without a close frame, which would
+    // leave its cursor in the room until it expires. Say so and close now. A page
+    // restored from the back-forward cache reconnects through the close handler.
+    const leave = () => {
+      if (socket?.readyState !== WebSocket.OPEN) return;
+      try {
+        socket.send(JSON.stringify({ type: "presence.clear" }));
+        socket.close(1000, "page hidden");
+      } catch {
+        // Already closing.
+      }
+    };
+    window.addEventListener("pagehide", leave);
+
     return () => {
       closed = true;
+      window.removeEventListener("pagehide", leave);
       if (ping) clearInterval(ping);
       if (retry) clearTimeout(retry);
       socket?.close();

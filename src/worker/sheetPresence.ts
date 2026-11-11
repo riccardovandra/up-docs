@@ -6,6 +6,7 @@
 import {
   parseSheetClientMessage,
   presenceColorIndex,
+  PRESENCE_EXPIRY_MS,
   type SheetPresence,
   type SheetRoomMessage,
 } from "../shared/sheets.ts";
@@ -33,6 +34,8 @@ export const PRESENCE_WINDOW_MS = 1000;
 
 interface Attachment {
   readonly presence: SheetPresence;
+  /** When the room last heard from the page; older than `PRESENCE_EXPIRY_MS` is gone. */
+  readonly seenAt: number;
   /** Flood control: when the current window started and how many updates it took. */
   readonly windowStart: number;
   readonly count: number;
@@ -55,6 +58,22 @@ function sendTo(socket: PresenceSocket, message: SheetRoomMessage): void {
   }
 }
 
+const isLive = (attachment: Attachment, now: number) =>
+  typeof attachment.seenAt === "number" && now - attachment.seenAt < PRESENCE_EXPIRY_MS;
+
+/**
+ * Drops every page the room has not heard from in time, as if it had closed.
+ * Its socket may be dead without a close (an unload, a lost network), so the
+ * runtime may never report it. A page that was only quiet and speaks again
+ * joins afresh (see `receivePresence`).
+ */
+function sweepPresence<S extends PresenceSocket>(host: PresenceHost<S>, now: number): void {
+  for (const socket of host.sockets()) {
+    const attachment = attachmentOf(socket);
+    if (attachment && !isLive(attachment, now)) leavePresence(host, socket);
+  }
+}
+
 function relay<S extends PresenceSocket>(host: PresenceHost<S>, from: S, message: SheetRoomMessage): void {
   for (const socket of host.sockets()) {
     if (socket !== from && attachmentOf(socket)) sendTo(socket, message);
@@ -69,6 +88,8 @@ export async function joinPresence<S extends PresenceSocket>(host: PresenceHost<
   const userId = host.userOf(socket);
   if (!userId) return false;
   const name = await host.nameOf(userId);
+  const now = host.now();
+  sweepPresence(host, now);
   const presence: SheetPresence = {
     connectionId: crypto.randomUUID(),
     userId,
@@ -78,7 +99,7 @@ export async function joinPresence<S extends PresenceSocket>(host: PresenceHost<
     range: null,
     activeCell: null,
   };
-  socket.serializeAttachment({ presence, windowStart: 0, count: 0 } satisfies Attachment);
+  socket.serializeAttachment({ presence, seenAt: now, windowStart: 0, count: 0 } satisfies Attachment);
   const presences: SheetPresence[] = [];
   for (const other of host.sockets()) {
     const attachment = other === socket ? null : attachmentOf(other);
@@ -97,28 +118,34 @@ export async function receivePresence<S extends PresenceSocket>(
 ): Promise<void> {
   const message = parseSheetClientMessage(text);
   if (!message) return;
+  const now = host.now();
   let attachment = attachmentOf(socket);
+  if (attachment && !isLive(attachment, now)) {
+    // Quiet past the expiry: the others are told it left, and it joins again below.
+    leavePresence(host, socket);
+    attachment = null;
+  }
   if (!attachment) {
-    // A socket opened before presence existed, or one whose join never ran.
+    // A socket opened before presence existed, one whose join never ran, or one that expired.
     if (!(await joinPresence(host, socket))) return;
     attachment = attachmentOf(socket);
     if (!attachment) return;
   }
+  sweepPresence(host, now);
   // The identity is the one the socket joined with, from its tag.
   const current = attachment.presence;
-  const now = host.now();
   const fresh = now - attachment.windowStart >= PRESENCE_WINDOW_MS;
   const windowStart = fresh ? now : attachment.windowStart;
   const count = (fresh ? 0 : attachment.count) + 1;
   if (count > PRESENCE_BURST) {
-    socket.serializeAttachment({ ...attachment, windowStart, count } satisfies Attachment);
+    socket.serializeAttachment({ ...attachment, seenAt: now, windowStart, count } satisfies Attachment);
     return;
   }
   const presence: SheetPresence =
     message.type === "presence"
       ? { ...current, tabId: message.tabId, range: message.range, activeCell: message.activeCell }
       : { ...current, tabId: null, range: null, activeCell: null };
-  socket.serializeAttachment({ presence, windowStart, count } satisfies Attachment);
+  socket.serializeAttachment({ presence, seenAt: now, windowStart, count } satisfies Attachment);
   relay(host, socket, { type: "sheet.presence", ...presence });
 }
 
