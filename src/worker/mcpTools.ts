@@ -84,6 +84,14 @@ import { importDeps, inviteByEmail, type ApiDeps } from "./api.ts";
 import type { Principal } from "./auth.ts";
 import * as Comments from "./comments.ts";
 import * as Diagrams from "./diagrams.ts";
+import * as DiagramThemes from "./diagramThemes.ts";
+import { isDiagramThemeId, restyleDiagram } from "../shared/diagramTheme.ts";
+import {
+  effectiveThemeBrief,
+  ROLE_COLOUR_FORMAT,
+  shouldApplyTheme,
+  themeListing,
+} from "./mcpThemes.ts";
 import * as DocThreads from "./docThreads.ts";
 import * as Docs from "./docs.ts";
 import * as ImageImport from "./imageImport.ts";
@@ -1678,7 +1686,7 @@ export const TOOLS = [
   {
     name: "create_drawio",
     description:
-      'Draw a new Draw.io diagram into the library from Draw.io XML (format_guide {topic: "drawio"} first). File it like create_doc: projectKey (with projectName if the project is new) or projectId; omit both for no project. Returns the id, the link and `block`, the exact ```t3-drawio block to paste into a doc tab. It opens in the same editor as a hand-drawn diagram. Its picture appears the first time a person who manages the diagram opens it.',
+      'Draw a new Draw.io diagram into the library from Draw.io XML (format_guide {topic: "drawio"} first). File it like create_doc: projectKey (with projectName if the project is new) or projectId; omit both for no project. Returns the id, the link and `block`, the exact ```t3-drawio block to paste into a doc tab. It opens in the same editor as a hand-drawn diagram. Its picture appears the first time a person who manages the diagram opens it. `theme` gives the project\'s diagram theme and its style lines; when the project has a theme and no cell sets its own fillColor, strokeColor or fontColor, the XML is restyled to it before it is stored (applyTheme: true always restyles, false never).',
     inputSchema: {
       type: "object",
       properties: {
@@ -1690,6 +1698,11 @@ export const TOOLS = [
           type: "string",
           description:
             'The whole diagram as uncompressed Draw.io XML: one <mxGraphModel> for one page, or an <mxfile> holding a <diagram name="..."> per page, each with its <mxGraphModel>.',
+        },
+        applyTheme: {
+          type: "boolean",
+          description:
+            "true: restyle the XML to the project's theme before storing it. false: store it as written. Left out: restyle only when the project has a theme and no cell sets a colour.",
         },
       },
       required: ["title", "xml"],
@@ -1718,6 +1731,34 @@ export const TOOLS = [
         },
       },
       required: ["diagramId", "baseVersion"],
+    },
+  },
+  {
+    name: "list_diagram_themes",
+    description:
+      'List the Draw.io diagram themes you can use: the built-ins (Neutral, the default, and Uplifted) and your own custom themes. Each gives its themeId, its default box role and every role\'s colours as "fill/line/text". People make and edit themes in Settings; agents only choose them. read_drawio and create_drawio give a diagram\'s theme with the exact style lines to write.',
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "set_diagram_theme",
+    description:
+      "Choose the theme of one Draw.io diagram you manage (diagramId), or the default theme of a project's diagrams (projectKey or projectId; workspace admin only). themeId null makes the diagram follow its project again, or the project fall back to Neutral. Setting a theme changes no drawing: pass restyle: true (diagrams only) to also restyle the current version to the theme and save it as a new version; the result has the restyle summary and the new version.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        diagramId: {
+          type: "string",
+          description: "The diagram's id, or its link.",
+        },
+        projectKey: { type: "string" },
+        projectId: { type: "string" },
+        themeId: {
+          type: ["string", "null"],
+          description: "A themeId from list_diagram_themes, or null.",
+        },
+        restyle: { type: "boolean" },
+      },
+      required: ["themeId"],
     },
   },
   {
@@ -2814,6 +2855,9 @@ const handlers: Record<
         ? { usedInOtherDocs: usage.otherDocs }
         : {}),
       ...describeDrawio(model, FULL_DRAWIO),
+      theme: effectiveThemeBrief(
+        await DiagramThemes.effectiveDiagramTheme(ctx.deps.db, diagramId),
+      ),
       picture: picture.note,
       ...(args.includeXml === true
         ? {
@@ -2834,8 +2878,34 @@ const handlers: Record<
 
   create_drawio: async (args, ctx) => {
     const title = requireString(args, "title", MAX_DIAGRAM_TITLE_LENGTH);
-    const { xml, model } = await drawioXmlArg(args);
+    if (args.applyTheme != null && typeof args.applyTheme !== "boolean") {
+      fail("invalid_argument", '"applyTheme" must be true or false.');
+    }
+    const applyTheme = args.applyTheme ?? undefined;
+    const written = await drawioXmlArg(args);
     const projectId = await targetProject(ctx, args);
+    const effective = await load(
+      DiagramThemes.effectiveProjectTheme(ctx.deps.db, projectId),
+      "project",
+    );
+    let { xml, model } = written;
+    let applied: string;
+    if (await shouldApplyTheme(applyTheme, effective, xml)) {
+      const restyled = await restyleDiagram(xml, effective.theme);
+      if (!restyled.ok) {
+        fail("invalid_xml", `The Draw.io XML could not be restyled (${restyled.error}). Nothing was saved.`, DRAWIO_GUIDE);
+      }
+      xml = restyled.xml;
+      model = await readDrawio(xml);
+      applied = `Restyled to the theme "${effective.theme.name}" before saving: ${restyled.summary.changed} cells changed. Write new cells with theme.styleGuide.`;
+    } else {
+      applied =
+        applyTheme === false
+          ? "Stored as written (applyTheme: false)."
+          : effective.source === "default"
+            ? "Stored as written: the project has no theme of its own (Neutral, Draw.io's own look)."
+            : `Stored as written, keeping the colours its cells set. set_diagram_theme {diagramId, themeId: "${effective.theme.id}", restyle: true} restyles it to the theme.`;
+    }
     const diagram = await load(
       Diagrams.createDiagram(ctx.deps.db, {
         projectId,
@@ -2846,7 +2916,10 @@ const handlers: Record<
       }),
       "project",
     );
-    return drawioWritten(ctx, diagram, model);
+    return {
+      ...drawioWritten(ctx, diagram, model),
+      theme: { ...effectiveThemeBrief(effective), applied },
+    };
   },
 
   update_drawio: async (args, ctx) => {
@@ -2912,14 +2985,116 @@ const handlers: Record<
       "Draw.io diagram",
     );
     if (!result.ok) return conflict(result.conflict.version);
-    return drawioWritten(
-      ctx,
-      result.diagram,
-      xml === undefined || xml !== written?.xml
-        ? await readDrawio(result.diagram.xml)
-        : written.model,
-      notes,
-    );
+    return {
+      ...drawioWritten(
+        ctx,
+        result.diagram,
+        xml === undefined || xml !== written?.xml
+          ? await readDrawio(result.diagram.xml)
+          : written.model,
+        notes,
+      ),
+      theme: effectiveThemeBrief(
+        await DiagramThemes.effectiveDiagramTheme(ctx.deps.db, diagramId),
+      ),
+    };
+  },
+
+  list_diagram_themes: async (_args, ctx) => {
+    const { userId } = ctx.principal;
+    const list = await DiagramThemes.listDiagramThemes(ctx.deps.db, userId);
+    return {
+      themes: list.themes.map((theme) => themeListing(theme, userId)),
+      defaultThemeId: list.defaultThemeId,
+      roleColours: ROLE_COLOUR_FORMAT,
+    };
+  },
+
+  set_diagram_theme: async (args, ctx) => {
+    const { db } = ctx.deps;
+    const { userId } = ctx.principal;
+    if (!Object.hasOwn(args, "themeId") || (args.themeId !== null && !isDiagramThemeId(args.themeId))) {
+      fail(
+        "invalid_argument",
+        '"themeId" must be a themeId from list_diagram_themes, or null to follow the default.',
+      );
+    }
+    const themeId = args.themeId as string | null;
+    if (args.restyle != null && typeof args.restyle !== "boolean") {
+      fail("invalid_argument", '"restyle" must be true or false.');
+    }
+    const forProject = args.projectId != null || args.projectKey != null;
+    if (forProject === (args.diagramId != null)) {
+      fail("invalid_argument", 'Pass "diagramId", or "projectKey" or "projectId" for a project\'s default, not both.');
+    }
+    const usable = async (id: string) => {
+      try {
+        return await DiagramThemes.requireUsableDiagramTheme(db, { themeId: id, userId });
+      } catch (cause) {
+        if (cause instanceof Docs.NotFoundError) {
+          return fail("not_found", "No theme with that id that you can use. list_diagram_themes lists them.");
+        }
+        throw cause;
+      }
+    };
+
+    if (forProject) {
+      if (args.restyle === true) {
+        fail("invalid_argument", '"restyle" restyles one diagram: pass it with "diagramId".');
+      }
+      const project = await existingProject(ctx, args);
+      if (!Access.isAdmin(userId)) {
+        fail("forbidden", "Only the workspace admin sets a project's default diagram theme. set_diagram_theme {diagramId, themeId} sets one diagram's.");
+      }
+      if (themeId !== null) await usable(themeId);
+      await DiagramThemes.setProjectDiagramTheme(db, { projectId: project.id, themeId });
+      return {
+        projectId: project.id,
+        theme: effectiveThemeBrief(await DiagramThemes.effectiveProjectTheme(db, project.id)),
+        note: "New diagrams in the project start with this theme; diagrams with a theme of their own keep it. No drawing was changed.",
+      };
+    }
+
+    const diagramId = drawioIdArg(args);
+    const { diagram } = await drawioWith(ctx, diagramId, "edit");
+    if (themeId !== null) await usable(themeId);
+    await DiagramThemes.setDiagramTheme(db, { diagramId, themeId });
+    const effective = await DiagramThemes.effectiveDiagramTheme(db, diagramId);
+    const theme = effectiveThemeBrief(effective);
+    if (args.restyle !== true) {
+      return {
+        diagramId,
+        version: diagram.version,
+        theme,
+        note: 'No drawing was changed. Pass restyle: true to restyle it to the theme, or write new cells with theme.styleGuide.',
+      };
+    }
+    const result = await DiagramThemes.restyleStoredDiagram(db, {
+      diagram,
+      theme: effective.theme,
+      baseVersion: diagram.version,
+      now: ctx.deps.now(),
+    });
+    if (!result.ok) {
+      if ("invalidXml" in result) {
+        fail("invalid_xml", `The theme is set, but the diagram's XML could not be read to restyle it: ${result.invalidXml}.`);
+      }
+      fail(
+        "version_conflict",
+        "The theme is set, but someone saved the diagram while it was being restyled. Call set_diagram_theme again with restyle: true.",
+        { currentVersion: result.conflict.version },
+      );
+    }
+    return {
+      diagramId,
+      version: result.diagram.version,
+      theme,
+      restyle: result.summary,
+      note:
+        result.summary.changed === 0
+          ? "Already in the theme: nothing changed, so the version is the same."
+          : `Restyled ${result.summary.changed} cells and saved them as version ${result.diagram.version}. Its picture is redrawn the next time someone opens it or a doc that links it.`,
+    };
   },
 
   prepare_claude_doc_push: async (args, ctx) => {
