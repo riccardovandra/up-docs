@@ -86,8 +86,15 @@ export function parseDrawioMessage(data: unknown): DrawioEvent | null {
  * The editor people draw in: Save & Exit and Exit, no separate Save button. It
  * asks for its configuration first (`configure=1`): the session answers with
  * the diagram's theme, so new shapes and connections come out styled.
+ *
+ * `page` (counted from 0) is the page it opens on. The `load` action takes no
+ * page; Draw.io reads the `page` URL parameter when it opens the file, and
+ * holds a number past the last page to the last page.
  */
-export function drawioEditorUrl(options: { readonly dark: boolean }): string {
+export function drawioEditorUrl(options: {
+  readonly dark: boolean;
+  readonly page?: number;
+}): string {
   const query = new URLSearchParams({
     embed: "1",
     proto: "json",
@@ -100,6 +107,7 @@ export function drawioEditorUrl(options: { readonly dark: boolean }): string {
     // Said either way, so the editor follows this app and not the system.
     dark: options.dark ? "1" : "0",
   });
+  if (options.page !== undefined && options.page > 0) query.set("page", String(options.page));
   return `${DRAWIO_ORIGIN}/?${query}`;
 }
 
@@ -139,13 +147,21 @@ export function mountDrawioFrame(options: {
   }
   frame.src = options.url;
 
+  // Draw.io focuses itself as it starts and loads. A hidden frame hands focus
+  // back, so the page's own keys (such as PageUp/PageDown on page tabs) still work.
+  const giveBackFocus = () => {
+    if (options.hidden && document.activeElement === frame) frame.blur();
+  };
+  const onBlur = () => setTimeout(giveBackFocus);
   const handlers = new Set<(event: DrawioEvent) => void>();
   const onMessage = (message: MessageEvent) => {
     if (message.source !== frame.contentWindow || message.origin !== DRAWIO_ORIGIN) return;
+    giveBackFocus();
     const event = parseDrawioMessage(message.data);
     if (event) for (const handler of [...handlers]) handler(event);
   };
   window.addEventListener("message", onMessage);
+  if (options.hidden) window.addEventListener("blur", onBlur);
   options.parent.append(frame);
 
   return {
@@ -156,6 +172,7 @@ export function mountDrawioFrame(options: {
     },
     remove: () => {
       window.removeEventListener("message", onMessage);
+      window.removeEventListener("blur", onBlur);
       handlers.clear();
       frame.remove();
     },

@@ -28,6 +28,7 @@ import type { DrawioPageLayout } from "../../shared/drawioModel.ts";
 import { authorLabel, CommentComposer } from "../comments/CommentCard.tsx";
 import { DiagramPicture, type DiagramPictureInfo } from "./DiagramPicture.tsx";
 import type { NewDiagramAnchor } from "./diagramCommentsApi.ts";
+import { threadsOnPage } from "./pageTabsLogic.ts";
 
 interface Box {
   readonly left: number;
@@ -183,7 +184,7 @@ export function DiagramReviewCanvas(props: {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  const onPage = threads.filter((thread) => thread.anchor.page === page);
+  const onPage = threadsOnPage(threads, page);
   const shown = onPage.filter((thread) => review || thread.resolvedAt === null);
   const number = new Map(threads.map((thread, index) => [thread.id, index + 1]));
 
