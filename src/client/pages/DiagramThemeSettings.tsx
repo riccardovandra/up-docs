@@ -28,8 +28,10 @@ import {
   setName,
   setRoleColour,
   setToken,
+  themeRowActions,
   WEB_SAFE_FONTS,
   type ThemeDraft,
+  type ThemeRowAction,
 } from "../diagrams/themeEditor.ts";
 import { themesApi } from "../diagrams/themesApi.ts";
 import "../diagrams/diagrams.css";
@@ -52,7 +54,8 @@ const problemOf = (cause: unknown) => {
   if (cause instanceof ApiError) {
     const message = (cause.body as { readonly message?: unknown }).message;
     if (typeof message === "string" && message !== "") return message;
-    if (cause.body.error === "theme_limit") return "You have reached the most custom themes you can keep.";
+    if (cause.body.error === "theme_limit") return "The workspace has reached the most custom themes it can keep.";
+    if (cause.body.error === "admin_only") return "Only the admin changes diagram themes.";
   }
   return "That did not work. Check your connection and try again.";
 };
@@ -168,13 +171,14 @@ const swatches = (theme: DiagramTheme) => (
   </span>
 );
 
-/** One theme open in the editor: a new one, a copy, a custom one to change, or a built-in to look at. */
+/** One theme open in the editor: a new one, a copy, a custom one to change, or one to look at. */
 type Open =
   | { readonly kind: "new" | "edit"; readonly themeId: string | null; readonly saved: ThemeDraft }
   | { readonly kind: "view"; readonly theme: DiagramTheme };
 
 function ThemeEditor(props: {
   readonly open: Open;
+  readonly admin: boolean;
   readonly onSaved: (theme: CustomDiagramTheme) => void;
   readonly onClose: () => void;
   readonly onDuplicate: (theme: DiagramTheme) => void;
@@ -367,13 +371,19 @@ function ThemeEditor(props: {
         <div className="theme-editor-actions">
           {readOnly ? (
             <>
-              <span className="muted">Built-in themes cannot be changed.</span>
+              <span className="muted">
+                {props.admin
+                  ? "Built-in themes cannot be changed."
+                  : "Only the admin changes themes. You can use any of them on your diagrams."}
+              </span>
               <button type="button" className="button secondary" onClick={props.onClose}>
                 Close
               </button>
-              <button type="button" className="button" onClick={() => props.onDuplicate(open.theme)}>
-                Duplicate to change
-              </button>
+              {props.admin ? (
+                <button type="button" className="button" onClick={() => props.onDuplicate(open.theme)}>
+                  Duplicate to change
+                </button>
+              ) : null}
             </>
           ) : (
             <>
@@ -398,6 +408,13 @@ function ThemeEditor(props: {
     </form>
   );
 }
+
+const ACTION_LABELS: Readonly<Record<ThemeRowAction, string>> = {
+  view: "View",
+  edit: "Edit",
+  duplicate: "Duplicate",
+  delete: "Delete",
+};
 
 const NO_THEME = "";
 
@@ -486,8 +503,9 @@ function ProjectDefaults(props: { readonly themes: ReadonlyArray<DiagramTheme> }
 }
 
 /**
- * Settings, Diagram themes: the built-ins and the person's own themes, an
- * editor with a live preview, and for the admin each project's default.
+ * Settings, Diagram themes: the built-ins and the workspace's custom themes.
+ * The admin gets the editor with a live preview and each project's default;
+ * everyone else views the themes read-only.
  */
 export function DiagramThemeSettings(props: { readonly admin: boolean }) {
   const [list, setList] = useState<DiagramThemeList | null>(null);
@@ -565,60 +583,48 @@ export function DiagramThemeSettings(props: { readonly admin: boolean }) {
               </span>
             </span>
             <span className="theme-row-actions">
-              {theme.builtIn ? (
+              {themeRowActions(theme, props.admin).map((action) => (
                 <button
+                  key={action}
                   type="button"
-                  className="link-button"
-                  onClick={() => setOpen({ kind: "view", theme })}
+                  className={action === "delete" ? "link-button danger" : "link-button"}
+                  onClick={() => {
+                    if (action === "view") setOpen({ kind: "view", theme });
+                    else if (action === "edit")
+                      setOpen({ kind: "edit", themeId: theme.id, saved: draftOf(theme) });
+                    else if (action === "duplicate") duplicate(theme);
+                    else void remove(theme);
+                  }}
                 >
-                  View
+                  {ACTION_LABELS[action]}
                 </button>
-              ) : (
-                <button
-                  type="button"
-                  className="link-button"
-                  onClick={() =>
-                    setOpen({ kind: "edit", themeId: theme.id, saved: draftOf(theme) })
-                  }
-                >
-                  Edit
-                </button>
-              )}
-              <button type="button" className="link-button" onClick={() => duplicate(theme)}>
-                Duplicate
-              </button>
-              {theme.builtIn ? null : (
-                <button
-                  type="button"
-                  className="link-button danger"
-                  onClick={() => void remove(theme)}
-                >
-                  Delete
-                </button>
-              )}
+              ))}
             </span>
           </li>
         ))}
       </ul>
-      <div className="inline-form">
-        <button
-          type="button"
-          className="button secondary"
-          onClick={() => setOpen({ kind: "new", themeId: null, saved: blankDraft(names) })}
-        >
-          New theme
-        </button>
-        {notice ? (
-          <span className="muted" role="status">
-            {notice}
-          </span>
-        ) : null}
-      </div>
+      {props.admin ? (
+        <div className="inline-form">
+          <button
+            type="button"
+            className="button secondary"
+            onClick={() => setOpen({ kind: "new", themeId: null, saved: blankDraft(names) })}
+          >
+            New theme
+          </button>
+          {notice ? (
+            <span className="muted" role="status">
+              {notice}
+            </span>
+          ) : null}
+        </div>
+      ) : null}
       <div ref={editor}>
         {open ? (
           <ThemeEditor
             key={open.kind === "view" ? `view-${open.theme.id}` : `${open.kind}-${open.themeId ?? open.saved.name}`}
             open={open}
+            admin={props.admin}
             onClose={() => setOpen(null)}
             onDuplicate={duplicate}
             onSaved={(theme) => {

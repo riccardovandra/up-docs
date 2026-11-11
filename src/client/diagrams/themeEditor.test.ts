@@ -18,6 +18,7 @@ import {
   isChanged,
   previewModel,
   setFont,
+  themeRowActions,
   setRoleColour,
   setToken,
   THEME_SAMPLE_XML,
@@ -156,5 +157,19 @@ describe("describeRestyle", () => {
     expect(describeRestyle({ ...base, pages: 2, unreadablePages: 1, shapes: 1 })).toBe(
       "1 box, 5 arrows on 2 pages: 17 items change. 1 page could not be read and stays as it is.",
     );
+  });
+});
+
+describe("Settings theme rows", () => {
+  const custom: DiagramTheme = { ...UPLIFTED_THEME, id: "custom01", name: "Client", builtIn: false };
+
+  it("gives a non-admin View only, on built-in and custom themes alike", () => {
+    expect(themeRowActions(NEUTRAL_THEME, false)).toEqual(["view"]);
+    expect(themeRowActions(custom, false)).toEqual(["view"]);
+  });
+
+  it("gives the admin the full editor", () => {
+    expect(themeRowActions(NEUTRAL_THEME, true)).toEqual(["view", "duplicate"]);
+    expect(themeRowActions(custom, true)).toEqual(["edit", "duplicate", "delete"]);
   });
 });

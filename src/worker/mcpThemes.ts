@@ -15,7 +15,7 @@ import { rewriteDrawio } from "../shared/drawioModel.ts";
 export const ROLE_COLOUR_FORMAT = "fill/line/text";
 
 /** One theme for list_diagram_themes: its role colours as "fill/line/text", and its look in a line. */
-export function themeListing(theme: DiagramTheme, userId: string) {
+export function themeListing(theme: DiagramTheme) {
   const { tokens } = theme;
   const roles = Object.fromEntries(
     DIAGRAM_THEME_ROLES.map((role) => {
@@ -23,12 +23,10 @@ export function themeListing(theme: DiagramTheme, userId: string) {
       return [role, `${fill}/${stroke}/${font}`];
     }),
   ) as Record<DiagramThemeRole, string>;
-  const created = "createdBy" in theme ? (theme.createdBy as string | null) : null;
   return {
     themeId: theme.id,
     name: theme.name,
     builtIn: theme.builtIn,
-    ...(theme.builtIn ? {} : { mine: created === userId }),
     defaultRole: tokens.defaultRole,
     roles,
     look:

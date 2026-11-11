@@ -362,10 +362,7 @@ async function handleProject(
     if (themeId === false || themeId === undefined) return error(400, "invalid_theme_id");
     await Docs.getProject(deps.db, id);
     if (themeId !== null) {
-      await DiagramThemes.requireUsableDiagramTheme(deps.db, {
-        themeId,
-        userId: route.userId,
-      });
+      await DiagramThemes.requireUsableDiagramTheme(deps.db, { themeId });
     }
     await DiagramThemes.setProjectDiagramTheme(deps.db, { projectId: id, themeId });
     return json(await DiagramThemes.effectiveProjectTheme(deps.db, id));
@@ -1017,9 +1014,9 @@ function themeIdArg(value: unknown): string | null | undefined | false {
 }
 
 /**
- * Diagram themes, under `/api/diagram-themes`. Everyone signed in lists the
- * built-ins and their own custom themes (the admin: all) and makes custom
- * themes; a custom theme's creator and the admin change and delete it.
+ * Diagram themes, under `/api/diagram-themes`. Everyone signed in lists and
+ * reads the built-ins and every custom theme; only the workspace admin
+ * creates, changes and deletes custom themes (others get 403 admin_only).
  * `effective?projectId=<id>|none` is the theme a new diagram there starts with.
  */
 async function handleDiagramThemes(
@@ -1036,8 +1033,12 @@ async function handleDiagramThemes(
   const userId = route.principal.userId;
   const now = deps.now();
   const invalid = (message: string) => json({ error: "invalid_theme", message }, 400);
+  // Writes are the admin's: refused with 403 admin_only before the body is read.
+  if (method === "POST" || method === "PATCH" || method === "DELETE") {
+    DiagramThemes.requireThemeAdmin(userId);
+  }
 
-  if (!id && method === "GET") return json(await DiagramThemes.listDiagramThemes(deps.db, userId));
+  if (!id && method === "GET") return json(await DiagramThemes.listDiagramThemes(deps.db));
 
   if (!id && method === "POST") {
     const body = await readJson(request);
@@ -1068,7 +1069,7 @@ async function handleDiagramThemes(
 
   if (method === "GET") {
     return json({
-      theme: await DiagramThemes.requireUsableDiagramTheme(deps.db, { themeId: id, userId }),
+      theme: await DiagramThemes.requireUsableDiagramTheme(deps.db, { themeId: id }),
     });
   }
 
@@ -1284,7 +1285,7 @@ async function handleDiagrams(
     if (themeId === false || themeId === undefined) return error(400, "invalid_theme_id");
     await need("edit");
     if (themeId !== null) {
-      await DiagramThemes.requireUsableDiagramTheme(deps.db, { themeId, userId });
+      await DiagramThemes.requireUsableDiagramTheme(deps.db, { themeId });
     }
     await DiagramThemes.setDiagramTheme(deps.db, { diagramId: id, themeId });
     return json(await DiagramThemes.effectiveDiagramTheme(deps.db, id));
@@ -1305,13 +1306,13 @@ async function handleDiagrams(
     const theme =
       themeId === undefined
         ? effective
-        : await DiagramThemes.requireUsableDiagramTheme(deps.db, { themeId, userId });
-    // The person's themes and the diagram's own: a box in one of their roles keeps its role.
-    const { themes } = await DiagramThemes.listDiagramThemes(deps.db, userId);
+        : await DiagramThemes.requireUsableDiagramTheme(deps.db, { themeId });
+    // Every custom theme: a box in one of their roles keeps its role.
+    const { themes } = await DiagramThemes.listDiagramThemes(deps.db);
     const result = await DiagramThemes.restyleStoredDiagram(deps.db, {
       diagram,
       theme,
-      knownThemes: [effective, ...themes].filter((each) => !each.builtIn),
+      knownThemes: themes.filter((each) => !each.builtIn),
       baseVersion,
       now,
     });

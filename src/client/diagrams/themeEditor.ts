@@ -28,6 +28,17 @@ export const WEB_SAFE_FONTS = [
   "Courier New",
 ] as const;
 
+/** What a theme's row in Settings offers. Only the admin changes themes; everyone views them. */
+export type ThemeRowAction = "view" | "edit" | "duplicate" | "delete";
+
+export function themeRowActions(
+  theme: Pick<DiagramTheme, "builtIn">,
+  admin: boolean,
+): ReadonlyArray<ThemeRowAction> {
+  if (!admin) return ["view"];
+  return theme.builtIn ? ["view", "duplicate"] : ["edit", "duplicate", "delete"];
+}
+
 /** A theme being edited: the name and tokens as typed, checked only on save. */
 export interface ThemeDraft {
   readonly name: string;

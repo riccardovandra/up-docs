@@ -1829,7 +1829,7 @@ export const TOOLS = [
   {
     name: "list_diagram_themes",
     description:
-      'List the Draw.io diagram themes you can use: the built-ins (Neutral, the default, and Uplifted) and your own custom themes. Each gives its themeId, its default box role and every role\'s colours as "fill/line/text". People make and edit themes in Settings; agents only choose them. read_drawio and create_drawio give a diagram\'s theme with the exact style lines to write.',
+      'List the Draw.io diagram themes: the built-ins (Neutral, the default, and Uplifted) and the workspace\'s custom themes, which everyone can use. Each gives its themeId, its default box role and every role\'s colours as "fill/line/text". The workspace admin makes and edits themes in Settings; agents only choose them. read_drawio and create_drawio give a diagram\'s theme with the exact style lines to write.',
     inputSchema: { type: "object", properties: {} },
   },
   {
@@ -3179,10 +3179,9 @@ const handlers: Record<
   },
 
   list_diagram_themes: async (_args, ctx) => {
-    const { userId } = ctx.principal;
-    const list = await DiagramThemes.listDiagramThemes(ctx.deps.db, userId);
+    const list = await DiagramThemes.listDiagramThemes(ctx.deps.db);
     return {
-      themes: list.themes.map((theme) => themeListing(theme, userId)),
+      themes: list.themes.map(themeListing),
       defaultThemeId: list.defaultThemeId,
       roleColours: ROLE_COLOUR_FORMAT,
     };
@@ -3207,10 +3206,10 @@ const handlers: Record<
     }
     const usable = async (id: string) => {
       try {
-        return await DiagramThemes.requireUsableDiagramTheme(db, { themeId: id, userId });
+        return await DiagramThemes.requireUsableDiagramTheme(db, { themeId: id });
       } catch (cause) {
         if (cause instanceof Docs.NotFoundError) {
-          return fail("not_found", "No theme with that id that you can use. list_diagram_themes lists them.");
+          return fail("not_found", "No theme with that id. list_diagram_themes lists them.");
         }
         throw cause;
       }
@@ -3236,8 +3235,6 @@ const handlers: Record<
     const diagramId = drawioIdArg(args);
     const { diagram } = await drawioWith(ctx, diagramId, "edit");
     if (themeId !== null) await usable(themeId);
-    // The theme the drawing was in before, so its boxes keep their roles on a restyle.
-    const previous = (await DiagramThemes.effectiveDiagramTheme(db, diagramId)).theme;
     await DiagramThemes.setDiagramTheme(db, { diagramId, themeId });
     const effective = await DiagramThemes.effectiveDiagramTheme(db, diagramId);
     const theme = effectiveThemeBrief(effective);
@@ -3249,15 +3246,12 @@ const handlers: Record<
         note: 'No drawing was changed. Pass restyle: true to restyle it to the theme, or write new cells with theme.styleGuide.',
       };
     }
-    // As the REST restyle: the caller's themes and the diagram's, before and now.
-    const { themes } = await DiagramThemes.listDiagramThemes(db, userId);
-    const knownThemes = [previous, effective.theme, ...themes].filter(
-      (each, index, all) => !each.builtIn && all.findIndex((other) => other.id === each.id) === index,
-    );
+    // As the REST restyle: every custom theme, so boxes in any of their roles keep the role.
+    const { themes } = await DiagramThemes.listDiagramThemes(db);
     const result = await DiagramThemes.restyleStoredDiagram(db, {
       diagram,
       theme: effective.theme,
-      knownThemes,
+      knownThemes: themes.filter((each) => !each.builtIn),
       baseVersion: diagram.version,
       now: ctx.deps.now(),
     });

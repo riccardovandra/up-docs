@@ -119,7 +119,7 @@ export function SettingsPage() {
       <p className="muted">
         Colours, fonts and box and arrow styles for Draw.io diagrams. New shapes start in a
         diagram&apos;s theme, and Restyle with theme on a diagram&apos;s page applies it to what is
-        drawn. Your custom themes are yours; the built-ins can be duplicated.
+        drawn. Themes are set up by the admin, and everyone can use them.
       </p>
       <DiagramThemeSettings admin={me !== null && isAdmin(me.user.id)} />
       <h2>API tokens</h2>

@@ -61,9 +61,9 @@ async function setup() {
 }
 
 describe("theme library", () => {
-  it("lists the built-ins for everyone and custom themes for their creator and the admin", async () => {
+  it("lists the built-ins and every custom theme for everyone signed in", async () => {
     const { admin, alice, bob, send, createTheme } = await setup();
-    const made = await createTheme(alice);
+    const made = await createTheme(admin);
     expect(made.status).toBe(201);
     expect(made.body.theme).toMatchObject({ name: "Client blue", builtIn: false });
     expect(made.body.theme.tokens.roles.primary.stroke).toBe("#112233");
@@ -72,23 +72,44 @@ describe("theme library", () => {
       (await send<DiagramThemeList>(cookie, "GET", "/api/diagram-themes")).body.themes.map(
         (theme) => theme.id,
       );
-    expect(await ids(alice)).toEqual(["neutral", "uplifted", made.body.theme.id]);
-    expect(await ids(admin)).toEqual(["neutral", "uplifted", made.body.theme.id]);
-    expect(await ids(bob)).toEqual(["neutral", "uplifted"]);
+    for (const cookie of [admin, alice, bob]) {
+      expect(await ids(cookie)).toEqual(["neutral", "uplifted", made.body.theme.id]);
+    }
     const list = (await send<DiagramThemeList>(bob, "GET", "/api/diagram-themes")).body;
     expect(list.defaultThemeId).toBe("neutral");
     expect(list.themes[1]).toEqual(UPLIFTED_THEME);
 
-    expect((await send(bob, "GET", `/api/diagram-themes/${made.body.theme.id}`)).status).toBe(404);
+    const read = await send<{ theme: CustomDiagramTheme }>(
+      bob,
+      "GET",
+      `/api/diagram-themes/${made.body.theme.id}`,
+    );
+    expect(read).toMatchObject({ status: 200, body: { theme: { id: made.body.theme.id } } });
     expect((await send(alice, "GET", `/api/diagram-themes/uplifted`)).status).toBe(200);
+    expect((await send(alice, "GET", `/api/diagram-themes/abcdefgh`)).status).toBe(404);
   });
 
-  it("lets the creator and the admin change and delete a custom theme, and nobody a built-in", async () => {
-    const { admin, alice, bob, send, createTheme } = await setup();
-    const { theme } = (await createTheme(alice)).body;
+  it("lets only the admin create, change and delete a custom theme, and nobody a built-in", async () => {
+    const { admin, alice, send, createTheme } = await setup();
+    const refused = await createTheme(alice);
+    expect(refused).toMatchObject({ status: 403, body: { error: "admin_only" } });
+    // Refused before the body is read: a malformed one is still admin_only.
+    expect(
+      (await send<{ error: string }>(alice, "POST", "/api/diagram-themes", { name: "" })).body,
+    ).toMatchObject({ error: "admin_only" });
+
+    const { theme } = (await createTheme(admin)).body;
     const path = `/api/diagram-themes/${theme.id}`;
-    expect((await send(bob, "PATCH", path, { name: "Mine now" })).status).toBe(404);
-    const renamed = await send<{ theme: CustomDiagramTheme }>(alice, "PATCH", path, {
+    const patch = await send<{ error: string }>(alice, "PATCH", path, { name: "Mine now" });
+    expect(patch).toMatchObject({ status: 403, body: { error: "admin_only" } });
+    const removed = await send<{ error: string }>(alice, "DELETE", path);
+    expect(removed).toMatchObject({ status: 403, body: { error: "admin_only" } });
+    expect(
+      (await send<{ error: string }>(alice, "PATCH", "/api/diagram-themes/uplifted", { name: "X" }))
+        .body,
+    ).toMatchObject({ error: "admin_only" });
+
+    const renamed = await send<{ theme: CustomDiagramTheme }>(admin, "PATCH", path, {
       name: "Renamed",
     });
     expect(renamed.body.theme).toMatchObject({ name: "Renamed" });
@@ -97,7 +118,7 @@ describe("theme library", () => {
       tokens: tokens((t) => (t.shadow = true)),
     });
     expect(restyled.body.theme.tokens.shadow).toBe(true);
-    expect((await send(alice, "PATCH", path, {})).status).toBe(400);
+    expect((await send(admin, "PATCH", path, {})).status).toBe(400);
 
     const builtIn = await send<{ error: string }>(admin, "PATCH", "/api/diagram-themes/uplifted", {
       name: "Mine",
@@ -105,15 +126,36 @@ describe("theme library", () => {
     expect(builtIn).toMatchObject({ status: 403, body: { error: "built_in_theme" } });
     expect((await send(admin, "DELETE", "/api/diagram-themes/neutral")).status).toBe(403);
 
-    expect((await send(bob, "DELETE", path)).status).toBe(404);
-    expect((await send(alice, "DELETE", path)).status).toBe(200);
+    expect((await send(admin, "DELETE", path)).status).toBe(200);
     expect((await send(alice, "GET", path)).status).toBe(404);
   });
 
+  it("keeps a theme a non-admin made before usable by everyone and editable only by the admin", async () => {
+    const { api, admin, alice, bob, send, createDiagram } = await setup();
+    // A row from before the rule: made by Alice, written straight into the table.
+    const aliceId = (await send<{ user: { id: string } }>(alice, "GET", "/api/me")).body.user.id;
+    await api.db
+      .prepare(
+        `INSERT INTO diagram_themes (id, name, tokens, created_by, created_at, updated_at)
+         VALUES ('legacy01', 'Old green', ?, ?, 1, 1)`,
+      )
+      .bind(JSON.stringify(tokens()), aliceId)
+      .run();
+    const path = "/api/diagram-themes/legacy01";
+    expect((await send(bob, "GET", path)).status).toBe(200);
+    const bobs = await createDiagram(bob);
+    expect(
+      (await send(bob, "PUT", `/api/diagrams/${bobs.id}/theme`, { themeId: "legacy01" })).status,
+    ).toBe(200);
+    expect((await send(alice, "PATCH", path, { name: "Mine" })).status).toBe(403);
+    expect((await send(alice, "DELETE", path)).status).toBe(403);
+    expect((await send(admin, "PATCH", path, { name: "Green" })).status).toBe(200);
+  });
+
   it("refuses invalid tokens with the field named", async () => {
-    const { alice, send } = await setup();
+    const { admin, send } = await setup();
     const sent = await send<{ error: string; message: string }>(
-      alice,
+      admin,
       "POST",
       "/api/diagram-themes",
       { name: "Bad", tokens: tokens((t) => (t.font.family = "Inter;fillColor=red")) },
@@ -122,7 +164,7 @@ describe("theme library", () => {
     expect(sent.body.error).toBe("invalid_theme");
     expect(sent.body.message).toContain("font.family");
     expect(
-      (await send(alice, "POST", "/api/diagram-themes", { name: "", tokens: tokens() })).status,
+      (await send(admin, "POST", "/api/diagram-themes", { name: "", tokens: tokens() })).status,
     ).toBe(400);
   });
 });
@@ -159,13 +201,17 @@ describe("effective theme", () => {
         .body.theme.id,
     ).toBe("neutral");
 
-    const { theme } = (await createTheme(alice)).body;
+    const { theme } = (await createTheme(admin)).body;
     const own = `/api/diagrams/${diagram.id}/theme`;
-    // Bob may not set Alice's diagram, nor name a theme he cannot see.
+    // Bob may not set Alice's diagram, but may put the admin's theme on his own.
     expect((await send(bob, "PUT", own, { themeId: "uplifted" })).status).toBe(404);
     const bobs = await createDiagram(bob);
+    const onBobs = await send<EffectiveDiagramTheme>(bob, "PUT", `/api/diagrams/${bobs.id}/theme`, {
+      themeId: theme.id,
+    });
+    expect(onBobs.body).toMatchObject({ source: "diagram", theme: { id: theme.id } });
     expect(
-      (await send(bob, "PUT", `/api/diagrams/${bobs.id}/theme`, { themeId: theme.id })).status,
+      (await send(bob, "PUT", `/api/diagrams/${bobs.id}/theme`, { themeId: "abcdefgh" })).status,
     ).toBe(404);
     expect((await send(alice, "PUT", own, { themeId: "nope!" })).status).toBe(400);
 
@@ -176,7 +222,7 @@ describe("effective theme", () => {
       theme: { id: theme.id },
     });
     // Deleting the theme sends the diagram back to its project's default.
-    await send(alice, "DELETE", `/api/diagram-themes/${theme.id}`);
+    await send(admin, "DELETE", `/api/diagram-themes/${theme.id}`);
     expect(await effective()).toMatchObject({ source: "project", diagramThemeId: null });
 
     await send(alice, "PUT", own, { themeId: "neutral" });
@@ -237,10 +283,33 @@ describe("restyle", () => {
     expect(back.body.diagram.xml).toContain("fillColor=#d5e8d4");
   });
 
-  it("maps a box in one of the person's custom themes to the same role", async () => {
-    const { alice, send, createDiagram } = await setup();
+  it("lets a non-admin list the admin's theme, set it on their diagram and restyle to it", async () => {
+    const { admin, alice, send, createTheme, createDiagram } = await setup();
+    const { theme } = (await createTheme(admin)).body;
+    const listed = (await send<DiagramThemeList>(alice, "GET", "/api/diagram-themes")).body;
+    expect(listed.themes.map((each) => each.id)).toContain(theme.id);
+    const diagram = await createDiagram(alice);
+    const set = await send<EffectiveDiagramTheme>(alice, "PUT", `/api/diagrams/${diagram.id}/theme`, {
+      themeId: theme.id,
+    });
+    expect(set.body).toMatchObject({ source: "diagram", theme: { id: theme.id } });
+    const done = await send<{ diagram: DiagramView; themeId: string; summary: RestyleSummary }>(
+      alice,
+      "POST",
+      `/api/diagrams/${diagram.id}/restyle`,
+      { baseVersion: 1, themeId: theme.id },
+    );
+    expect(done.status).toBe(200);
+    expect(done.body).toMatchObject({ themeId: theme.id, diagram: { version: 2 } });
+    expect(done.body.summary.changed).toBe(1);
+    // The box was success green in Neutral and stays the success role.
+    expect(done.body.diagram.xml).toContain(`fillColor=${theme.tokens.roles.success.fill}`);
+  });
+
+  it("maps a box in any custom theme to the same role", async () => {
+    const { admin, alice, send, createDiagram } = await setup();
     const orange = (
-      await send<{ theme: CustomDiagramTheme }>(alice, "POST", "/api/diagram-themes", {
+      await send<{ theme: CustomDiagramTheme }>(admin, "POST", "/api/diagram-themes", {
         name: "Orange",
         tokens: tokens((t) => (t.roles.primary = { fill: "#ffe1c2", stroke: "#e8701a", font: "#14131b" })),
       })
