@@ -377,6 +377,8 @@ describe("diagram pictures", () => {
     expect(policy.startsWith("default-src 'none';")).toBe(true);
     expect(policy.endsWith("; sandbox")).toBe(true);
     expect(policy).not.toContain("script");
+    // A theme's Google font is embedded in the SVG as a data URI.
+    expect(policy).toContain("font-src data:;");
     expect(svg.headers.get("Cache-Control")).toBe("private, no-cache");
     expect(await svg.text()).toBe(SVG);
 

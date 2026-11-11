@@ -17,6 +17,7 @@ afterEach(() => vi.useRealTimers());
 
 describe("parseDrawioMessage", () => {
   it("reads the events the app acts on", () => {
+    expect(parseDrawioMessage('{"event":"configure"}')).toEqual({ event: "configure" });
     expect(parseDrawioMessage('{"event":"init"}')).toEqual({ event: "init" });
     expect(parseDrawioMessage('{"event":"load","xml":"<mxfile/>"}')).toEqual({ event: "load" });
     expect(parseDrawioMessage('{"event":"exit","modified":true}')).toEqual({ event: "exit" });
@@ -64,11 +65,15 @@ describe("the Draw.io URLs", () => {
       saveAndExit: "1",
       noSaveBtn: "1",
       dark: "1",
+      // The editor waits for the theme before it starts.
+      configure: "1",
     });
     expect(new URL(drawioEditorUrl({ dark: false })).searchParams.get("dark")).toBe("0");
     const renderer = new URL(DRAWIO_RENDERER_URL);
     expect(renderer.origin).toBe(DRAWIO_ORIGIN);
     expect(Object.fromEntries(renderer.searchParams)).toMatchObject({ embed: "1", proto: "json" });
+    // The picture frame draws what the source says and asks for nothing.
+    expect(renderer.searchParams.has("configure")).toBe(false);
   });
 });
 

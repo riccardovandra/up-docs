@@ -4,6 +4,11 @@ import type {
   DiagramUsage,
   DiagramView,
 } from "../../../shared/drawio.ts";
+import {
+  NEUTRAL_THEME,
+  type DiagramTheme,
+  type EffectiveDiagramTheme,
+} from "../../../shared/diagramTheme.ts";
 import { ApiError } from "../../api.ts";
 import type { DiagramPictureUpload } from "../diagramsApi.ts";
 import type { DrawioAction, DrawioEvent, DrawioFrame } from "../drawioFrame.ts";
@@ -95,9 +100,22 @@ export function fakeApi(initial: ReadonlyArray<DiagramView> = []) {
     delete fail[key];
     if (cause !== undefined) throw cause;
   };
+  /** The effective theme of each diagram, and of each project for a new one ("none": no project). */
+  const themes = new Map<string, DiagramTheme>();
+  const effective = (theme: DiagramTheme | undefined): EffectiveDiagramTheme => ({
+    theme: theme ?? NEUTRAL_THEME,
+    source: theme ? "diagram" : "default",
+    diagramThemeId: theme?.id ?? null,
+    projectThemeId: null,
+  });
   return {
     diagrams,
     usage,
+    themes,
+    theme: async (diagramId: string): Promise<EffectiveDiagramTheme> =>
+      effective(themes.get(diagramId)),
+    projectTheme: async (projectId: string | null): Promise<EffectiveDiagramTheme> =>
+      effective(themes.get(projectId ?? "none")),
     calls,
     reads,
     fail,
