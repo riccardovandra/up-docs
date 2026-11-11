@@ -93,6 +93,39 @@ describe("the theme", () => {
   });
 });
 
+describe("a theme picked for a new diagram", () => {
+  it("starts the editor in it, and sets it on the diagram the first save creates", async () => {
+    const { api, drawio } = open({ kind: "new", projectId: "p1", themeId: "uplifted" });
+    drawio.emit({ event: "configure" });
+    await settle();
+    expect(drawio.posted).toEqual([
+      { action: "configure", config: themeToDrawioConfig(UPLIFTED_THEME) },
+    ]);
+    drawio.emit({ event: "init" });
+    await settle();
+    drawio.emit({ event: "save", xml: NEW_XML, exit: false });
+    await settle();
+    const created = api.calls.find((call) => call[0] === "create");
+    expect(created).toBeDefined();
+    expect(api.calls.filter((call) => call[0] === "setTheme")).toEqual([
+      ["setTheme", "new1", "uplifted"],
+    ]);
+    // A second save does not set it again.
+    drawio.emit({ event: "save", xml: NEW_XML, exit: false });
+    await settle();
+    expect(api.calls.filter((call) => call[0] === "setTheme")).toHaveLength(1);
+  });
+
+  it("sets no theme on a new diagram that follows its project", async () => {
+    const { api, drawio } = open({ kind: "new", projectId: "p1" });
+    drawio.emit({ event: "init" });
+    await settle();
+    drawio.emit({ event: "save", xml: NEW_XML, exit: true });
+    await settle();
+    expect(api.calls.some((call) => call[0] === "setTheme")).toBe(false);
+  });
+});
+
 describe("editing a diagram", () => {
   it("loads the stored source once Draw.io is ready", async () => {
     const { drawio, phase, states } = open(existing, [

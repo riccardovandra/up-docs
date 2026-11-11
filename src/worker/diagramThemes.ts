@@ -312,13 +312,17 @@ export async function restyleStoredDiagram(
     readonly theme: DiagramTheme;
     readonly baseVersion: number;
     readonly now: number;
+    /** Custom themes whose role colours map role to role (see `restyleDiagram`). */
+    readonly knownThemes?: ReadonlyArray<DiagramTheme>;
   },
 ): Promise<RestyleStoredResult> {
   const { diagram } = input;
   if (diagram.version !== input.baseVersion) {
     return { ok: false, conflict: diagramSummary(diagram) };
   }
-  const restyled = await restyleDiagram(diagram.xml, input.theme);
+  const restyled = await restyleDiagram(diagram.xml, input.theme, {
+    knownThemes: input.knownThemes ?? [],
+  });
   if (!restyled.ok) return { ok: false, invalidXml: restyled.error };
   const result = await updateDiagram(db, {
     diagramId: diagram.id,

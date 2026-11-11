@@ -7,6 +7,7 @@
 import type { DrawioThemeConfig } from "../../shared/diagramTheme.ts";
 import { MAX_DIAGRAM_PAGES } from "../../shared/drawio.ts";
 import { drawioPageSources } from "../../shared/drawioModel.ts";
+import { trimSvgFonts } from "./svgFonts.ts";
 
 export const DRAWIO_ORIGIN = "https://embed.diagrams.net";
 
@@ -279,7 +280,8 @@ export async function exportDrawioPicture(
     (event) => pngBase64FromDataUri(event.data),
     () => null,
   );
-  return { svg: lightSvg(svg), png };
+  // Only the font subsets the picture shows: a Google-font theme otherwise adds ~0.5 MB.
+  return { svg: trimSvgFonts(lightSvg(svg)), png };
 }
 
 /** A picture of every page: the first page's at the top, as an upload sends it. */

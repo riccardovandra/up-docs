@@ -5,7 +5,9 @@ import type {
   DiagramView,
 } from "../../../shared/drawio.ts";
 import {
+  builtInDiagramTheme,
   NEUTRAL_THEME,
+  restyleDiagram,
   type DiagramTheme,
   type EffectiveDiagramTheme,
 } from "../../../shared/diagramTheme.ts";
@@ -94,7 +96,13 @@ export function fakeApi(initial: ReadonlyArray<DiagramView> = []) {
   const calls: Array<readonly [string, ...Array<unknown>]> = [];
   /** The ids each re-read asked about: reads, so kept apart from the writes in `calls`. */
   const reads: Array<ReadonlyArray<string>> = [];
-  const fail: { update?: unknown; create?: unknown; upload?: unknown; summaries?: unknown } = {};
+  const fail: {
+    update?: unknown;
+    create?: unknown;
+    upload?: unknown;
+    summaries?: unknown;
+    restyle?: unknown;
+  } = {};
   const take = (key: keyof typeof fail) => {
     const cause = fail[key];
     delete fail[key];
@@ -184,6 +192,32 @@ export function fakeApi(initial: ReadonlyArray<DiagramView> = []) {
       diagrams.set(diagramId, next);
       const { xml: _xml, canEdit: _canEdit, ...rest } = next;
       return rest;
+    },
+    /** A built-in, or a theme set in `themes` under its own id. */
+    themeById: async (themeId: string): Promise<DiagramTheme> => {
+      const theme = builtInDiagramTheme(themeId) ?? themes.get(themeId);
+      if (!theme) throw new ApiError(404, { error: "not_found" });
+      return theme;
+    },
+    setTheme: async (diagramId: string, themeId: string | null) => {
+      calls.push(["setTheme", diagramId, themeId]);
+      if (themeId === null) themes.delete(diagramId);
+      else themes.set(diagramId, builtInDiagramTheme(themeId) ?? themes.get(themeId)!);
+      return effective(themes.get(diagramId));
+    },
+    restyle: async (diagramId: string, input: { readonly baseVersion: number; readonly themeId?: string }) => {
+      calls.push(["restyle", diagramId, input]);
+      take("restyle");
+      const current = diagrams.get(diagramId)!;
+      if (input.baseVersion !== current.version) throw conflictError(current);
+      const theme =
+        (input.themeId === undefined ? themes.get(diagramId) : builtInDiagramTheme(input.themeId)) ??
+        NEUTRAL_THEME;
+      const result = await restyleDiagram(current.xml ?? "", theme);
+      if (!result.ok) throw new ApiError(400, { error: "invalid_xml" });
+      const next = { ...current, xml: result.xml, version: current.version + 1 };
+      diagrams.set(diagramId, next);
+      return { diagram: next, themeId: theme.id, summary: result.summary };
     },
   };
 }

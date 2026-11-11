@@ -28,7 +28,13 @@ import {
 export type DiagramEditorTarget =
   | { readonly kind: "existing"; readonly diagramId: string }
   /** Created in `projectId` (null: no project) by the first save. */
-  | { readonly kind: "new"; readonly projectId: string | null; readonly title?: string };
+  | {
+      readonly kind: "new";
+      readonly projectId: string | null;
+      readonly title?: string;
+      /** A theme picked for it; absent: it follows its project. */
+      readonly themeId?: string;
+    };
 
 export interface EditorSessionState {
   /**
@@ -56,7 +62,7 @@ export function startEditorSession(options: {
   readonly frame: DrawioFrame;
   readonly api: Pick<
     DiagramsApi,
-    "get" | "create" | "update" | "uploadPicture" | "theme" | "projectTheme"
+    "get" | "create" | "update" | "uploadPicture" | "theme" | "projectTheme" | "themeById" | "setTheme"
   >;
   readonly target: DiagramEditorTarget;
   readonly onState: (state: EditorSessionState) => void;
@@ -116,9 +122,13 @@ export function startEditorSession(options: {
     const neutral = () => resolve(themeToDrawioConfig(NEUTRAL_THEME));
     const timer = setTimeout(neutral, THEME_MS);
     const lookup =
-      target.kind === "new" ? api.projectTheme(target.projectId) : api.theme(target.diagramId);
+      target.kind === "existing"
+        ? api.theme(target.diagramId).then((effective) => effective.theme)
+        : target.themeId !== undefined
+          ? api.themeById(target.themeId)
+          : api.projectTheme(target.projectId).then((effective) => effective.theme);
     lookup.then(
-      (effective) => resolve(themeToDrawioConfig(effective.theme)),
+      (theme) => resolve(themeToDrawioConfig(theme)),
       neutral,
     ).finally(() => clearTimeout(timer));
   });
@@ -147,6 +157,10 @@ export function startEditorSession(options: {
               xml,
             })
           : await api.update(diagramId, { xml, baseVersion });
+      if (diagramId === null && target.kind === "new" && target.themeId !== undefined) {
+        // The theme picked for the new diagram. On failure it follows its project; the drawing is saved.
+        await api.setTheme(diagram.id, target.themeId).catch(() => undefined);
+      }
       diagramId = diagram.id;
       baseVersion = diagram.version;
       saved = diagram;
