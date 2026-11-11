@@ -217,6 +217,8 @@ export function Grid(props: GridProps) {
     scroll.current = { x: el.scrollLeft, y: el.scrollTop };
     placeMovers();
     refresh();
+    // The cells move under a still mouse.
+    if (pointer.current) updateHover();
   };
 
   // Keep the cell the keyboard moved to in sight.
@@ -273,16 +275,20 @@ export function Grid(props: GridProps) {
     props.onPointer(target, "down", info(event));
     viewportRef.current?.setPointerCapture(event.pointerId);
   };
-  // The cell under the mouse, tracked only while some overlay hides its label until hovered.
+  // The cell under the mouse, tracked while some overlay has a label it may show on hover.
   const [hover, setHover] = useState<{ row: number; col: number } | null>(null);
-  const hoverMatters = props.overlays.some((overlay) => overlay.label && !overlay.labelShown);
+  const pointer = useRef<{ x: number; y: number } | null>(null);
+  const hoverMatters = props.overlays.some((overlay) => overlay.label);
+  const updateHover = () => {
+    const at = pointer.current;
+    const target = at && hoverMatters ? targetAt(at.x, at.y) : null;
+    const next = target?.kind === "cell" ? { row: target.row, col: target.col } : null;
+    setHover((current) => (current?.row === next?.row && current?.col === next?.col ? current : next));
+  };
   const trackHover = (event: PointerEvent<HTMLDivElement>) => {
-    if (event.pointerType !== "mouse" || !hoverMatters) return;
-    const target = targetAt(event.clientX, event.clientY);
-    const next = target.kind === "cell" ? { row: target.row, col: target.col } : null;
-    setHover((current) =>
-      current?.row === next?.row && current?.col === next?.col ? current : next,
-    );
+    if (event.pointerType !== "mouse") return;
+    pointer.current = { x: event.clientX, y: event.clientY };
+    updateHover();
   };
   const onPointerMove = (event: PointerEvent<HTMLDivElement>) => {
     trackHover(event);
@@ -597,7 +603,10 @@ export function Grid(props: GridProps) {
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
         onPointerCancel={() => (drag.current = null)}
-        onPointerLeave={() => setHover(null)}
+        onPointerLeave={() => {
+          pointer.current = null;
+          setHover(null);
+        }}
         onDoubleClick={(event) => {
           if ((event.target as HTMLElement).closest(".sheet-editor-box, .sheet-col-resize")) return;
           const target = targetAt(event.clientX, event.clientY);
