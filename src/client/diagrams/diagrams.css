@@ -401,10 +401,35 @@ button.diagram-canvas:hover {
   margin-top: 1rem;
 }
 
+.diagram-theme-slot {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
 @media (max-width: 800px) {
   .diagram-viewer {
     grid-template-columns: 1fr;
     min-height: 0;
+  }
+
+  /* The title keeps the first row; the theme goes below it, then the actions. */
+  .diagram-page .doc-header {
+    flex-wrap: wrap;
+    row-gap: 0.4rem;
+    height: auto;
+    min-height: 3.5rem;
+    padding-block: 0.5rem;
+  }
+
+  .diagram-page .doc-header-title {
+    flex: 1 1 100%;
+    flex-wrap: wrap;
+  }
+
+  .diagram-theme-slot {
+    flex: 1 1 100%;
+    padding-left: 0.4rem;
   }
 
   .diagram-side {
@@ -441,14 +466,6 @@ button.diagram-canvas:hover {
 
   .diagram-canvas .diagram-picture {
     min-height: 12rem;
-  }
-
-  /* The title keeps its row; the actions take the next one. */
-  .diagram-page .doc-header {
-    flex-wrap: wrap;
-    height: auto;
-    min-height: 3.5rem;
-    padding-block: 0.5rem;
   }
 
   .diagram-page .doc-header .diagram-chip {
@@ -783,10 +800,7 @@ button.diagram-canvas:hover {
   .theme-editor {
     padding: 0.75rem;
   }
-
-  .theme-chip {
-    max-width: 7.5rem;
-  }
+}
 
 /* Comments: pins over the picture, the thread inline at its pin (review mode). */
 .diagram-review {
