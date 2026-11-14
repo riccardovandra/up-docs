@@ -1,15 +1,17 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import type { DocRole } from "../../shared/access.ts";
+import type { ShareTarget } from "../api.ts";
 import { ShareDialog } from "./ShareDialog.tsx";
 import "./share.css";
 
 const noFlush = async () => undefined;
 
-/** The doc header's Share button and the panel it opens beneath itself. */
+/** A doc or diagram header's Share button and the panel it opens beneath itself. */
 export function ShareButton(props: {
-  readonly docId: string;
-  /** The caller's role on the doc, from `GET /api/docs/:docId`. */
+  /** The doc or diagram to share. */
+  readonly target: ShareTarget;
+  /** The caller's role, from `GET /api/docs/:docId` or `GET /api/diagrams/:id`. */
   readonly role: DocRole;
   readonly title: string;
   /** The open tab, for the Export segment's tab actions. */
@@ -62,7 +64,7 @@ export function ShareButton(props: {
       </button>
       {open ? (
         <ShareDialog
-          docId={props.docId}
+          target={props.target}
           title={props.title}
           role={props.role}
           tabId={props.tabId ?? null}

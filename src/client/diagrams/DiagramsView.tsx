@@ -7,6 +7,7 @@ import {
   type ReactNode,
 } from "react";
 
+import { canEdit as roleCanEdit } from "../../shared/access.ts";
 import { diagramPath, type DiagramListItem } from "../../shared/drawio.ts";
 import type { Project } from "../../shared/protocol.ts";
 import { formatDay, type HomeView, type ProjectScope } from "../home/homeLogic.ts";
@@ -243,7 +244,7 @@ export function DiagramsView(props: {
               >
                 <DiagramPicture
                   diagramId={diagram.id}
-                  diagram={{ ...diagram, canEdit: true }}
+                  diagram={{ ...diagram, canEdit: roleCanEdit(diagram.role) }}
                   className="diagram-card-cover"
                 />
                 <span className="doc-card-footer">
@@ -299,7 +300,7 @@ export function DiagramsView(props: {
                     <a href={diagramPath(diagram.id)} onClick={follow(diagramPath(diagram.id))}>
                       <DiagramPicture
                         diagramId={diagram.id}
-                        diagram={{ ...diagram, canEdit: true }}
+                        diagram={{ ...diagram, canEdit: roleCanEdit(diagram.role) }}
                         className="diagram-row-thumb"
                       />
                       <span className="doc-row-title-text">

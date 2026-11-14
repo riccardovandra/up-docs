@@ -214,8 +214,11 @@ describe("diagram access", () => {
     const orphanPicture = async (cookie: string) =>
       (await api.call("GET", `/api/diagrams/${orphan.id}/picture.svg`, as(cookie))).status;
     expect(await orphanPicture(reader)).toBe(200);
-    const forget = api.db.prepare("UPDATE diagrams SET created_by = NULL WHERE id = ?");
-    await forget.bind(orphan.id).run();
+    // A removed account takes its people-list rows with it (ON DELETE CASCADE).
+    await api.db.batch([
+      api.db.prepare("UPDATE diagrams SET created_by = NULL WHERE id = ?").bind(orphan.id),
+      api.db.prepare("DELETE FROM diagram_members WHERE diagram_id = ?").bind(orphan.id),
+    ]);
     expect(await orphanPicture(reader)).toBe(404);
     expect(await orphanPicture(creator)).toBe(404);
     expect(await orphanPicture(admin)).toBe(200);
@@ -650,9 +653,9 @@ describe("where a diagram is used", () => {
     expect(await Diagrams.diagramUsage(api.db, { diagramId: diagram.id, userId: "owner" })).toEqual(
       { uses: [], otherDocs: 0 },
     );
-    const reader = { id: diagram.id, createdBy: diagram.createdBy };
-    expect(await Diagrams.canViewDiagram(api.db, reader, "owner")).toBe(true);
-    expect(await Diagrams.canViewDiagram(api.db, reader, "nobody")).toBe(false);
+    const reader = { id: diagram.id };
+    expect(await Diagrams.diagramAccess(api.db, reader, "owner")).toEqual(Diagrams.OWNER_ACCESS);
+    expect(await Diagrams.diagramAccess(api.db, reader, "nobody")).toBeNull();
   });
 });
 
@@ -806,5 +809,135 @@ describe("diagram pictures in D1", () => {
     await Diagrams.deleteDiagram(db, images, diagram.id);
     expect(await count("diagram_chunks")).toBe(0);
     expect(await Diagrams.diagramPicture(images, current, "svg")).toBeNull();
+  });
+});
+
+describe("sharing a diagram", () => {
+  type Members = {
+    members: Array<{ id: string; role: string; email: string; pending: boolean }>;
+    member?: { id: string; email: string };
+    emailDelivery?: string | null;
+    error?: string;
+  };
+
+  /** A diagram by `creator`, shared with a new person at `role`, who then signs in. */
+  async function shared(role: string) {
+    const harness = await setup();
+    const { api, creator, create, send } = harness;
+    const diagram = await create(creator, { title: "Pipeline", xml: XML });
+    const added = await send<Members>(creator, "POST", `/api/diagrams/${diagram.id}/members`, {
+      email: "guest@example.com",
+      role,
+    });
+    expect(added.status).toBe(201);
+    // Nobody had this address before: the invite alone lets them sign in.
+    const guest = await api.signIn("guest@example.com");
+    return { ...harness, diagram, guest, added };
+  }
+
+  it("makes the creator its owner and lists them as the only person on it", async () => {
+    const { creator, create, send } = await setup();
+    const diagram = await create(creator, { xml: XML });
+    expect(diagram).toMatchObject({ role: "owner", member: true });
+    const listed = await send<Members>(creator, "GET", `/api/diagrams/${diagram.id}/members`);
+    expect(listed.body.members).toEqual([
+      expect.objectContaining({ role: "owner", email: "creator@example.com", pending: false }),
+    ]);
+  });
+
+  it("emails the invite with the diagram's title and link", async () => {
+    const { api, diagram, added } = await shared("viewer");
+    expect(added.body.emailDelivery).toBe("sent");
+    expect(api.invites.at(-1)).toMatchObject({
+      to: "guest@example.com",
+      docTitle: "Pipeline",
+      url: expect.stringMatching(new RegExp(`/diagrams/${diagram.id}$`)),
+    });
+  });
+
+  it("lets a viewer see it, and nothing more", async () => {
+    const { guest, diagram, send, upload } = await shared("viewer");
+    const read = await send<{ diagram: DiagramView }>(guest, "GET", `/api/diagrams/${diagram.id}`);
+    expect(read.body.diagram).toMatchObject({ role: "viewer", member: true, canEdit: false, xml: null });
+    const listed = await send<{ diagrams: Array<DiagramListItem> }>(guest, "GET", "/api/diagrams");
+    expect(listed.body.diagrams.map((item) => [item.id, item.role])).toEqual([[diagram.id, "viewer"]]);
+    const comment = await send(guest, "POST", `/api/diagrams/${diagram.id}/comments`, {
+      body: "Looks good",
+      anchor: { page: null, x: 1, y: 1 },
+    });
+    expect(comment.status).toBe(403);
+    expect((await upload(guest, diagram.id, 1)).status).toBe(403);
+    const share = await send(guest, "POST", `/api/diagrams/${diagram.id}/members`, {
+      email: "third@example.com",
+      role: "viewer",
+    });
+    expect(share.status).toBe(403);
+  });
+
+  it("lets a commenter comment but not change the drawing", async () => {
+    const { guest, diagram, send } = await shared("commenter");
+    const comment = await send(guest, "POST", `/api/diagrams/${diagram.id}/comments`, {
+      body: "Looks good",
+      anchor: { page: null, x: 1, y: 1 },
+    });
+    expect(comment.status).toBe(201);
+    const write = await send(guest, "PATCH", `/api/diagrams/${diagram.id}`, { title: "Mine" });
+    expect(write.status).toBe(403);
+  });
+
+  it("lets an editor change it, but only an owner move, delete or share it", async () => {
+    const { guest, diagram, project, send } = await shared("editor");
+    const read = await send<{ diagram: DiagramView }>(guest, "GET", `/api/diagrams/${diagram.id}`);
+    expect(read.body.diagram).toMatchObject({ role: "editor", canEdit: true, xml: XML });
+    const redrawn = await send<{ diagram: DiagramView }>(
+      guest,
+      "PATCH",
+      `/api/diagrams/${diagram.id}`,
+      { xml: XML2, baseVersion: 1, title: "Pipeline v2" },
+    );
+    expect(redrawn.status).toBe(200);
+    expect(redrawn.body.diagram).toMatchObject({ version: 2, title: "Pipeline v2", role: "editor" });
+    const moved = await send(guest, "PATCH", `/api/diagrams/${diagram.id}`, {
+      projectId: project.id,
+    });
+    expect(moved.status).toBe(403);
+    expect((await send(guest, "DELETE", `/api/diagrams/${diagram.id}`)).status).toBe(403);
+  });
+
+  it("lets a person leave, and keeps the last owner", async () => {
+    const { creator, guest, diagram, send } = await shared("editor");
+    const path = `/api/diagrams/${diagram.id}/members`;
+    const { members } = (await send<Members>(guest, "GET", path)).body;
+    const mine = members.find((member) => member.email === "guest@example.com")!;
+    const owner = members.find((member) => member.role === "owner")!;
+    expect((await send<Members>(creator, "DELETE", `${path}/${owner.id}`)).body.error).toBe(
+      "last_owner",
+    );
+    expect((await send(guest, "DELETE", `${path}/${mine.id}`)).status).toBe(200);
+    expect((await send(guest, "GET", `/api/diagrams/${diagram.id}`)).status).toBe(404);
+  });
+
+  it("keeps its people list from someone who only sees it through a doc", async () => {
+    const { creator, doc, person, create, link, send } = await setup();
+    const diagram = await create(creator, { xml: XML });
+    await link(doc, diagram.id, creator);
+    const reader = await person("reader@example.com", doc.doc.id);
+    const read = await send<{ diagram: DiagramView }>(reader, "GET", `/api/diagrams/${diagram.id}`);
+    expect(read.body.diagram).toMatchObject({ role: "viewer", member: false });
+    expect((await send(reader, "GET", `/api/diagrams/${diagram.id}/members`)).status).toBe(404);
+  });
+
+  it("shows a doc's linked diagram when an editor it was shared with linked it", async () => {
+    const { creator, otherDoc, person, create, link, send } = await setup();
+    const diagram = await create(creator, { xml: XML });
+    // The creator is not on otherDoc; an editor of the diagram who is links it there.
+    const editor = await person("editor@example.com", otherDoc.doc.id, "editor");
+    await send(creator, "POST", `/api/diagrams/${diagram.id}/members`, {
+      email: "editor@example.com",
+      role: "editor",
+    });
+    await link(otherDoc, diagram.id, editor);
+    const reader = await person("reader@example.com", otherDoc.doc.id);
+    expect((await send(reader, "GET", `/api/diagrams/${diagram.id}`)).status).toBe(200);
   });
 });

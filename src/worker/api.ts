@@ -59,7 +59,7 @@ import {
   MAX_DIAGRAM_REFRESH_IDS,
   MAX_DIAGRAM_TITLE_LENGTH,
 } from "../shared/drawio.ts";
-import { MAX_DIAGRAM_COMMENT_LENGTH } from "../shared/diagramComments.ts";
+import { diagramUrl, MAX_DIAGRAM_COMMENT_LENGTH } from "../shared/diagramComments.ts";
 import { readDrawioLayout } from "../shared/drawioModel.ts";
 import * as Sheets from "./sheets.ts";
 import {
@@ -594,7 +594,7 @@ export async function handleApi(
     if (resource === "docs" && id && sub === "members") {
       const response = await handleMembers(
         request,
-        { id, subId, method, principal },
+        { scope: { kind: "doc", id }, subId, method, principal },
         deps,
       );
       if (response) return response;
@@ -944,6 +944,15 @@ export async function handleApi(
       if (response) return response;
     }
 
+    if (resource === "diagrams" && id && sub === "members" && segments.length <= 4) {
+      const response = await handleMembers(
+        request,
+        { scope: Access.diagramScope(id), subId, method, principal },
+        deps,
+      );
+      if (response) return response;
+    }
+
     if (resource === "diagrams" && segments.length <= 3) {
       const response = await handleDiagrams(
         request,
@@ -1115,10 +1124,11 @@ const versionConflict = (conflict: { readonly version: number }) =>
   json({ error: "version_conflict", version: conflict.version, diagram: conflict }, 409);
 
 /**
- * Draw.io diagrams, under `/api/diagrams`. Their creator and the admin list
- * and change them. Someone on a doc that shows one (`Diagrams.canViewDiagram`)
- * may fetch its picture and the diagram without its source, one at a time or
- * several by id. Returns null when the path is not one of these routes.
+ * Draw.io diagrams, under `/api/diagrams`. Their people hold doc roles
+ * (`Diagrams.requireDiagram`): viewers and commenters fetch the picture and
+ * the diagram without its source, editors change it, owners also move and
+ * delete it. Someone on a doc that shows one views it the same way. People
+ * are under `/members`, handled like a doc's. Returns null for other paths.
  */
 async function handleDiagrams(
   request: Request,
@@ -1181,12 +1191,12 @@ async function handleDiagrams(
       createdBy: userId,
       now,
     });
-    return json({ diagram: Diagrams.diagramView(diagram, true) }, 201);
+    return json({ diagram: Diagrams.diagramView(diagram, Diagrams.OWNER_ACCESS) }, 201);
   }
 
   if (!id) return null;
   if (!isDiagramId(id)) return error(404, "not_found");
-  const need = (access: "view" | "edit") =>
+  const need = (access: Diagrams.DiagramNeed) =>
     Diagrams.requireDiagram(deps.db, { diagramId: id, userId, need: access });
 
   // `picture.svg` is what people see, `picture.png` what agents are handed.
@@ -1240,7 +1250,7 @@ async function handleDiagrams(
     return result.ok ? json({ diagram: result.diagram }) : versionConflict(result.conflict);
   }
 
-  // Comment threads: anyone who sees the diagram reads them; its managers start them.
+  // Comment threads: anyone who sees the diagram reads them; commenters and up start them.
   // `pages`: where each page's shapes sit, so pins follow their shapes. Not the source.
   if (sub === "comments" && method === "GET") {
     const { diagram } = await need("view");
@@ -1255,7 +1265,7 @@ async function handleDiagrams(
     const body = await readJson(request);
     const text = str(body.body, MAX_DIAGRAM_COMMENT_LENGTH);
     if (!text) return error(400, "invalid_body");
-    const { diagram } = await need("edit");
+    const { diagram } = await need("comment");
     const { anchor, quote } = await DiagramComments.resolveNewAnchor(diagram.xml, body.anchor);
     const thread = await DiagramComments.createDiagramThread(deps.db, {
       diagramId: id,
@@ -1301,7 +1311,7 @@ async function handleDiagrams(
       return error(400, "invalid_base_version");
     const themeId = themeIdArg(body.themeId);
     if (themeId === false || themeId === null) return error(400, "invalid_theme_id");
-    const { diagram } = await need("edit");
+    const { diagram, access } = await need("edit");
     const effective = (await DiagramThemes.effectiveDiagramTheme(deps.db, id)).theme;
     const theme =
       themeId === undefined
@@ -1324,7 +1334,7 @@ async function handleDiagrams(
     }
     return result.ok
       ? json({
-          diagram: Diagrams.diagramView(result.diagram, true),
+          diagram: Diagrams.diagramView(result.diagram, access),
           themeId: theme.id,
           summary: result.summary,
         })
@@ -1334,8 +1344,8 @@ async function handleDiagrams(
   if (sub) return null;
 
   if (method === "GET") {
-    const { diagram, canEdit } = await need("view");
-    return json({ diagram: Diagrams.diagramView(diagram, canEdit) });
+    const { diagram, access } = await need("view");
+    return json({ diagram: Diagrams.diagramView(diagram, access) });
   }
 
   if (method === "PATCH") {
@@ -1358,7 +1368,8 @@ async function handleDiagrams(
     }
     if (title === undefined && projectId === undefined && xml === undefined)
       return error(400, "empty_write");
-    await need("edit");
+    // Editors rename and redraw; moving it to another project is the owner's.
+    const { access } = await need(projectId === undefined ? "edit" : "owner");
     if (projectId && !(await Access.canSeeProject(deps.db, projectId, userId))) {
       return error(404, "not_found");
     }
@@ -1371,12 +1382,12 @@ async function handleDiagrams(
       now,
     });
     return result.ok
-      ? json({ diagram: Diagrams.diagramView(result.diagram, true) })
+      ? json({ diagram: Diagrams.diagramView(result.diagram, access) })
       : versionConflict(result.conflict);
   }
 
   if (method === "DELETE") {
-    await need("edit");
+    await need("owner");
     await Diagrams.deleteDiagram(deps.db, deps.images, id);
     return json({ ok: true });
   }
@@ -1395,7 +1406,7 @@ const diagramCommentAuthor = (principal: Auth.Principal) =>
 /**
  * One diagram comment thread, under `/api/diagram-comments/:commentId`:
  * `POST .../replies` {body} answers it, `POST .../resolve` and `.../reopen`
- * change its state. Only the diagram's managers write. Null for other paths.
+ * change its state. Commenters and up write. Null for other paths.
  */
 async function handleDiagramComment(
   request: Request,
@@ -1414,7 +1425,7 @@ async function handleDiagramComment(
   await Diagrams.requireDiagram(deps.db, {
     diagramId: existing.diagramId,
     userId: route.principal.userId,
-    need: "edit",
+    need: "comment",
   });
   const now = deps.now();
   if (route.sub === "replies") {
@@ -1894,25 +1905,40 @@ async function handleComments(
 
 const MAX_EMAIL_LENGTH = 320;
 
-/** People on a doc. Any member sees the list; owners change it, and anyone may leave. */
+/**
+ * The role a principal holds on a doc or diagram, for its people list. Only
+ * people on the list (and the admin) see it: someone who views a diagram
+ * through a doc that links it is not on its list, so it reads as not found.
+ */
+async function memberListRole(
+  deps: ApiDeps,
+  scope: Access.MemberScope,
+  userId: string,
+): Promise<DocRole> {
+  if (scope.kind === "doc") return Access.requireDocRole(deps.db, scope.id, userId, "viewer");
+  const { access } = await Diagrams.requireDiagram(deps.db, {
+    diagramId: scope.id,
+    userId,
+    need: "view",
+  });
+  if (!access.member) throw new Docs.NotFoundError("diagram");
+  return access.role;
+}
+
+/** People on a doc or diagram. Any member sees the list; owners change it, and anyone may leave. */
 async function handleMembers(
   request: Request,
   route: {
-    readonly id: string;
+    readonly scope: Access.MemberScope;
     readonly subId: string | undefined;
     readonly method: string;
     readonly principal: Auth.Principal;
   },
   deps: ApiDeps,
 ): Promise<Response | null> {
-  const { id, subId, method, principal } = route;
-  const role = await Access.requireDocRole(
-    deps.db,
-    id,
-    principal.userId,
-    "viewer",
-  );
-  const members = () => Access.listMembers(deps.db, id, deps.owners);
+  const { scope, subId, method, principal } = route;
+  const role = await memberListRole(deps, scope, principal.userId);
+  const members = () => Access.listScopeMembers(deps.db, scope, deps.owners);
 
   if (!subId && method === "GET") return json({ members: await members() });
 
@@ -1922,8 +1948,8 @@ async function handleMembers(
     const email = str(body.email, MAX_EMAIL_LENGTH);
     if (!email || !email.includes("@")) return error(400, "invalid_email");
     if (!isDocRole(body.role)) return error(400, "invalid_role");
-    const { member, created } = await Access.shareDoc(deps.db, {
-      docId: id,
+    const { member, created } = await Access.shareScope(deps.db, {
+      on: scope,
       email,
       role: body.role,
       addedBy: principal.userId,
@@ -1932,7 +1958,7 @@ async function handleMembers(
     });
     // Awaited so the response can say whether the email went out.
     const emailDelivery = created
-      ? await inviteByEmail(deps, { docId: id, to: member.email, principal })
+      ? await inviteToScope(deps, { scope, to: member.email, principal })
       : null;
     return json(
       { member, members: await members(), emailDelivery },
@@ -1944,8 +1970,8 @@ async function handleMembers(
     if (role !== "owner") throw new Access.ForbiddenError("owner");
     const body = await readJson(request);
     if (!isDocRole(body.role)) return error(400, "invalid_role");
-    const member = await Access.setMemberRole(deps.db, {
-      docId: id,
+    const member = await Access.setScopeMemberRole(deps.db, {
+      on: scope,
       memberId: subId,
       role: body.role,
       owners: deps.owners,
@@ -1954,12 +1980,13 @@ async function handleMembers(
   }
 
   if (subId && method === "DELETE") {
-    const { userId } = await Access.removeMember(deps.db, {
-      docId: id,
+    const { userId } = await Access.removeScopeMember(deps.db, {
+      on: scope,
       memberId: subId,
       by: { userId: principal.userId, role },
     });
-    if (userId) await deps.rooms.closeSockets(id, userId);
+    // Diagram pages re-read over HTTP; only a doc has open sockets to close.
+    if (userId && scope.kind === "doc") await deps.rooms.closeSockets(scope.id, userId);
     return json({ members: await members() });
   }
   return null;
@@ -1974,16 +2001,37 @@ export async function inviteByEmail(
     readonly principal: Auth.Principal;
   },
 ): Promise<EmailDelivery> {
-  const [inviter, { doc, tabs }] = await Promise.all([
-    Access.getUser(deps.db, input.principal.userId, deps.owners),
-    Docs.getDoc(deps.db, input.docId),
-  ]);
-  const firstTab = tabs.find((tab) => tab.parentTabId === null);
+  return inviteToScope(deps, { ...input, scope: { kind: "doc", id: input.docId } });
+}
+
+/** Tells a newly added person the doc or diagram is theirs to open. */
+export async function inviteToScope(
+  deps: ApiDeps,
+  input: {
+    readonly scope: Access.MemberScope;
+    readonly to: string;
+    readonly principal: Auth.Principal;
+  },
+): Promise<EmailDelivery> {
+  const { scope } = input;
+  const inviter = await Access.getUser(deps.db, input.principal.userId, deps.owners);
+  let title: string;
+  let url: string;
+  if (scope.kind === "doc") {
+    const { doc, tabs } = await Docs.getDoc(deps.db, scope.id);
+    const firstTab = tabs.find((tab) => tab.parentTabId === null);
+    title = doc.title;
+    url = `${deps.publicOrigin}/d/${doc.id}${firstTab ? `/${firstTab.id}` : ""}`;
+  } else {
+    const diagram = await Diagrams.getDiagram(deps.db, scope.id);
+    title = diagram.title;
+    url = diagramUrl(deps.publicOrigin, diagram.id);
+  }
   return deps.sendDocInvite({
     to: input.to,
     inviterName: inviter.name.trim() || inviter.email,
-    docTitle: doc.title,
-    url: `${deps.publicOrigin}/d/${doc.id}${firstTab ? `/${firstTab.id}` : ""}`,
+    docTitle: title,
+    url,
   });
 }
 

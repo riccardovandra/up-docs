@@ -6,11 +6,12 @@ import {
   type DocRole,
   type UserSummary,
 } from "../../shared/access.ts";
+import { diagramPath } from "../../shared/drawio.ts";
 import { PUBLIC_ORIGIN_META } from "../../shared/embed.ts";
-import { api, ApiError } from "../api.ts";
+import { api, ApiError, type ShareTarget } from "../api.ts";
 import { useMe } from "../me.ts";
-import { leaveDoc } from "../openTabs.ts";
-import { docPath } from "../router.ts";
+import { forgetTab, leaveDoc } from "../openTabs.ts";
+import { docPath, navigate } from "../router.ts";
 import { MemberRow } from "./MemberRow.tsx";
 import { RoleMenu } from "./RoleMenu.tsx";
 import { ShareExportTab } from "./ShareExportTab.tsx";
@@ -23,14 +24,19 @@ import {
   suggestPeople,
 } from "./shareLogic.ts";
 
-/** The doc's public address. Inside T3 Code the page may be served from another origin. */
+/** The public origin. Inside T3 Code the page may be served from another origin. */
+const publicOrigin = () =>
+  document.querySelector(`meta[name="${PUBLIC_ORIGIN_META}"]`)?.getAttribute("content") ||
+  window.location.origin;
+
 /** The doc's public URL; with a tab id, the link opens on that tab. */
 export function canonicalDocUrl(docId: string, tabId?: string | null): string {
-  const origin =
-    document.querySelector(`meta[name="${PUBLIC_ORIGIN_META}"]`)?.getAttribute("content") ||
-    window.location.origin;
-  return `${origin}${docPath(docId, tabId)}`;
+  return `${publicOrigin()}${docPath(docId, tabId)}`;
 }
+
+/** The public URL of what the panel shares. */
+const targetUrl = (target: ShareTarget) =>
+  target.kind === "doc" ? canonicalDocUrl(target.id) : `${publicOrigin()}${diagramPath(target.id)}`;
 
 const errorCode = (cause: unknown) => (cause instanceof ApiError ? cause.body.error : undefined);
 
@@ -38,9 +44,12 @@ const FOCUSABLE = "button:not([disabled]), input:not([disabled]), [href], [tabin
 
 type Person = Pick<UserSummary, "name" | "email">;
 
-/** The Share popover. Mounted only while open, so members load each time it opens. */
+/**
+ * The Share popover for a doc or a Draw.io diagram. Mounted only while open,
+ * so members load each time it opens. Only a doc has the Export segment.
+ */
 export function ShareDialog(props: {
-  readonly docId: string;
+  readonly target: ShareTarget;
   readonly title: string;
   readonly role: DocRole;
   readonly tabId: string | null;
@@ -50,7 +59,9 @@ export function ShareDialog(props: {
   /** `restoreFocus` is false when the user clicked elsewhere, so focus stays there. */
   readonly onClose: (restoreFocus: boolean) => void;
 }) {
-  const { docId, onClose } = props;
+  const { target, onClose } = props;
+  const { kind, id } = target;
+  const isDoc = kind === "doc";
   const me = useMe();
   const meId = me?.user.id ?? "";
   const panel = useRef<HTMLDivElement>(null);
@@ -77,14 +88,14 @@ export function ShareDialog(props: {
 
   useEffect(() => {
     let live = true;
-    api.members(docId).then(
+    api.members({ kind, id }).then(
       (result) => live && setMembers(result.members),
       () => live && setLoadError("Could not load who has access. Close and try again."),
     );
     return () => {
       live = false;
     };
-  }, [docId]);
+  }, [kind, id]);
 
   useEffect(() => {
     if (!canInvite) return;
@@ -145,7 +156,7 @@ export function ShareDialog(props: {
     const remaining = [...parsed.valid];
     try {
       while (remaining.length > 0) {
-        const result = await api.shareDoc(docId, { email: remaining[0]!, role: inviteRole });
+        const result = await api.share(target, { email: remaining[0]!, role: inviteRole });
         setMembers(result.members);
         const notice =
           result.emailDelivery && emailDeliveryNotice(result.emailDelivery, result.member.email);
@@ -166,7 +177,7 @@ export function ShareDialog(props: {
     setBusy(true);
     setRowError(null);
     try {
-      setMembers((await api.setMemberRole(docId, member.id, role)).members);
+      setMembers((await api.setMemberRole(target, member.id, role)).members);
     } catch (cause) {
       setRowError({ memberId: member.id, text: shareErrorText(errorCode(cause)) });
     } finally {
@@ -179,10 +190,14 @@ export function ShareDialog(props: {
     setBusy(true);
     setRowError(null);
     try {
-      const result = await api.removeMember(docId, member.id);
+      const result = await api.removeMember(target, member.id);
       if (leaving) {
-        // Without access the doc page cannot load anymore.
-        leaveDoc(docId);
+        // Without access the page cannot load anymore.
+        if (isDoc) leaveDoc(target.id);
+        else {
+          forgetTab(`diagram:${target.id}`);
+          navigate("/diagrams", { replace: true });
+        }
         return;
       }
       setMembers(result.members);
@@ -195,7 +210,7 @@ export function ShareDialog(props: {
 
   const copyLink = async () => {
     try {
-      await navigator.clipboard.writeText(canonicalDocUrl(docId));
+      await navigator.clipboard.writeText(targetUrl(target));
       setCopied(true);
     } catch {
       setCopied(false);
@@ -273,6 +288,7 @@ export function ShareDialog(props: {
         </button>
       </div>
 
+      {isDoc ? (
       <div
         className="share-segments"
         role="tablist"
@@ -298,10 +314,11 @@ export function ShareDialog(props: {
           </button>
         ))}
       </div>
+      ) : null}
 
-      {view === "export" ? (
+      {isDoc && view === "export" ? (
         <ShareExportTab
-          docId={docId}
+          docId={target.id}
           tabId={props.tabId}
           flush={props.flush}
           title={props.title}
@@ -387,13 +404,13 @@ export function ShareDialog(props: {
                   {emailNotices.map((notice) => (
                     <p key={notice}>{notice}</p>
                   ))}
-                  <p className="share-email-link">{canonicalDocUrl(docId)}</p>
+                  <p className="share-email-link">{targetUrl(target)}</p>
                   <button
                     type="button"
                     className="button secondary small"
                     onClick={() => void copyLink()}
                   >
-                    {copied ? "Copied" : "Copy doc link"}
+                    {copied ? "Copied" : isDoc ? "Copy doc link" : "Copy diagram link"}
                   </button>
                 </div>
               ) : null}

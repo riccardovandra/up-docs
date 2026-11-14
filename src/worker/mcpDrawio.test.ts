@@ -65,7 +65,7 @@ describe("MCP Draw.io tools", () => {
 
     const guide = (await mcp.tool("format_guide", { topic: "drawio" })).body.guide as string;
     expect(guide).toContain(DRAWIO_EXAMPLE);
-    expect(guide).toContain("first time a person who manages the diagram opens it");
+    expect(guide).toContain("first time a person who can edit the diagram opens it");
     const read = await readDrawio(DRAWIO_EXAMPLE);
     expect(read).toEqual({
       ok: true,
@@ -106,7 +106,7 @@ describe("MCP Draw.io tools", () => {
       shapes: ["Discovery call", "Proposal"],
       connections: ["Discovery call -[won]-> Proposal"],
     });
-    expect(created.body.picture).toContain("first time a person who manages the diagram opens");
+    expect(created.body.picture).toContain("first time a person who can edit the diagram opens");
     expect(created.body.warnings).toBeUndefined();
     const projects = (await mcp.tool("list_projects", {})).body.projects;
     expect(created.body.projectId).toBe(projects[0].projectId);
@@ -163,6 +163,7 @@ describe("MCP Draw.io tools", () => {
         version: 1,
         updatedAt: expect.any(String),
         url: `${ORIGIN}/diagrams/${diagramId}`,
+        role: "owner",
         usedIn: [
           {
             docId: doc.docId,
@@ -836,5 +837,41 @@ describe("Draw.io layout defaults over MCP", () => {
     const stored = (await Diagrams.getDiagram(mcp.api.db, created.body.diagramId as string)).xml;
     expect(stored).toContain('style="edgeStyle=orthogonalEdgeStyle;html=1;jumpStyle=arc;jumpSize=6;"');
     expect(stored).toContain('style="html=1;jumpStyle=none;"');
+  });
+
+  it("shares a diagram through share_doc, list_members and unshare_doc", async () => {
+    const { mcp, doc, diagramId } = await setup();
+    const guest = await agentOf(mcp, "guest@example.com", doc.docId);
+    // On the doc but not the diagram, and the doc does not link it.
+    expect((await guest("read_drawio", { diagramId })).isError).toBe(true);
+
+    const shared = await mcp.tool("share_doc", {
+      diagramId: `${ORIGIN}/diagrams/${diagramId}`,
+      email: "guest@example.com",
+      role: "commenter",
+    });
+    expect(shared.isError).toBe(false);
+    expect(shared.body).toMatchObject({ added: true, member: { role: "commenter" } });
+    const read = await guest("read_drawio", { diagramId });
+    expect(read.isError).toBe(false);
+    expect(read.body).toMatchObject({ canEdit: false });
+    const listed = await guest("list_drawio", {});
+    expect(listed.body.diagrams).toEqual([expect.objectContaining({ diagramId, role: "commenter" })]);
+    const xml = await guest("read_drawio", { diagramId, includeXml: true });
+    expect(xml.isError).toBe(true);
+    const reshare = await guest("share_doc", {
+      diagramId,
+      email: "third@example.com",
+      role: "viewer",
+    });
+    expect(reshare.body).toMatchObject({ error: "forbidden" });
+
+    const members = await guest("list_members", { diagramId });
+    expect(members.body.members).toHaveLength(2);
+    expect((await mcp.tool("list_members", { docId: doc.docId, diagramId })).isError).toBe(true);
+
+    const removed = await mcp.tool("unshare_doc", { diagramId, email: "guest@example.com" });
+    expect(removed.body.members).toHaveLength(1);
+    expect((await guest("read_drawio", { diagramId })).isError).toBe(true);
   });
 });
