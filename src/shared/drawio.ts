@@ -3,6 +3,7 @@
 // `page: <name>` line, then an optional caption. The diagram (its Draw.io XML and the picture drawn
 // from it) is stored once, so one save updates every doc that links it.
 
+import type { DocRole } from "./access.ts";
 import { findFences } from "./table.ts";
 
 export const DRAWIO_LANGUAGE = "t3-drawio";
@@ -77,20 +78,25 @@ export interface DiagramUsage {
   readonly otherDocs: number;
 }
 
-/** `GET /api/diagrams`: a diagram the caller manages, with the readable tabs that link it. */
+/** `GET /api/diagrams`: a diagram the caller is on, with the readable tabs that link it. */
 export interface DiagramListItem extends DiagramSummary {
+  /** The caller's role on it. */
+  readonly role: DocRole;
   readonly uses: ReadonlyArray<DiagramUse>;
   /** How many comment threads on it are open. */
   readonly openComments: number;
 }
 
 /**
- * `GET /api/diagrams/:id`: the diagram as one caller may see it. Someone who
- * only reads a doc that links it gets the picture, never the source: `canEdit`
- * is false and `xml` is null.
+ * `GET /api/diagrams/:id`: the diagram as one caller may see it. Viewers and
+ * commenters get the picture, never the source: `canEdit` is false and `xml`
+ * is null. `member` is false for someone who sees it only through a doc that
+ * links it (role "viewer"): they are not on its people list.
  */
 export interface DiagramView extends DiagramSummary {
   readonly canEdit: boolean;
+  readonly role: DocRole;
+  readonly member: boolean;
   readonly xml: string | null;
 }
 
@@ -106,6 +112,7 @@ export const MAX_DIAGRAM_REFRESH_IDS = 20;
  */
 export interface DiagramRefresh extends DiagramSummary {
   readonly canEdit: boolean;
+  readonly role: DocRole;
   readonly usage: DiagramUsage | null;
 }
 

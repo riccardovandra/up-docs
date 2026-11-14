@@ -10,6 +10,7 @@ import { diagramCommentForChat } from "../../shared/embed.ts";
 
 import type { DiagramUsage, DiagramView } from "../../shared/drawio.ts";
 import type { Project } from "../../shared/protocol.ts";
+import { canComment as roleCanComment } from "../../shared/access.ts";
 import { ApiError, api } from "../api.ts";
 import { formatDay } from "../home/homeLogic.ts";
 import { HomeLink } from "../home/HomeLink.tsx";
@@ -29,6 +30,7 @@ import { openCountsByPage } from "./pageTabsLogic.ts";
 import { subscribeRefresh, watchDiagram } from "./diagramRefresh.ts";
 import { diagramErrorMessage, diagramsApi, subscribeDiagram } from "./diagramsApi.ts";
 import { ThemeMenu } from "./ThemeMenu.tsx";
+import { ShareButton } from "../share/ShareButton.tsx";
 import "../home/home.css";
 import "./diagrams.css";
 
@@ -75,9 +77,10 @@ function useDiagramComments(diagramId: string, version: number | null, review: b
 }
 
 /**
- * One diagram's own page: its picture, and for its creator and the admin the
- * way to rename, delete and edit it, and the docs that link it. Someone who
- * only reads a doc that links it sees the picture and the title.
+ * One diagram's own page: its picture, and by role the way to share it
+ * (everyone on it sees who has access; owners change it), rename and edit it
+ * (editors), delete it (owners), comment (commenters) and the docs that link
+ * it. Someone who only reads a doc that links it sees the picture and the title.
  */
 export function DiagramPage(props: { readonly diagramId: string }) {
   const { diagramId } = props;
@@ -182,9 +185,11 @@ export function DiagramPage(props: { readonly diagramId: string }) {
     );
   }
 
-  const { canEdit } = diagram;
+  const { canEdit, role } = diagram;
   // On a phone or tablet the diagram is for reading: no Draw.io, rename, delete or theme change.
   const canChange = canEdit && changesHere;
+  const canDelete = role === "owner" && changesHere;
+  const canComment = roleCanComment(role);
   const pageName = pageNames[shownPage] ?? null;
   const threads = comments?.threads ?? [];
   const openCount = threads.filter((thread) => thread.resolvedAt === null).length;
@@ -270,7 +275,7 @@ export function DiagramPage(props: { readonly diagramId: string }) {
           </span>
         </div>
         <div className="doc-header-actions">
-          {canEdit || threads.length > 0 ? (
+          {canComment || threads.length > 0 ? (
             <button
               type="button"
               className="button secondary small diagram-review-toggle"
@@ -280,6 +285,14 @@ export function DiagramPage(props: { readonly diagramId: string }) {
               {review ? "Exit review" : "Review"} · {openCount} open
             </button>
           ) : null}
+        {diagram.member ? (
+          <ShareButton
+            target={{ kind: "diagram", id: diagramId }}
+            role={role}
+            title={diagram.title}
+            onClosed={() => void reload()}
+          />
+        ) : null}
         {canChange ? (
           <>
             <button
@@ -289,9 +302,15 @@ export function DiagramPage(props: { readonly diagramId: string }) {
             >
               Rename
             </button>
-            <button type="button" className="button secondary small" onClick={() => void remove()}>
-              Delete
-            </button>
+            {canDelete ? (
+              <button
+                type="button"
+                className="button secondary small"
+                onClick={() => void remove()}
+              >
+                Delete
+              </button>
+            ) : null}
             <button
               type="button"
               className="button small diagram-edit-button"
@@ -324,7 +343,7 @@ export function DiagramPage(props: { readonly diagramId: string }) {
                 layouts={comments?.pages ?? []}
                 threads={threads}
                 review={review}
-                canComment={canEdit}
+                canComment={canComment}
                 copyToChat={copyToChat}
                 onCreate={async (anchor, body) => {
                   try {

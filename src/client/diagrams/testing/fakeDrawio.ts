@@ -77,6 +77,8 @@ export const summary = (overrides: Partial<DiagramSummary> = {}): DiagramSummary
 export const view = (overrides: Partial<DiagramView> = {}): DiagramView => ({
   ...summary(),
   canEdit: true,
+  role: "owner",
+  member: true,
   xml: "<mxGraphModel/>",
   ...overrides,
 });
@@ -135,7 +137,8 @@ export function fakeApi(initial: ReadonlyArray<DiagramView> = []) {
       return diagramIds.flatMap((diagramId) => {
         const diagram = diagrams.get(diagramId);
         if (!diagram) return [];
-        const { xml: _xml, ...rest } = diagram;
+        // The route never says whether the caller is on its list.
+        const { xml: _xml, member: _member, ...rest } = diagram;
         const linked = usage.get(diagramId) ?? { uses: [], otherDocs: 0 };
         return [{ ...rest, usage: diagram.canEdit ? linked : null }];
       });

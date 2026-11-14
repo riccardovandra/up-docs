@@ -78,7 +78,7 @@ export function blockActions(input: {
   const remove: BlockAction = { id: "remove", label: "Remove", disabled: null };
   if (!input.diagram) return [remove];
   const reason = (what: string) =>
-    input.diagram?.canEdit ? null : `Only the diagram's creator can ${what} it.`;
+    input.diagram?.canEdit ? null : `Only the diagram's owners and editors can ${what} it.`;
   return [
     ...(input.hosted && input.drawioEditor
       ? [{ id: "edit", label: "Edit", disabled: reason("edit") } satisfies BlockAction]

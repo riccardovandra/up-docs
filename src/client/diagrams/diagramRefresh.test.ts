@@ -258,7 +258,7 @@ describe("the fake API's re-read", () => {
     const api = fakeApi([view({ id: "g1", xml: "<mxGraphModel/>" })]);
     const found = await api.summaries(["g1", "gone"]);
     expect(found).toEqual([
-      { ...summary({ id: "g1" }), canEdit: true, usage: { uses: [], otherDocs: 0 } },
+      { ...summary({ id: "g1" }), canEdit: true, role: "owner", usage: { uses: [], otherDocs: 0 } },
     ]);
   });
 });

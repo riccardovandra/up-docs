@@ -169,7 +169,7 @@ export const DocHeader = memo(function DocHeader(props: {
           </button>
         ) : null}
         <ShareButton
-          docId={props.docId}
+          target={{ kind: "doc", id: props.docId }}
           role={props.role}
           title={props.title}
           tabId={props.tabId}

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { canEdit as roleCanEdit } from "../../../shared/access.ts";
 import { isPictureCurrent, type DiagramListItem } from "../../../shared/drawio.ts";
 import { drawioPageSources } from "../../../shared/drawioModel.ts";
 import type { Project } from "../../../shared/protocol.ts";
@@ -147,7 +148,7 @@ export function DiagramPicker(props: {
               >
                 <DiagramPicture
                   diagramId={choosing.diagram.id}
-                  diagram={{ ...choosing.diagram, canEdit: true }}
+                  diagram={{ ...choosing.diagram, canEdit: roleCanEdit(choosing.diagram.role) }}
                   page={page}
                   className="drawio-pick-preview"
                 />
@@ -212,7 +213,7 @@ export function DiagramPicker(props: {
           >
             <DiagramPicture
               diagramId={diagram.id}
-              diagram={{ ...diagram, canEdit: true }}
+              diagram={{ ...diagram, canEdit: roleCanEdit(diagram.role) }}
               className="drawio-pick-preview"
             />
             <span className="drawio-pick-text">

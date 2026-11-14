@@ -86,6 +86,15 @@ let libraryPrefetch: Promise<HomeLibrary> | null = null;
 /** Identifies this page's writes, so the DocRoom echo of our own save is recognisable. */
 export const clientId = crypto.randomUUID();
 
+/** What a share panel lists people for: a doc or a Draw.io diagram. */
+export interface ShareTarget {
+  readonly kind: "doc" | "diagram";
+  readonly id: string;
+}
+
+const membersPath = (target: ShareTarget) =>
+  `/api/${target.kind === "doc" ? "docs" : "diagrams"}/${target.id}/members`;
+
 export const api = {
   me: () => request<Me>("GET", "/api/me"),
   setName: (name: string) => request<Me>("PATCH", "/api/me", { name }),
@@ -162,26 +171,27 @@ export const api = {
       ...(group ? { group } : {}),
     }),
   doc: (docId: string) => request<DocView>("GET", `/api/docs/${docId}`),
-  members: (docId: string) =>
-    request<{ members: Array<DocMember> }>("GET", `/api/docs/${docId}/members`),
+  /** People on a doc, or on a diagram: `kind` picks which. */
+  members: (target: ShareTarget) =>
+    request<{ members: Array<DocMember> }>("GET", membersPath(target)),
   /** Adds the person, or changes their role if they already have access. */
-  shareDoc: (docId: string, input: { email: string; role: DocRole }) =>
+  share: (target: ShareTarget, input: { email: string; role: DocRole }) =>
     request<{
       member: DocMember;
       members: Array<DocMember>;
       /** Null when nobody new was added, so no email was due. */
       emailDelivery: EmailDelivery | null;
-    }>("POST", `/api/docs/${docId}/members`, input),
-  setMemberRole: (docId: string, memberId: string, role: DocRole) =>
+    }>("POST", membersPath(target), input),
+  setMemberRole: (target: ShareTarget, memberId: string, role: DocRole) =>
     request<{ member: DocMember; members: Array<DocMember> }>(
       "PATCH",
-      `/api/docs/${docId}/members/${memberId}`,
+      `${membersPath(target)}/${memberId}`,
       { role },
     ),
-  removeMember: (docId: string, memberId: string) =>
+  removeMember: (target: ShareTarget, memberId: string) =>
     request<{ members: Array<DocMember> }>(
       "DELETE",
-      `/api/docs/${docId}/members/${memberId}`,
+      `${membersPath(target)}/${memberId}`,
     ),
   setDocStatus: (docId: string, status: DocStatus) =>
     request<{ doc: DocSummary }>("PATCH", `/api/docs/${docId}`, {

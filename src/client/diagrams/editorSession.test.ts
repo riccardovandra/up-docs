@@ -258,7 +258,7 @@ describe("editing a diagram", () => {
     expect(drawio.posted).toEqual([]);
     expect(states.at(-1)).toMatchObject({
       phase: "failed",
-      message: "Only the diagram's creator can change it.",
+      message: "Your role on this diagram does not allow that. Ask one of its owners.",
     });
   });
 });

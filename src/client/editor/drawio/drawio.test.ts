@@ -288,9 +288,9 @@ describe("block actions", () => {
   it("greys out Edit and Detach a copy, with the reason, for an editor who only views it", () => {
     const actions = onDesktop({ docEditable: true, diagram: { canEdit: false }, hosted: true });
     expect(actions).toEqual([
-      { id: "edit", label: "Edit", disabled: "Only the diagram's creator can edit it." },
+      { id: "edit", label: "Edit", disabled: "Only the diagram's owners and editors can edit it." },
       { id: "open", label: "Open in Diagrams", disabled: null },
-      { id: "detach", label: "Detach a copy", disabled: "Only the diagram's creator can copy it." },
+      { id: "detach", label: "Detach a copy", disabled: "Only the diagram's owners and editors can copy it." },
       { id: "remove", label: "Remove", disabled: null },
     ]);
   });

@@ -87,7 +87,7 @@ export async function userIdForEmail(
   return row?.user_id ?? null;
 }
 
-/** Owners, and anyone with a pending or accepted membership on some doc. */
+/** Owners, and anyone with a pending or accepted membership on some doc or diagram. */
 export async function canSignIn(
   db: D1Database,
   email: string,
@@ -101,9 +101,13 @@ export async function canSignIn(
       `SELECT 1 FROM doc_members WHERE email = ?
        UNION ALL
        SELECT 1 FROM doc_members m JOIN user_emails e ON e.user_id = m.user_id WHERE e.email = ?
+       UNION ALL
+       SELECT 1 FROM diagram_members WHERE email = ?
+       UNION ALL
+       SELECT 1 FROM diagram_members m JOIN user_emails e ON e.user_id = m.user_id WHERE e.email = ?
        LIMIT 1`,
     )
-    .bind(address, address)
+    .bind(address, address, address, address)
     .first();
   return row !== null;
 }
@@ -132,13 +136,15 @@ export async function claimInvites(
         .bind(address, userId, now),
     );
   }
-  // An invite to a doc the person already belongs to keeps their current role.
-  statements.push(
-    db
-      .prepare("UPDATE OR IGNORE doc_members SET user_id = ?, email = NULL WHERE email = ?")
-      .bind(userId, address),
-    db.prepare("DELETE FROM doc_members WHERE email = ?").bind(address),
-  );
+  // An invite to a doc or diagram the person already belongs to keeps their current role.
+  for (const table of ["doc_members", "diagram_members"]) {
+    statements.push(
+      db
+        .prepare(`UPDATE OR IGNORE ${table} SET user_id = ?, email = NULL WHERE email = ?`)
+        .bind(userId, address),
+      db.prepare(`DELETE FROM ${table} WHERE email = ?`).bind(address),
+    );
+  }
   await db.batch(statements);
   return userId;
 }
@@ -226,9 +232,38 @@ export const ownerMembershipStatement = (
     )
     .bind(randomId(), input.docId, input.userId, input.userId, input.now);
 
+/** Makes `userId` the owner of a new diagram; batch it with the diagram's insert. */
+export const diagramOwnerStatement = (
+  db: D1Database,
+  input: { readonly diagramId: string; readonly userId: string; readonly now: number },
+) =>
+  db
+    .prepare(
+      `INSERT INTO diagram_members (id, diagram_id, user_id, email, role, added_by, created_at)
+       VALUES (?, ?, ?, NULL, 'owner', ?, ?)`,
+    )
+    .bind(randomId(), input.diagramId, input.userId, input.userId, input.now);
+
+/**
+ * What a membership list belongs to. Docs and Draw.io diagrams are shared the
+ * same way: one row per person or pending invite, in a table of their own.
+ */
+export type MemberScope = { readonly kind: "doc" | "diagram"; readonly id: string };
+
+const MEMBER_TABLES = {
+  doc: { table: "doc_members", key: "doc_id" },
+  diagram: { table: "diagram_members", key: "diagram_id" },
+} as const;
+
+const docScope = (docId: string): MemberScope => ({ kind: "doc", id: docId });
+export const diagramScope = (diagramId: string): MemberScope => ({
+  kind: "diagram",
+  id: diagramId,
+});
+
 interface MemberRow {
   id: string;
-  doc_id: string;
+  scope_id: string;
   role: DocRole;
   email: string | null;
   added_by: string | null;
@@ -238,9 +273,12 @@ interface MemberRow {
   user_name: string | null;
 }
 
-const MEMBER_SELECT = `SELECT m.id, m.doc_id, m.role, m.email, m.added_by, m.created_at,
+const memberSelect = (on: MemberScope) => {
+  const { table, key } = MEMBER_TABLES[on.kind];
+  return `SELECT m.id, m.${key} AS scope_id, m.role, m.email, m.added_by, m.created_at,
     u.id AS user_id, u.email AS user_email, u.name AS user_name
-  FROM doc_members m LEFT JOIN users u ON u.id = m.user_id`;
+  FROM ${table} m LEFT JOIN users u ON u.id = m.user_id`;
+};
 
 const toMember = (row: MemberRow, owners: ReadonlySet<string>): DocMember => {
   const user =
@@ -258,88 +296,122 @@ const toMember = (row: MemberRow, owners: ReadonlySet<string>): DocMember => {
   };
 };
 
-/** Owners first (the earliest is the doc's owner), then everyone else in the order they were added. */
-export async function listMembers(
+/** The person's own row on a doc or diagram, or null. The admin's implicit access is not a row. */
+export async function memberRole(
   db: D1Database,
-  docId: string,
+  on: MemberScope,
+  userId: string,
+): Promise<DocRole | null> {
+  const { table, key } = MEMBER_TABLES[on.kind];
+  const row = await db
+    .prepare(`SELECT role FROM ${table} WHERE ${key} = ? AND user_id = ?`)
+    .bind(on.id, userId)
+    .first<{ role: DocRole }>();
+  return row?.role ?? null;
+}
+
+/** Owners first (the earliest is the owner), then everyone else in the order they were added. */
+export async function listScopeMembers(
+  db: D1Database,
+  on: MemberScope,
   owners: ReadonlySet<string>,
 ): Promise<ReadonlyArray<DocMember>> {
+  const { key } = MEMBER_TABLES[on.kind];
   const { results } = await db
     .prepare(
-      `${MEMBER_SELECT} WHERE m.doc_id = ?
+      `${memberSelect(on)} WHERE m.${key} = ?
        ORDER BY m.role = 'owner' DESC, m.created_at, m.id`,
     )
-    .bind(docId)
+    .bind(on.id)
     .all<MemberRow>();
   return results.map((row) => toMember(row, owners));
 }
 
-async function getMember(db: D1Database, docId: string, memberId: string): Promise<MemberRow> {
+export const listMembers = (db: D1Database, docId: string, owners: ReadonlySet<string>) =>
+  listScopeMembers(db, docScope(docId), owners);
+
+async function getMember(db: D1Database, on: MemberScope, memberId: string): Promise<MemberRow> {
+  const { key } = MEMBER_TABLES[on.kind];
   const row = await db
-    .prepare(`${MEMBER_SELECT} WHERE m.doc_id = ? AND m.id = ?`)
-    .bind(docId, memberId)
+    .prepare(`${memberSelect(on)} WHERE m.${key} = ? AND m.id = ?`)
+    .bind(on.id, memberId)
     .first<MemberRow>();
   if (!row) throw new NotFoundError("member");
   return row;
 }
 
 /** The membership an address names: the person it signs in as, or a pending invite to it. */
-export async function findMemberId(
+export async function findScopeMemberId(
   db: D1Database,
-  input: { readonly docId: string; readonly email: string; readonly owners: ReadonlySet<string> },
+  input: { readonly on: MemberScope; readonly email: string; readonly owners: ReadonlySet<string> },
 ): Promise<string | null> {
+  const { table, key } = MEMBER_TABLES[input.on.kind];
   const address = normalizeEmail(input.email);
   const userId = await userIdForEmail(db, address, input.owners);
   const row = await db
-    .prepare("SELECT id FROM doc_members WHERE doc_id = ? AND (user_id = ? OR email = ?)")
-    .bind(input.docId, userId, address)
+    .prepare(`SELECT id FROM ${table} WHERE ${key} = ? AND (user_id = ? OR email = ?)`)
+    .bind(input.on.id, userId, address)
     .first<{ id: string }>();
   return row?.id ?? null;
 }
 
-async function ownerCount(db: D1Database, docId: string): Promise<number> {
+export const findMemberId = (
+  db: D1Database,
+  input: { readonly docId: string; readonly email: string; readonly owners: ReadonlySet<string> },
+) => findScopeMemberId(db, { ...input, on: docScope(input.docId) });
+
+async function ownerCount(db: D1Database, on: MemberScope): Promise<number> {
+  const { table, key } = MEMBER_TABLES[on.kind];
   const row = await db
     .prepare(
-      "SELECT COUNT(*) AS count FROM doc_members WHERE doc_id = ? AND role = 'owner' AND user_id IS NOT NULL",
+      `SELECT COUNT(*) AS count FROM ${table} WHERE ${key} = ? AND role = 'owner' AND user_id IS NOT NULL`,
     )
-    .bind(docId)
+    .bind(on.id)
     .first<{ count: number }>();
   return row?.count ?? 0;
 }
 
 /** Refuses to take away the last signed-in owner. */
-async function assertKeepsAnOwner(db: D1Database, member: MemberRow, nextRole: DocRole | null) {
+async function assertKeepsAnOwner(
+  db: D1Database,
+  on: MemberScope,
+  member: MemberRow,
+  nextRole: DocRole | null,
+) {
   if (member.role !== "owner" || member.user_id === null || nextRole === "owner") return;
-  if ((await ownerCount(db, member.doc_id)) <= 1) throw new LastOwnerError();
+  if ((await ownerCount(db, on)) <= 1) throw new LastOwnerError();
+}
+
+interface ShareInput {
+  readonly email: string;
+  readonly role: DocRole;
+  readonly addedBy: string;
+  readonly owners: ReadonlySet<string>;
+  readonly now: number;
 }
 
 /**
- * Gives `email` a role on the doc: a membership when the address already
- * signs in as someone, else a pending invite. An existing member's role is
- * changed instead. `created` says whether anyone new was added, so callers
- * only send an invite email for a new person.
+ * Gives `email` a role on the doc or diagram: a membership when the address
+ * already signs in as someone, else a pending invite. An existing member's
+ * role is changed instead. `created` says whether anyone new was added, so
+ * callers only send an invite email for a new person.
  */
-export async function shareDoc(
+export async function shareScope(
   db: D1Database,
-  input: {
-    readonly docId: string;
-    readonly email: string;
-    readonly role: DocRole;
-    readonly addedBy: string;
-    readonly owners: ReadonlySet<string>;
-    readonly now: number;
-  },
+  input: ShareInput & { readonly on: MemberScope },
 ): Promise<{ readonly member: DocMember; readonly created: boolean }> {
+  const { on } = input;
+  const { table, key } = MEMBER_TABLES[on.kind];
   const address = normalizeEmail(input.email);
   if (address === ADMIN_SESSION_EMAIL) throw new ReservedEmailError();
   // Without this, sharing to your own other address edits your own role.
   if ((await userIdForEmail(db, address, input.owners)) === input.addedBy) {
     throw new SelfShareError();
   }
-  const existing = await findMemberId(db, { ...input, email: address });
+  const existing = await findScopeMemberId(db, { ...input, email: address });
   if (existing) {
     return {
-      member: await setMemberRole(db, { ...input, memberId: existing }),
+      member: await setScopeMemberRole(db, { ...input, memberId: existing }),
       created: false,
     };
   }
@@ -347,15 +419,37 @@ export async function shareDoc(
   const id = randomId();
   await db
     .prepare(
-      `INSERT INTO doc_members (id, doc_id, user_id, email, role, added_by, created_at)
+      `INSERT INTO ${table} (id, ${key}, user_id, email, role, added_by, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
     )
-    .bind(id, input.docId, userId, userId ? null : address, input.role, input.addedBy, input.now)
+    .bind(id, on.id, userId, userId ? null : address, input.role, input.addedBy, input.now)
     .run();
-  return { member: toMember(await getMember(db, input.docId, id), input.owners), created: true };
+  return { member: toMember(await getMember(db, on, id), input.owners), created: true };
 }
 
-export async function setMemberRole(
+export const shareDoc = (db: D1Database, input: ShareInput & { readonly docId: string }) =>
+  shareScope(db, { ...input, on: docScope(input.docId) });
+
+export async function setScopeMemberRole(
+  db: D1Database,
+  input: {
+    readonly on: MemberScope;
+    readonly memberId: string;
+    readonly role: DocRole;
+    readonly owners: ReadonlySet<string>;
+  },
+): Promise<DocMember> {
+  const { table } = MEMBER_TABLES[input.on.kind];
+  const member = await getMember(db, input.on, input.memberId);
+  await assertKeepsAnOwner(db, input.on, member, input.role);
+  await db
+    .prepare(`UPDATE ${table} SET role = ? WHERE id = ?`)
+    .bind(input.role, member.id)
+    .run();
+  return toMember({ ...member, role: input.role }, input.owners);
+}
+
+export const setMemberRole = (
   db: D1Database,
   input: {
     readonly docId: string;
@@ -363,36 +457,38 @@ export async function setMemberRole(
     readonly role: DocRole;
     readonly owners: ReadonlySet<string>;
   },
-): Promise<DocMember> {
-  const member = await getMember(db, input.docId, input.memberId);
-  await assertKeepsAnOwner(db, member, input.role);
-  await db
-    .prepare("UPDATE doc_members SET role = ? WHERE id = ?")
-    .bind(input.role, member.id)
-    .run();
-  return toMember({ ...member, role: input.role }, input.owners);
-}
+) => setScopeMemberRole(db, { ...input, on: docScope(input.docId) });
 
 /**
  * Owners remove anyone; everyone else may only leave. Returns the removed
  * person's user id (null for a pending invite) so their open sockets can close.
  */
-export async function removeMember(
+export async function removeScopeMember(
+  db: D1Database,
+  input: {
+    readonly on: MemberScope;
+    readonly memberId: string;
+    readonly by: { readonly userId: string; readonly role: DocRole };
+  },
+): Promise<{ readonly userId: string | null }> {
+  const { table } = MEMBER_TABLES[input.on.kind];
+  const member = await getMember(db, input.on, input.memberId);
+  if (input.by.role !== "owner" && member.user_id !== input.by.userId) {
+    throw new ForbiddenError("owner");
+  }
+  await assertKeepsAnOwner(db, input.on, member, null);
+  await db.prepare(`DELETE FROM ${table} WHERE id = ?`).bind(member.id).run();
+  return { userId: member.user_id };
+}
+
+export const removeMember = (
   db: D1Database,
   input: {
     readonly docId: string;
     readonly memberId: string;
     readonly by: { readonly userId: string; readonly role: DocRole };
   },
-): Promise<{ readonly userId: string | null }> {
-  const member = await getMember(db, input.docId, input.memberId);
-  if (input.by.role !== "owner" && member.user_id !== input.by.userId) {
-    throw new ForbiddenError("owner");
-  }
-  await assertKeepsAnOwner(db, member, null);
-  await db.prepare("DELETE FROM doc_members WHERE id = ?").bind(member.id).run();
-  return { userId: member.user_id };
-}
+) => removeScopeMember(db, { ...input, on: docScope(input.docId) });
 
 /**
  * Narrows the library to the docs the user belongs to. The admin keeps every
@@ -449,8 +545,8 @@ export async function scopeLibrary(
 }
 
 /**
- * Everyone on a doc the user is also on, as share suggestions: people by
- * their primary address and pending invites by theirs. Never the user.
+ * Everyone on a doc or diagram the user is also on, as share suggestions:
+ * people by their primary address and pending invites by theirs. Never the user.
  */
 export async function listPeople(
   db: D1Database,
@@ -461,12 +557,18 @@ export async function listPeople(
     .prepare(
       `SELECT DISTINCT o.user_id, o.email AS pending_email, u.email AS user_email, u.name
        FROM doc_members o
-       JOIN doc_members me ON me.doc_id = o.doc_id AND me.user_id = ?
+       JOIN doc_members me ON me.doc_id = o.doc_id AND me.user_id = ?1
        LEFT JOIN users u ON u.id = o.user_id
-       WHERE o.user_id IS NULL OR o.user_id <> ?
+       WHERE o.user_id IS NULL OR o.user_id <> ?1
+       UNION
+       SELECT DISTINCT o.user_id, o.email AS pending_email, u.email AS user_email, u.name
+       FROM diagram_members o
+       JOIN diagram_members me ON me.diagram_id = o.diagram_id AND me.user_id = ?1
+       LEFT JOIN users u ON u.id = o.user_id
+       WHERE o.user_id IS NULL OR o.user_id <> ?1
        LIMIT 500`,
     )
-    .bind(userId, userId)
+    .bind(userId)
     .all<{
       user_id: string | null;
       pending_email: string | null;

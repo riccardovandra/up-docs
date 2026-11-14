@@ -79,7 +79,7 @@ export function diagramErrorMessage(cause: unknown): string {
   if (cause instanceof ApiError) {
     const message = (cause.body as { readonly message?: unknown }).message;
     if (typeof message === "string" && message !== "") return message;
-    if (cause.status === 403) return "Only the diagram's creator can change it.";
+    if (cause.status === 403) return "Your role on this diagram does not allow that. Ask one of its owners.";
     if (cause.status === 404) return "This diagram no longer exists.";
   }
   return "The server could not be reached. Check your connection and try again.";

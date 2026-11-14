@@ -1,10 +1,13 @@
 // Draw.io diagrams: the store, who may see and change one, and where one is
 // linked. The REST API and the MCP tools call these, so both share one
-// behaviour. A diagram is managed by its creator and the admin. A doc that links
-// it shows it to the people on that doc only when its creator can edit that doc
-// (see `canViewDiagram`); they see its picture and what it shows, never its source.
+// behaviour. A diagram is shared like a doc: its people (diagram_members) hold
+// the doc roles, and the admin owns every diagram. A doc that links it also
+// shows it to the people on that doc, as viewers, when someone who can edit the
+// diagram can edit that doc (see `diagramAccess`). Viewers and commenters see
+// its picture and what it shows, never its source.
 
-import { canEdit as canEditDoc, isAdmin, type DocRole } from "../shared/access.ts";
+import { canEdit as canEditDoc, hasRole, isAdmin, type DocRole } from "../shared/access.ts";
+import { diagramOwnerStatement, diagramScope, memberRole } from "./access.ts";
 import {
   checkDiagramXml,
   DIAGRAM_PICTURE_TYPES,
@@ -26,10 +29,13 @@ import { randomId } from "./crypto.ts";
 import { getProject, NotFoundError } from "./docs.ts";
 import { matchesType, type ImageStore } from "./images.ts";
 
-/** The person can see the diagram's picture but does not manage the diagram. */
+/** The person can see the diagram, but their role does not allow what they asked. */
 export class DiagramForbiddenError extends Error {
-  constructor() {
-    super("forbidden: diagram");
+  readonly required: DocRole;
+
+  constructor(required: DocRole) {
+    super(`forbidden: diagram ${required}`);
+    this.required = required;
   }
 }
 
@@ -111,21 +117,34 @@ export function diagramSummary(diagram: DiagramSummary): DiagramSummary {
   };
 }
 
-/** The diagram as one caller may see it: the source only for someone who manages it. */
-export const diagramView = (diagram: Diagram, canEdit: boolean): DiagramView => ({
-  ...diagramSummary(diagram),
-  canEdit,
-  xml: canEdit ? diagram.xml : null,
-});
+/**
+ * What one person may do with a diagram. `member` is false for someone who
+ * sees it only through a doc that links it: they are not on its people list.
+ */
+export interface DiagramAccess {
+  readonly role: DocRole;
+  readonly member: boolean;
+}
+
+/** The creator's access to a diagram they just made. */
+export const OWNER_ACCESS: DiagramAccess = { role: "owner", member: true };
+
+/** The diagram as one caller may see it: the source only for someone who can edit it. */
+export const diagramView = (diagram: Diagram, access: DiagramAccess): DiagramView => {
+  const canEdit = canEditDoc(access.role);
+  return {
+    ...diagramSummary(diagram),
+    canEdit,
+    role: access.role,
+    member: access.member,
+    xml: canEdit ? diagram.xml : null,
+  };
+};
 
 function assertSource(xml: string): void {
   const problem = checkDiagramXml(xml);
   if (problem) throw new InvalidDiagramError(problem.code, problem.message);
 }
-
-/** The creator and the admin manage a diagram: edit, rename, move and delete it. */
-export const canEditDiagram = (diagram: Pick<DiagramSummary, "createdBy">, userId: string) =>
-  isAdmin(userId) || (diagram.createdBy !== null && diagram.createdBy === userId);
 
 interface LinkRow {
   tab_id: string;
@@ -134,41 +153,39 @@ interface LinkRow {
   doc_id: string;
   doc_title: string;
   readable: number;
-  creator_role: DocRole | null;
+  by_editor: number;
 }
 
 /**
  * Every ```t3-drawio block in the tabs, read from their markdown: there is no
  * index table. `diagramId` narrows the scan to tabs that mention that id.
- * `readable` says whether `userId` is on the tab's doc, and `byCreator` whether
- * `creatorId` is a member of it who can edit it.
+ * `readable` says whether `userId` is on the tab's doc, and, with `diagramId`,
+ * `byEditor` whether someone who can edit that diagram can also edit the doc.
  */
 async function linkedTabs(
   db: D1Database,
   input: {
     readonly diagramId?: string | undefined;
     readonly userId?: string | undefined;
-    readonly creatorId?: string | undefined;
   },
 ): Promise<
-  ReadonlyArray<{ diagramId: string; use: DiagramUse; readable: boolean; byCreator: boolean }>
+  ReadonlyArray<{ diagramId: string; use: DiagramUse; readable: boolean; byEditor: boolean }>
 > {
   const { results } = await db
     .prepare(
       `SELECT t.id AS tab_id, t.title AS tab_title, t.markdown, t.doc_id, d.title AS doc_title,
-         (m.user_id IS NOT NULL) AS readable, c.role AS creator_role
+         (m.user_id IS NOT NULL) AS readable,
+         (?3 IS NOT NULL AND EXISTS (
+           SELECT 1 FROM doc_members c
+           JOIN diagram_members g ON g.user_id = c.user_id
+           WHERE c.doc_id = t.doc_id AND c.role IN ('owner', 'editor')
+             AND g.diagram_id = ?3 AND g.role IN ('owner', 'editor'))) AS by_editor
        FROM tabs t JOIN docs d ON d.id = t.doc_id
        LEFT JOIN doc_members m ON m.doc_id = t.doc_id AND m.user_id = ?1
-       LEFT JOIN doc_members c ON c.doc_id = t.doc_id AND c.user_id = ?4
        WHERE instr(t.markdown, ?2) > 0 AND (?3 IS NULL OR instr(t.markdown, ?3) > 0)
        ORDER BY d.title COLLATE NOCASE, d.id, t.position, t.id`,
     )
-    .bind(
-      input.userId ?? null,
-      DRAWIO_LANGUAGE,
-      input.diagramId ?? null,
-      input.creatorId ?? null,
-    )
+    .bind(input.userId ?? null, DRAWIO_LANGUAGE, input.diagramId ?? null)
     .all<LinkRow>();
   return results.flatMap((row) => {
     const ids = new Set<string>();
@@ -185,12 +202,11 @@ async function linkedTabs(
       tabId: row.tab_id,
       tabTitle: row.tab_title,
     };
-    const byCreator = canEditDoc(row.creator_role);
     return [...ids].map((diagramId) => ({
       diagramId,
       use,
       readable: row.readable === 1,
-      byCreator,
+      byEditor: row.by_editor === 1,
     }));
   });
 }
@@ -230,27 +246,38 @@ export async function diagramUsesById(
 }
 
 /**
- * Whether the person may see the diagram: they manage it, or they are on a doc
- * that links it and that the diagram's creator can edit. Anyone who edits a doc
- * can put any diagram's id in a block, so a link counts only where the creator
- * is a member who could have put it there. Membership is the doc's own list:
- * the admin manages every diagram, but being on a doc counts only for the ones
- * the admin created. A diagram whose creator is gone is the admin's alone.
+ * What the person may do with the diagram, or null when they may not see it.
+ * The admin owns every diagram; anyone on its people list has their role
+ * there. Otherwise someone on a doc that links it views it, but only where a
+ * person who can edit the diagram can also edit that doc: anyone who edits a
+ * doc can put any diagram's id in a block, so a link counts only where someone
+ * who could have put it there is a member. Membership is the doc's own list:
+ * the admin owns every diagram, but being on a doc counts only for the ones
+ * the admin is on the people list of.
  */
-export async function canViewDiagram(
+export async function diagramAccess(
   db: D1Database,
-  diagram: Pick<DiagramSummary, "id" | "createdBy">,
+  diagram: Pick<DiagramSummary, "id">,
   userId: string,
-): Promise<boolean> {
-  if (canEditDiagram(diagram, userId)) return true;
-  if (diagram.createdBy === null) return false;
-  const links = await linkedTabs(db, {
-    diagramId: diagram.id,
-    userId,
-    creatorId: diagram.createdBy,
-  });
-  return links.some((link) => link.readable && link.byCreator);
+): Promise<DiagramAccess | null> {
+  if (isAdmin(userId)) return OWNER_ACCESS;
+  const role = await memberRole(db, diagramScope(diagram.id), userId);
+  if (role) return { role, member: true };
+  const links = await linkedTabs(db, { diagramId: diagram.id, userId });
+  return links.some((link) => link.readable && link.byEditor)
+    ? { role: "viewer", member: false }
+    : null;
 }
+
+/** What each ask on a diagram needs: see it, comment on it, change it, or share, move and delete it. */
+export type DiagramNeed = "view" | "comment" | "edit" | "owner";
+
+const NEED_ROLE: Readonly<Record<DiagramNeed, DocRole>> = {
+  view: "viewer",
+  comment: "commenter",
+  edit: "editor",
+  owner: "owner",
+};
 
 export async function getDiagram(db: D1Database, diagramId: string): Promise<Diagram> {
   const row = await db
@@ -264,27 +291,30 @@ export async function getDiagram(db: D1Database, diagramId: string): Promise<Dia
 /**
  * The diagram, once `userId` is known to have the access asked for. A diagram
  * the person cannot see at all is NotFoundError, as with docs, so ids do not
- * reveal what exists; one they can only view is DiagramForbiddenError when
- * `need` is "edit". A viewer must never be handed `diagram.xml`.
+ * reveal what exists; one whose role falls short of `need` is
+ * DiagramForbiddenError. Only someone who can edit may be handed `diagram.xml`.
  */
 export async function requireDiagram(
   db: D1Database,
-  input: { readonly diagramId: string; readonly userId: string; readonly need: "view" | "edit" },
-): Promise<{ readonly diagram: Diagram; readonly canEdit: boolean }> {
+  input: { readonly diagramId: string; readonly userId: string; readonly need: DiagramNeed },
+): Promise<{
+  readonly diagram: Diagram;
+  readonly canEdit: boolean;
+  readonly access: DiagramAccess;
+}> {
   const diagram = await getDiagram(db, input.diagramId);
-  const canEdit = canEditDiagram(diagram, input.userId);
-  if (!canEdit && !(await canViewDiagram(db, diagram, input.userId))) {
-    throw new NotFoundError("diagram");
-  }
-  if (input.need === "edit" && !canEdit) throw new DiagramForbiddenError();
-  return { diagram, canEdit };
+  const access = await diagramAccess(db, diagram, input.userId);
+  if (!access) throw new NotFoundError("diagram");
+  const required = NEED_ROLE[input.need];
+  if (!hasRole(access.role, required)) throw new DiagramForbiddenError(required);
+  return { diagram, canEdit: canEditDoc(access.role), access };
 }
 
 /**
  * The diagrams among `diagramIds` that `userId` may see, as they are now and
  * without their source, for an open page to re-read. The rule is
  * `requireDiagram`'s: one the person cannot see is left out, like one that is
- * gone. Someone who manages a diagram is also told where it is linked.
+ * gone. Someone who can edit a diagram is also told where it is linked.
  */
 export async function refreshDiagrams(
   db: D1Database,
@@ -301,31 +331,35 @@ export async function refreshDiagrams(
     .all<SummaryRow>();
   const seen = await Promise.all(
     results.map(toSummary).map(async (diagram): Promise<DiagramRefresh | null> => {
-      if (canEditDiagram(diagram, userId)) {
+      const access = await diagramAccess(db, diagram, userId);
+      if (!access) return null;
+      if (canEditDoc(access.role)) {
         const usage = await diagramUsage(db, { diagramId: diagram.id, userId });
-        return { ...diagram, canEdit: true, usage };
+        return { ...diagram, canEdit: true, role: access.role, usage };
       }
-      return (await canViewDiagram(db, diagram, userId))
-        ? { ...diagram, canEdit: false, usage: null }
-        : null;
+      return { ...diagram, canEdit: false, role: access.role, usage: null };
     }),
   );
   return seen.filter((diagram) => diagram !== null);
 }
 
 /**
- * The diagrams a person manages, newest edit first: their own, or every
- * diagram for the admin. `projectId` narrows to one project, or to diagrams in
- * no project when null.
+ * The diagrams a person is on, newest edit first, with their role on each:
+ * every diagram for the admin. `projectId` narrows to one project, or to
+ * diagrams in no project when null.
  */
 export async function listDiagrams(
   db: D1Database,
   input: { readonly userId: string; readonly projectId?: string | null | undefined },
-): Promise<ReadonlyArray<DiagramSummary>> {
+): Promise<ReadonlyArray<DiagramSummary & { readonly role: DocRole }>> {
   const { results } = await db
     .prepare(
-      `SELECT ${SUMMARY_COLUMNS} FROM diagrams
-       WHERE (?1 OR created_by = ?2) AND (?3 OR project_id IS ?4)
+      `SELECT ${SUMMARY_COLUMNS}, (SELECT m.role FROM diagram_members m
+           WHERE m.diagram_id = diagrams.id AND m.user_id = ?2) AS role
+       FROM diagrams
+       WHERE (?1 OR EXISTS (SELECT 1 FROM diagram_members m
+           WHERE m.diagram_id = diagrams.id AND m.user_id = ?2))
+         AND (?3 OR project_id IS ?4)
        ORDER BY updated_at DESC, id`,
     )
     .bind(
@@ -334,8 +368,12 @@ export async function listDiagrams(
       input.projectId === undefined ? 1 : 0,
       input.projectId ?? null,
     )
-    .all<SummaryRow>();
-  return results.map(toSummary);
+    .all<SummaryRow & { role: DocRole | null }>();
+  // The admin owns every diagram, on its list or not.
+  return results.map((row) => ({
+    ...toSummary(row),
+    role: isAdmin(input.userId) ? "owner" : (row.role ?? "viewer"),
+  }));
 }
 
 /**
@@ -368,22 +406,28 @@ export async function createDiagram(
     createdAt: input.now,
     updatedAt: input.now,
   };
-  await db
-    .prepare(
-      `INSERT INTO diagrams (id, project_id, title, xml, version, picture_version, created_by,
-         created_at, updated_at)
-       VALUES (?, ?, ?, ?, 1, NULL, ?, ?, ?)`,
-    )
-    .bind(
-      diagram.id,
-      diagram.projectId,
-      diagram.title,
-      diagram.xml,
-      diagram.createdBy,
-      diagram.createdAt,
-      diagram.updatedAt,
-    )
-    .run();
+  await db.batch([
+    db
+      .prepare(
+        `INSERT INTO diagrams (id, project_id, title, xml, version, picture_version, created_by,
+           created_at, updated_at)
+         VALUES (?, ?, ?, ?, 1, NULL, ?, ?, ?)`,
+      )
+      .bind(
+        diagram.id,
+        diagram.projectId,
+        diagram.title,
+        diagram.xml,
+        diagram.createdBy,
+        diagram.createdAt,
+        diagram.updatedAt,
+      ),
+    diagramOwnerStatement(db, {
+      diagramId: diagram.id,
+      userId: input.createdBy,
+      now: input.now,
+    }),
+  ]);
   return diagram;
 }
 

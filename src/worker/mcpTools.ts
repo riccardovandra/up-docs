@@ -89,7 +89,7 @@ import { findWidgetFences, spliceFenceSource } from "../shared/widget/fence.ts";
 import { MAX_LABEL_LENGTH, rewriteLabel } from "../shared/widget/rewrite.ts";
 import { analyzeWidget, formatDiagnostic } from "../shared/widget/validate.ts";
 import * as Access from "./access.ts";
-import { importDeps, inviteByEmail, type ApiDeps } from "./api.ts";
+import { importDeps, inviteToScope, type ApiDeps } from "./api.ts";
 import type { Principal } from "./auth.ts";
 import * as Comments from "./comments.ts";
 import * as DiagramComments from "./diagramComments.ts";
@@ -581,7 +581,7 @@ async function load<A>(promise: Promise<A>, what: string): Promise<A> {
     if (cause instanceof Access.ForbiddenError) {
       return fail(
         "forbidden",
-        `This needs ${cause.required} access to the doc.`,
+        `This needs ${cause.required} access to the ${what}.`,
       );
     }
     if (cause instanceof Access.ReservedEmailError) {
@@ -591,7 +591,7 @@ async function load<A>(promise: Promise<A>, what: string): Promise<A> {
       );
     }
     if (cause instanceof Access.LastOwnerError) {
-      return fail("last_owner", "A doc must keep at least one owner.");
+      return fail("last_owner", `A ${what} must keep at least one owner.`);
     }
     if (cause instanceof Facts.TooManyFactsError) {
       return fail(
@@ -633,6 +633,29 @@ const scopedLibrary = (ctx: ToolContext) =>
     userId: ctx.principal.userId,
     owners: ctx.deps.owners,
   });
+
+/**
+ * The doc or Draw.io diagram list_members, share_doc and unshare_doc act on,
+ * with the token user's role there. Only people on a diagram's list see it:
+ * someone who views it through a doc that links it reads it as not found.
+ */
+async function shareTarget(
+  ctx: ToolContext,
+  args: Args,
+): Promise<{ readonly scope: Access.MemberScope; readonly role: DocRole; readonly noun: "doc" | "diagram" }> {
+  if ((args.docId === undefined) === (args.diagramId === undefined)) {
+    fail("invalid_argument", 'Pass "docId" for a doc, or "diagramId" for a Draw.io diagram (one of them).');
+  }
+  if (args.docId !== undefined) {
+    const docId = requireString(args, "docId");
+    return { scope: { kind: "doc", id: docId }, role: await need(ctx, docId, "viewer"), noun: "doc" };
+  }
+  const { diagram, access } = await drawioWith(ctx, drawioIdArg(args), "view");
+  if (!access.member) {
+    fail("not_found", "No Draw.io diagram with that id that you can see. list_drawio lists the ones you are on.");
+  }
+  return { scope: Access.diagramScope(diagram.id), role: access.role, noun: "diagram" };
+}
 
 const memberSummary = (member: DocMember) => ({
   email: member.email,
@@ -833,7 +856,7 @@ const DRAWIO_GUIDE = {
 };
 
 const PICTURE_PENDING =
-  "No current picture: Draw.io draws it the first time a person who manages the diagram opens it or a doc that links it.";
+  "No current picture: Draw.io draws it the first time a person who can edit the diagram opens it or a doc that links it.";
 
 const drawioUrl = (ctx: ToolContext, diagramId: string) =>
   `${ctx.origin}${diagramPath(diagramId)}`;
@@ -860,7 +883,7 @@ async function drawioLinkFor(
   return { token, expiresAt: new Date(expiresAt).toISOString() };
 }
 
-/** The whole, uncompressed Draw.io file of a diagram the token user manages. */
+/** The whole, uncompressed Draw.io file of a diagram the token user can edit. */
 export async function drawioDownload(ctx: ToolContext, diagramId: string) {
   const { diagram } = await drawioWith(ctx, diagramId, "edit");
   return {
@@ -884,11 +907,11 @@ function drawioIdArg(args: Args): string {
   );
 }
 
-/** A Draw.io diagram the token user may view or, with "edit", change. */
+/** A Draw.io diagram the token user's role on it allows `need` for. */
 async function drawioWith(
   ctx: ToolContext,
   diagramId: string,
-  need: "view" | "edit",
+  need: Diagrams.DiagramNeed,
 ) {
   try {
     return await Diagrams.requireDiagram(ctx.deps.db, {
@@ -900,13 +923,14 @@ async function drawioWith(
     if (cause instanceof Docs.NotFoundError) {
       return fail(
         "not_found",
-        "No Draw.io diagram with that id that you can see. list_drawio lists the ones you manage.",
+        "No Draw.io diagram with that id that you can see. list_drawio lists the ones you are on.",
       );
     }
     if (cause instanceof Diagrams.DiagramForbiddenError) {
       return fail(
         "forbidden",
-        "Only the diagram's creator and the workspace admin can change it. read_drawio still describes it, and create_drawio draws one of your own.",
+        `This needs the ${cause.required} role on the diagram, and you have less. read_drawio still describes it, create_drawio draws one of your own, and a diagram owner can give you more with share_doc {diagramId}.`,
+        { required: cause.required },
       );
     }
     throw cause;
@@ -961,7 +985,7 @@ async function diagramThreads(ctx: ToolContext, diagram: Diagram, includeResolve
 /**
  * The diagram comment a reply_comment or resolve_comment names: always when
  * `diagramId` is given, else when `commentId` is no doc comment. Null for a
- * doc comment. The token user must manage the diagram.
+ * doc comment. The token user must be able to comment on the diagram.
  */
 async function diagramCommentArg(
   ctx: ToolContext,
@@ -987,7 +1011,7 @@ async function diagramCommentArg(
   if (diagramId !== null && comment.diagramId !== diagramId) {
     fail("not_found", "No comment with that id on this diagram.");
   }
-  const { diagram } = await drawioWith(ctx, comment.diagramId, "edit");
+  const { diagram } = await drawioWith(ctx, comment.diagramId, "comment");
   return { comment, diagram };
 }
 
@@ -1042,13 +1066,17 @@ async function drawioXmlArg(args: Args): Promise<{
 const pageNames = (model: DrawioModel): ReadonlyArray<string | null> =>
   model.ok ? model.pages.map((page) => page.name) : [];
 
-const drawioSummary = (ctx: ToolContext, diagram: DiagramSummary) => ({
+const drawioSummary = (
+  ctx: ToolContext,
+  diagram: DiagramSummary & { readonly role?: DocRole },
+) => ({
   diagramId: diagram.id,
   title: diagram.title,
   projectId: diagram.projectId,
   version: diagram.version,
   updatedAt: new Date(diagram.updatedAt).toISOString(),
   url: drawioUrl(ctx, diagram.id),
+  ...(diagram.role ? { role: diagram.role } : {}),
 });
 
 const drawioUse = (ctx: ToolContext, use: DiagramUse) => ({
@@ -1721,35 +1749,42 @@ export const TOOLS = [
   {
     name: "list_members",
     description:
-      "List the people who can open a doc and their roles (owner, editor, commenter, viewer). Pending people were invited but have not signed in yet.",
+      "List the people who can open a doc, or a Draw.io diagram (diagramId instead of docId), and their roles (owner, editor, commenter, viewer). Pending people were invited but have not signed in yet.",
     inputSchema: {
       type: "object",
-      properties: { docId: { type: "string" } },
-      required: ["docId"],
+      properties: {
+        docId: { type: "string" },
+        diagramId: { type: "string", description: "A Draw.io diagram's id or link, instead of docId." },
+      },
     },
   },
   {
     name: "share_doc",
     description:
-      "Give a person access to a doc by email, or change their role. Docs are private until shared. New people get an email with the link when email is set up; the result says if none was sent. Owner only.",
+      "Give a person access to a doc, or to a Draw.io diagram (diagramId instead of docId), by email, or change their role. Docs and diagrams are private until shared. On a diagram, editors change the drawing, commenters comment and viewers see it. New people get an email with the link when email is set up; the result says if none was sent. Owner only.",
     inputSchema: {
       type: "object",
       properties: {
         docId: { type: "string" },
+        diagramId: { type: "string", description: "A Draw.io diagram's id or link, instead of docId." },
         email: { type: "string" },
         role: { type: "string", enum: DOC_ROLES },
       },
-      required: ["docId", "email", "role"],
+      required: ["email", "role"],
     },
   },
   {
     name: "unshare_doc",
     description:
-      "Remove a person's access to a doc. Owner only; a doc keeps at least one owner.",
+      "Remove a person's access to a doc, or to a Draw.io diagram (diagramId instead of docId). Owner only, except that anyone may remove themselves; each keeps at least one owner.",
     inputSchema: {
       type: "object",
-      properties: { docId: { type: "string" }, email: { type: "string" } },
-      required: ["docId", "email"],
+      properties: {
+        docId: { type: "string" },
+        diagramId: { type: "string", description: "A Draw.io diagram's id or link, instead of docId." },
+        email: { type: "string" },
+      },
+      required: ["email"],
     },
   },
   {
@@ -1783,7 +1818,7 @@ export const TOOLS = [
   {
     name: "list_drawio",
     description:
-      "List the Draw.io diagrams you manage (the ones you created; every diagram for the workspace admin), most recently changed first, each with the docs that link it. These are library items a person draws in the Draw.io editor, not the ```t3-widget diagrams read_diagram reads. Narrow to one project with projectId or projectKey, or pass noProject: true.",
+      "List the Draw.io diagrams you are on (ones you created or that were shared with you; every diagram for the workspace admin), most recently changed first, each with your role and the docs that link it. These are library items a person draws in the Draw.io editor, not the ```t3-widget diagrams read_diagram reads. Narrow to one project with projectId or projectKey, or pass noProject: true.",
     inputSchema: {
       type: "object",
       properties: {
@@ -1796,7 +1831,7 @@ export const TOOLS = [
   {
     name: "read_drawio",
     description:
-      'Read one Draw.io diagram from the library, by its id (the first line of a ```t3-drawio block) or its link (<origin>/diagrams/<id>): title, project, the docs that use it, pageNames (its pages, in order), its shapes and its connections ("A -> B", "A -[label]-> B"), per page when the file has several, its version, and openComments (open comment threads with page, shapeId and quote). The current picture of the first page, or of `page`, comes attached as a PNG image when there is one. Pass includeXml: true for the Draw.io XML (an <mxfile> holding every page when there are several), which only the diagram\'s creator and the workspace admin get; you need it to change the diagram with update_drawio. To change a diagram with a shell, pass downloadLink: true instead: you get a one-time link that saves the whole file to disk with curl in under a second, and reading the XML into the reply costs minutes on a large file. Edit the file with a script, then send it back with prepare_drawio_upload.',
+      'Read one Draw.io diagram from the library, by its id (the first line of a ```t3-drawio block) or its link (<origin>/diagrams/<id>): title, project, the docs that use it, pageNames (its pages, in order), its shapes and its connections ("A -> B", "A -[label]-> B"), per page when the file has several, its version, and openComments (open comment threads with page, shapeId and quote). The current picture of the first page, or of `page`, comes attached as a PNG image when there is one. Pass includeXml: true for the Draw.io XML (an <mxfile> holding every page when there are several), which only the diagram\'s owners and editors get; you need it to change the diagram with update_drawio. To change a diagram with a shell, pass downloadLink: true instead: you get a one-time link that saves the whole file to disk with curl in under a second, and reading the XML into the reply costs minutes on a large file. Edit the file with a script, then send it back with prepare_drawio_upload.',
     inputSchema: {
       type: "object",
       properties: {
@@ -1823,7 +1858,7 @@ export const TOOLS = [
   {
     name: "create_drawio",
     description:
-      'Draw a new Draw.io diagram into the library from Draw.io XML (format_guide {topic: "drawio"} first). For XML over about 20 KB, or any file already on disk, use prepare_drawio_upload instead: typing a large file into this call takes many minutes. File it like create_doc: projectKey (with projectName if the project is new) or projectId; omit both for no project. Returns the id, the link and `block`, the exact ```t3-drawio block to paste into a doc tab. It opens in the same editor as a hand-drawn diagram. Its picture appears the first time a person who manages the diagram opens it. `theme` gives the project\'s diagram theme and its style lines; when the project has a theme and no cell sets its own fillColor, strokeColor or fontColor, the XML is restyled to it before it is stored (applyTheme: true always restyles, false never).',
+      'Draw a new Draw.io diagram into the library from Draw.io XML (format_guide {topic: "drawio"} first). For XML over about 20 KB, or any file already on disk, use prepare_drawio_upload instead: typing a large file into this call takes many minutes. File it like create_doc: projectKey (with projectName if the project is new) or projectId; omit both for no project. Returns the id, the link and `block`, the exact ```t3-drawio block to paste into a doc tab. It opens in the same editor as a hand-drawn diagram. You become its owner; share it with share_doc {diagramId}. Its picture appears the first time a person who can edit the diagram opens it. `theme` gives the project\'s diagram theme and its style lines; when the project has a theme and no cell sets its own fillColor, strokeColor or fontColor, the XML is restyled to it before it is stored (applyTheme: true always restyles, false never).',
     inputSchema: {
       type: "object",
       properties: {
@@ -1848,7 +1883,7 @@ export const TOOLS = [
   {
     name: "update_drawio",
     description:
-      "Change a Draw.io diagram you manage: its XML, its title, or both. For XML over about 20 KB, or any file already on disk, use prepare_drawio_upload {diagramId, baseVersion} instead: typing a large file into this call takes many minutes. Pass the version you read as baseVersion. xml replaces the whole source, so start from read_drawio {includeXml: true}: for a diagram of several pages send the whole <mxfile> back (one <mxGraphModel> is refused, since it would delete the other pages), and a page you leave out is deleted. If someone saved since then nothing is written and the current version is returned: read again and redo your change. Every doc that links the diagram shows the change.",
+      "Change a Draw.io diagram you own or edit: its XML, its title, or both. For XML over about 20 KB, or any file already on disk, use prepare_drawio_upload {diagramId, baseVersion} instead: typing a large file into this call takes many minutes. Pass the version you read as baseVersion. xml replaces the whole source, so start from read_drawio {includeXml: true}: for a diagram of several pages send the whole <mxfile> back (one <mxGraphModel> is refused, since it would delete the other pages), and a page you leave out is deleted. If someone saved since then nothing is written and the current version is returned: read again and redo your change. Every doc that links the diagram shows the change.",
     inputSchema: {
       type: "object",
       properties: {
@@ -1909,7 +1944,7 @@ export const TOOLS = [
   {
     name: "set_diagram_theme",
     description:
-      "Choose the theme of one Draw.io diagram you manage (diagramId), or the default theme of a project's diagrams (projectKey or projectId; workspace admin only). themeId null makes the diagram follow its project again, or the project fall back to Neutral. Setting a theme changes no drawing: pass restyle: true (diagrams only) to also restyle the current version to the theme and save it as a new version; the result has the restyle summary and the new version.",
+      "Choose the theme of one Draw.io diagram you own or edit (diagramId), or the default theme of a project's diagrams (projectKey or projectId; workspace admin only). themeId null makes the diagram follow its project again, or the project fall back to Neutral. Setting a theme changes no drawing: pass restyle: true (diagrams only) to also restyle the current version to the theme and save it as a new version; the result has the restyle summary and the new version.",
     inputSchema: {
       type: "object",
       properties: {
@@ -2631,7 +2666,7 @@ const handlers: Record<
   create_comment: async (args, ctx) => {
     if (args.diagramId !== undefined) {
       const body = requireString(args, "body", MAX_DIAGRAM_COMMENT_LENGTH);
-      const { diagram } = await drawioWith(ctx, drawioIdArg(args), "edit");
+      const { diagram } = await drawioWith(ctx, drawioIdArg(args), "comment");
       let placed: Awaited<ReturnType<typeof DiagramComments.resolveNewAnchor>>;
       try {
         placed = await DiagramComments.resolveNewAnchor(diagram.xml, args.anchor ?? {});
@@ -2904,18 +2939,12 @@ const handlers: Record<
   },
 
   list_members: async (args, ctx) => {
-    const docId = requireString(args, "docId");
-    await need(ctx, docId, "viewer");
-    const members = await Access.listMembers(
-      ctx.deps.db,
-      docId,
-      ctx.deps.owners,
-    );
+    const target = await shareTarget(ctx, args);
+    const members = await Access.listScopeMembers(ctx.deps.db, target.scope, ctx.deps.owners);
     return { members: members.map(memberSummary) };
   },
 
   share_doc: async (args, ctx) => {
-    const docId = requireString(args, "docId");
     const email = requireString(args, "email", 320);
     if (!email.includes("@"))
       fail("invalid_argument", '"email" must be an email address.');
@@ -2925,21 +2954,26 @@ const handlers: Record<
         "invalid_argument",
         `"role" must be one of ${DOC_ROLES.join(", ")}.`,
       );
-    await need(ctx, docId, "owner");
+    const target = await shareTarget(ctx, args);
+    if (target.role !== "owner") {
+      fail("forbidden", `Only an owner of this ${target.noun} can share it.`, {
+        required: "owner",
+      });
+    }
     const { member, created } = await load(
-      Access.shareDoc(ctx.deps.db, {
-        docId,
+      Access.shareScope(ctx.deps.db, {
+        on: target.scope,
         email,
         role,
         addedBy: ctx.principal.userId,
         owners: ctx.deps.owners,
         now: ctx.deps.now(),
       }),
-      "doc",
+      target.noun,
     );
     if (!created) return { member: memberSummary(member), added: false };
-    const delivery = await inviteByEmail(ctx.deps, {
-      docId,
+    const delivery = await inviteToScope(ctx.deps, {
+      scope: target.scope,
       to: member.email,
       principal: ctx.principal,
     });
@@ -2948,34 +2982,38 @@ const handlers: Record<
       member: memberSummary(member),
       added: true,
       emailSent: delivery === "sent",
-      ...(notice ? { notice, docUrl: `${ctx.origin}/d/${docId}` } : {}),
+      ...(notice
+        ? {
+            notice,
+            ...(target.scope.kind === "doc"
+              ? { docUrl: `${ctx.origin}/d/${target.scope.id}` }
+              : { diagramUrl: drawioUrl(ctx, target.scope.id) }),
+          }
+        : {}),
     };
   },
 
   unshare_doc: async (args, ctx) => {
-    const docId = requireString(args, "docId");
     const email = requireString(args, "email", 320);
-    const role = await need(ctx, docId, "viewer");
-    const memberId = await Access.findMemberId(ctx.deps.db, {
-      docId,
+    const target = await shareTarget(ctx, args);
+    const memberId = await Access.findScopeMemberId(ctx.deps.db, {
+      on: target.scope,
       email,
       owners: ctx.deps.owners,
     });
-    if (!memberId) fail("not_found", "That email has no access to this doc.");
+    if (!memberId) fail("not_found", `That email has no access to this ${target.noun}.`);
     const { userId } = await load(
-      Access.removeMember(ctx.deps.db, {
-        docId,
+      Access.removeScopeMember(ctx.deps.db, {
+        on: target.scope,
         memberId,
-        by: { userId: ctx.principal.userId, role },
+        by: { userId: ctx.principal.userId, role: target.role },
       }),
-      "doc",
+      target.noun,
     );
-    if (userId) await ctx.deps.rooms.closeSockets(docId, userId);
-    const members = await Access.listMembers(
-      ctx.deps.db,
-      docId,
-      ctx.deps.owners,
-    );
+    if (userId && target.scope.kind === "doc") {
+      await ctx.deps.rooms.closeSockets(target.scope.id, userId);
+    }
+    const members = await Access.listScopeMembers(ctx.deps.db, target.scope, ctx.deps.owners);
     return { members: members.map(memberSummary) };
   },
 
@@ -3080,13 +3118,13 @@ const handlers: Record<
     if (args.includeXml === true && !canEdit) {
       fail(
         "forbidden",
-        "Only the diagram's creator and the workspace admin get its Draw.io XML. Call read_drawio without includeXml for its shapes, connections and picture.",
+        "Only the diagram's owners and editors get its Draw.io XML. Call read_drawio without includeXml for its shapes, connections and picture.",
       );
     }
     if (args.downloadLink === true && !canEdit) {
       fail(
         "forbidden",
-        "Only the diagram's creator and the workspace admin can download its Draw.io file. Call read_drawio without downloadLink for its shapes, connections and picture.",
+        "Only the diagram's owners and editors can download its Draw.io file. Call read_drawio without downloadLink for its shapes, connections and picture.",
       );
     }
     const download =
@@ -3110,7 +3148,7 @@ const handlers: Record<
       project,
       canEdit,
       usedIn: usage.uses.map((use) => drawioUse(ctx, use)),
-      // How many docs the person is not on is for those who manage the diagram.
+      // How many docs the person is not on is for those who can edit the diagram.
       ...(canEdit && usage.otherDocs > 0
         ? { usedInOtherDocs: usage.otherDocs }
         : {}),
