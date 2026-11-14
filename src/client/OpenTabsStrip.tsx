@@ -1,7 +1,14 @@
 import type { MouseEvent } from "react";
 
-import { CloseIcon, DocIcon, HomeIcon } from "./home/icons.tsx";
-import { closeOpenTab, openTabKey, rememberTab, type OpenTab } from "./openTabs.ts";
+import { CloseIcon, DiagramIcon, DocIcon, HomeIcon } from "./home/icons.tsx";
+import {
+  closeOpenTab,
+  openTabKey,
+  openTabKind,
+  rememberTab,
+  type OpenTab,
+} from "./openTabs.ts";
+import { SheetIcon } from "./sheets/SheetIcon.tsx";
 import { navigate, parseRoute, subscribePathname, type Route } from "./router.ts";
 
 const follow = (path: string) => (event: MouseEvent) => {
@@ -10,7 +17,14 @@ const follow = (path: string) => (event: MouseEvent) => {
   navigate(path);
 };
 
-/** Home plus one tab per open doc, above whichever page is showing. */
+function TabIcon(props: { readonly tabKey: string }) {
+  const kind = openTabKind(props.tabKey);
+  if (kind === "diagram") return <DiagramIcon size={14} />;
+  if (kind === "sheet") return <SheetIcon size={14} />;
+  return <DocIcon size={14} />;
+}
+
+/** Home plus one tab per open doc, diagram or sheet, above whichever page is showing. */
 export function OpenTabsStrip(props: {
   readonly tabs: ReadonlyArray<OpenTab>;
   readonly route: Route;
@@ -22,7 +36,13 @@ export function OpenTabsStrip(props: {
         href="/"
         className="open-tab open-tab-home"
         aria-label="UP Docs home"
-        aria-current={props.route.name === "library" ? "page" : undefined}
+        aria-current={
+          props.route.name === "library" ||
+          props.route.name === "diagrams" ||
+          props.route.name === "sheets"
+            ? "page"
+            : undefined
+        }
         onClick={follow("/")}
       >
         <HomeIcon size={15} />
@@ -37,7 +57,7 @@ export function OpenTabsStrip(props: {
           }}
         >
           <a href={tab.path} className="open-tab-link" onClick={follow(tab.path)}>
-            <DocIcon size={14} />
+            <TabIcon tabKey={tab.key} />
             <span className="open-tab-title">{tab.title}</span>
           </a>
           <button
@@ -55,8 +75,8 @@ export function OpenTabsStrip(props: {
 }
 
 /**
- * Every doc visited, however it was reached, gets a tab. Cmd/Ctrl-click on a
- * link to a doc opens it in a background tab, as a browser would.
+ * Every doc, diagram and sheet visited, however it was reached, gets a tab.
+ * Cmd/Ctrl-click on a link to one opens it in a background tab, as a browser would.
  */
 export function startOpenTabs(): void {
   const visit = () => rememberTab(window.location.pathname);

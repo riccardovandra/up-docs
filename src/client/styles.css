@@ -393,7 +393,8 @@ input:focus {
   padding: 0.35rem 0.6rem;
 }
 
-.comments-toggle {
+.comments-toggle,
+.copy-link-button {
   position: relative;
   display: inline-flex;
   align-items: center;
@@ -408,7 +409,8 @@ input:focus {
 }
 
 .comments-toggle:hover,
-.comments-toggle[aria-pressed="true"] {
+.comments-toggle[aria-pressed="true"],
+.copy-link-button:hover {
   background: var(--hover);
 }
 

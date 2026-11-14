@@ -4,7 +4,7 @@ import type { DocRole } from "../../../shared/access.ts";
 import { DOC_STATUS_LABEL, DOC_STATUSES, type DocStatus } from "../../../shared/protocol.ts";
 import { ShareButton } from "../../share/ShareButton.tsx";
 import type { ExportAction } from "../ExportMenu.tsx";
-import { ChevronDown, CommentIcon, SparkIcon } from "../toolbar/icons.tsx";
+import { ChevronDown, CommentIcon, LinkIcon, SparkIcon } from "../toolbar/icons.tsx";
 import { InlineRename, MenuItem, MenuLabel, MenuSeparator, Popover } from "../toolbar/Popover.tsx";
 import type { DocAbilities } from "./docAbilities.ts";
 import { HomeLink } from "../../home/HomeLink.tsx";
@@ -12,7 +12,7 @@ import { MoveToProject } from "./MoveToProject.tsx";
 
 /**
  * The bar across the top of a doc: the title and its menu on the left;
- * Start chat, Share and the comments toggle on the right. Memoised, with
+ * Start chat, Share, Copy link and the comments toggle on the right. Memoised, with
  * stable callbacks from the page, so typing in the editor does not repaint it.
  */
 export const DocHeader = memo(function DocHeader(props: {
@@ -176,6 +176,15 @@ export const DocHeader = memo(function DocHeader(props: {
           flush={props.flush}
           onClosed={props.onShareClosed}
         />
+        <button
+          type="button"
+          className="copy-link-button"
+          aria-label="Copy link"
+          title="Copy link"
+          onClick={props.onCopyLink}
+        >
+          <LinkIcon />
+        </button>
         <button
           type="button"
           className="comments-toggle"

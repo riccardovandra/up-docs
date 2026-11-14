@@ -6,6 +6,7 @@ import { ApiError, clientId } from "../api.ts";
 import { HomeLink } from "../home/HomeLink.tsx";
 import { TitleDialog } from "../home/TitleDialog.tsx";
 import { useLockedProject } from "../lockedProject.ts";
+import { forgetTab, setSheetTabTitle } from "../openTabs.ts";
 import { navigate } from "../router.ts";
 import type { GridOverlay } from "./Grid.tsx";
 import {
@@ -235,6 +236,11 @@ export function SheetPage(props: { readonly sheetId: string; readonly tabId: str
     </button>
   );
 
+  const sheetTitle = meta?.title ?? "";
+  useEffect(() => {
+    if (sheetTitle) setSheetTabTitle(sheetId, sheetTitle);
+  }, [sheetId, sheetTitle]);
+
   if (missing) {
     return (
       <main className="home">
@@ -265,6 +271,7 @@ export function SheetPage(props: { readonly sheetId: string; readonly tabId: str
     if (!window.confirm(`Delete "${meta.title}" for everyone? Its tabs and cells go too.`)) return;
     try {
       await sheetsApi.remove(sheetId);
+      forgetTab(`sheet:${sheetId}`);
       navigate(SHEETS_PATH, { replace: true });
     } catch {
       setNotice("Could not delete the sheet. Try again.");
