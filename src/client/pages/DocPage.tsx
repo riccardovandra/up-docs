@@ -67,6 +67,7 @@ import { docPath, navigate } from "../router.ts";
 import { useMe } from "../me.ts";
 import { useLockedProject } from "../lockedProject.ts";
 import { canonicalDocUrl } from "../share/ShareDialog.tsx";
+import { copyText } from "../copyText.ts";
 
 export function DocPage(props: {
   readonly docId: string;
@@ -543,12 +544,12 @@ export function DocPage(props: {
 
   const copyLink = useStableCallback(
     () =>
-      void navigator.clipboard.writeText(canonicalDocUrl(props.docId, activeTabId)).then(
-        () =>
-          setNotice(
-            "Link copied. Only people the doc is shared with can open it.",
-          ),
-        () => setNotice("Could not copy the link."),
+      void copyText(canonicalDocUrl(props.docId, activeTabId)).then((copied) =>
+        setNotice(
+          copied
+            ? "Link copied. Only people the doc is shared with can open it."
+            : "Could not copy the link.",
+        ),
       ),
   );
 

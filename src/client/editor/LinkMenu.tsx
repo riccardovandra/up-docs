@@ -6,28 +6,12 @@ import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from "re
 
 import { CopyIcon, EditIcon, OpenIcon, UnlinkIcon } from "../doc/toolbar/icons.tsx";
 import { openDocLink, shortLink } from "../docLinks.ts";
+import { copyText } from "../copyText.ts";
 import { linkHref } from "./linkHref.ts";
 
 // Buttons keep the editor's focus and caret, so the menu stays on its link.
 const keepSelection = (event: MouseEvent) => event.preventDefault();
 
-/** Copies text, falling back to a hidden field where the Clipboard API is blocked (some iframes). */
-async function copyText(text: string): Promise<boolean> {
-  try {
-    await navigator.clipboard.writeText(text);
-    return true;
-  } catch {
-    const field = document.createElement("textarea");
-    field.value = text;
-    field.style.position = "fixed";
-    field.style.opacity = "0";
-    document.body.append(field);
-    field.select();
-    const copied = document.execCommand("copy");
-    field.remove();
-    return copied;
-  }
-}
 
 /** The link element the caret sits in, for placing the menu under it. */
 function linkElementAt(editor: Editor): HTMLElement | null {

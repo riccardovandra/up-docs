@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 
-import { closeTab, parseTabSets, retitleTab, visitTab, type OpenTab } from "./openTabs.ts";
+import {
+  closeTab,
+  openTabKind,
+  parseTabSets,
+  retitleTab,
+  visitTab,
+  type OpenTab,
+} from "./openTabs.ts";
 
 const spec: OpenTab = { key: "doc:spec", path: "/d/spec", title: "Spec" };
 const plan: OpenTab = { key: "doc:plan", path: "/d/plan/t2", title: "Build plan" };
@@ -25,9 +32,26 @@ describe("visitTab", () => {
     ]);
   });
 
-  it("ignores home and settings", () => {
+  it("opens diagrams and sheets as tabs of their own kind", () => {
+    const tabs = visitTab(visitTab([spec], "/diagrams/flow"), "/sheets/budget/Q1");
+    expect(tabs).toEqual([
+      spec,
+      { key: "diagram:flow", path: "/diagrams/flow", title: "Untitled" },
+      { key: "sheet:budget", path: "/sheets/budget/Q1", title: "Untitled" },
+    ]);
+    expect(tabs.map((tab) => openTabKind(tab.key))).toEqual(["doc", "diagram", "sheet"]);
+  });
+
+  it("keeps one tab per sheet and remembers its sheet tab", () => {
+    const tabs = visitTab([{ key: "sheet:b", path: "/sheets/b/Q1", title: "Budget" }], "/sheets/b/Q2");
+    expect(tabs).toEqual([{ key: "sheet:b", path: "/sheets/b/Q2", title: "Budget" }]);
+  });
+
+  it("ignores home, the library views and settings", () => {
     const tabs = [spec];
     expect(visitTab(tabs, "/")).toBe(tabs);
+    expect(visitTab(tabs, "/diagrams")).toBe(tabs);
+    expect(visitTab(tabs, "/sheets")).toBe(tabs);
     expect(visitTab(tabs, "/settings")).toBe(tabs);
   });
 });

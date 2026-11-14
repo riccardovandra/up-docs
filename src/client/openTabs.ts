@@ -3,7 +3,10 @@ import { useSyncExternalStore } from "react";
 
 import { navigate, parseRoute, type Route } from "./router.ts";
 
-/** A doc open in the tab strip. `path` is where it was last, in-doc tab included. */
+/**
+ * A doc, diagram or sheet open in the tab strip. `path` is where it was last,
+ * in-doc (or in-sheet) tab included.
+ */
 export interface OpenTab {
   readonly key: string;
   readonly path: string;
@@ -13,7 +16,18 @@ export interface OpenTab {
 export function openTabKey(route: Route): string | null {
   if (route.name === "doc") return `doc:${route.docId}`;
   if (route.name === "local") return `local:${route.path}`;
+  if (route.name === "diagram") return `diagram:${route.diagramId}`;
+  if (route.name === "sheet") return `sheet:${route.sheetId}`;
   return null;
+}
+
+export type OpenTabKind = "doc" | "diagram" | "sheet";
+
+/** What a tab holds, for its icon. Project files are docs. */
+export function openTabKind(key: string): OpenTabKind {
+  if (key.startsWith("diagram:")) return "diagram";
+  if (key.startsWith("sheet:")) return "sheet";
+  return "doc";
 }
 
 /** Records a visit to `path`: adds its doc as a tab, or moves that tab to it. */
@@ -149,11 +163,32 @@ export function setTabsProject(key: string): void {
   }
 }
 
-/** Adds or updates the tab for `path` without navigating, e.g. for a background tab. */
-export const rememberTab = (path: string) => write(visitTab(read(), path));
+// Titles seen this session, so a tab opened before T3 Code names the project still gets one.
+const knownTitles = new Map<string, string>();
 
-export const setDocTabTitle = (docId: string, title: string) =>
-  write(retitleTab(read(), `doc:${docId}`, title));
+/** Adds or updates the tab for `path` without navigating, e.g. for a background tab. */
+export function rememberTab(path: string): void {
+  const tabs = visitTab(read(), path);
+  const key = openTabKey(parseRoute(path));
+  const title = key === null ? undefined : knownTitles.get(key);
+  write(key !== null && title ? retitleTab(tabs, key, title) : tabs);
+}
+
+function setTabTitle(key: string, title: string): void {
+  knownTitles.set(key, title);
+  write(retitleTab(read(), key, title));
+}
+
+export const setDocTabTitle = (docId: string, title: string) => setTabTitle(`doc:${docId}`, title);
+
+export const setDiagramTabTitle = (diagramId: string, title: string) =>
+  setTabTitle(`diagram:${diagramId}`, title);
+
+export const setSheetTabTitle = (sheetId: string, title: string) =>
+  setTabTitle(`sheet:${sheetId}`, title);
+
+/** Drops a tab without navigating, e.g. after its diagram or sheet is deleted. */
+export const forgetTab = (key: string) => write(closeTab(read(), key, null).tabs);
 
 export function closeOpenTab(key: string): void {
   const active = openTabKey(parseRoute(window.location.pathname));

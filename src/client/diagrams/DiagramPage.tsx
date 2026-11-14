@@ -16,6 +16,8 @@ import { HomeLink } from "../home/HomeLink.tsx";
 import { DiagramIcon, DocIcon, LinkIcon, PenIcon } from "../home/icons.tsx";
 import { TitleDialog } from "../home/TitleDialog.tsx";
 import { useLockedProject } from "../lockedProject.ts";
+import { copyText } from "../copyText.ts";
+import { forgetTab, setDiagramTabTitle } from "../openTabs.ts";
 import { postToEmbedParent, useEmbedFeatures } from "../embedBridge.ts";
 import { docPath, navigate } from "../router.ts";
 import { DiagramEditor } from "./DiagramEditor.tsx";
@@ -42,29 +44,6 @@ const plural = (count: number, word: string) => `${count} ${word}${count === 1 ?
 
 /** While review mode is on and the page is seen, threads are re-read this often. */
 const REVIEW_POLL_MS = 5_000;
-
-async function copyText(text: string): Promise<boolean> {
-  try {
-    await navigator.clipboard.writeText(text);
-    return true;
-  } catch {
-    // A frame without clipboard-write permission: the older copy command still works there.
-    const area = document.createElement("textarea");
-    area.value = text;
-    area.setAttribute("readonly", "");
-    area.style.position = "fixed";
-    area.style.opacity = "0";
-    document.body.append(area);
-    area.select();
-    try {
-      return document.execCommand("copy");
-    } catch {
-      return false;
-    } finally {
-      area.remove();
-    }
-  }
-}
 
 /**
  * The diagram's comment threads and page layouts, re-read when the page's
@@ -164,6 +143,11 @@ export function DiagramPage(props: { readonly diagramId: string }) {
     return () => stops.forEach((stop) => stop());
   }, [diagramId]);
 
+  const diagramTitle = diagram?.title ?? "";
+  useEffect(() => {
+    if (diagramTitle) setDiagramTabTitle(diagramId, diagramTitle);
+  }, [diagramId, diagramTitle]);
+
   const back = (label: string) => (
     <button type="button" className="button secondary" onClick={() => navigate(DIAGRAMS_PATH)}>
       {label}
@@ -251,6 +235,7 @@ export function DiagramPage(props: { readonly diagramId: string }) {
     if (!window.confirm(`Delete "${diagram.title}" for everyone?${warning}`)) return;
     try {
       await diagramsApi.remove(diagramId);
+      forgetTab(`diagram:${diagramId}`);
       navigate(DIAGRAMS_PATH, { replace: true });
     } catch (cause) {
       setNotice(diagramErrorMessage(cause));

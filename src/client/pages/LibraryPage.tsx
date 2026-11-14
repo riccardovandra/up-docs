@@ -65,6 +65,7 @@ import {
 import { useMe } from "../me.ts";
 import { docPath, navigate } from "../router.ts";
 import { canonicalDocUrl } from "../share/ShareDialog.tsx";
+import { copyText } from "../copyText.ts";
 import { DiagramsView, LibraryKindSwitch, type LibraryKind } from "../diagrams/DiagramsView.tsx";
 import { SheetsView } from "../sheets/SheetsView.tsx";
 import "../home/home.css";
@@ -267,9 +268,12 @@ export function LibraryPage(props: { readonly kind?: LibraryKind }) {
       },
       onCopyLink: (entry: HomeEntry) =>
         // Same wording as the doc page's Copy link.
-        void navigator.clipboard.writeText(canonicalDocUrl(entry.id)).then(
-          () => setNotice("Link copied. Only people the doc is shared with can open it."),
-          () => setNotice("Could not copy the link."),
+        void copyText(canonicalDocUrl(entry.id)).then((copied) =>
+          setNotice(
+            copied
+              ? "Link copied. Only people the doc is shared with can open it."
+              : "Could not copy the link.",
+          ),
         ),
       onRename: setRenaming,
       onDelete: (entry: HomeEntry) => {
