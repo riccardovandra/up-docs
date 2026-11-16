@@ -13,6 +13,7 @@ import { useMe } from "../me.ts";
 import { forgetTab, leaveDoc } from "../openTabs.ts";
 import { docPath, navigate } from "../router.ts";
 import { MemberRow } from "./MemberRow.tsx";
+import { PublicLinkSection } from "./PublicLinkSection.tsx";
 import { RoleMenu } from "./RoleMenu.tsx";
 import { ShareExportTab } from "./ShareExportTab.tsx";
 import {
@@ -440,6 +441,7 @@ export function ShareDialog(props: {
               ))}
             </ul>
           )}
+          {isDoc && callerRole === "owner" ? <PublicLinkSection docId={id} /> : null}
         </>
       )}
 

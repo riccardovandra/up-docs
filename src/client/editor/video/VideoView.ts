@@ -3,6 +3,7 @@ import type { Node as ProseMirrorNode } from "@tiptap/pm/model";
 import type { NodeView } from "@tiptap/pm/view";
 
 import { isVideoLanguage, parseVideoBlock, type VideoBlock } from "../../../shared/video.ts";
+import { assetSrc } from "../../publicMode.ts";
 import "./video.css";
 
 const PROVIDER_NAMES = { youtube: "YouTube", loom: "Loom" } as const;
@@ -105,7 +106,15 @@ export class VideoView implements NodeView {
   private show(source: string) {
     if (source === this.source) return;
     this.source = source;
-    const video = parseVideoBlock(source);
+    const parsed = parseVideoBlock(source);
+    // On a public page, only the shared doc's own uploads play.
+    const fileSrc = parsed?.kind === "file" ? assetSrc(parsed.src) : null;
+    const video =
+      parsed?.kind === "file"
+        ? fileSrc === null
+          ? null
+          : { ...parsed, src: fileSrc, watchUrl: fileSrc }
+        : parsed;
     this.dom.dataset.state = video ? "ready" : "invalid";
     this.stage.replaceChildren();
     this.meta.replaceChildren();
@@ -114,7 +123,11 @@ export class VideoView implements NodeView {
       const message = document.createElement("p");
       message.className = "video-message";
       message.textContent =
-        source.trim() === "" ? "Paste a YouTube or Loom link." : "Unsupported video link.";
+        parsed !== null
+          ? "This video is not shared."
+          : source.trim() === ""
+            ? "Paste a YouTube or Loom link."
+            : "Unsupported video link.";
       this.stage.replaceChildren(message);
       return;
     }

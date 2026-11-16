@@ -7,6 +7,7 @@ import {
   type DiagramSummary,
 } from "../../shared/drawio.ts";
 import { diagramsApi, subscribeDiagram } from "./diagramsApi.ts";
+import { assetSrc } from "../publicMode.ts";
 import { requestRedraw } from "./redraw.ts";
 import "./diagrams.css";
 
@@ -136,7 +137,7 @@ export function useDiagramPicture(
   const src =
     info.pictureVersion === null || shown?.kind !== "picture"
       ? null
-      : diagramPictureUrl(info.id, "svg", info.pictureVersion, shown.index);
+      : assetSrc(diagramPictureUrl(info.id, "svg", info.pictureVersion, shown.index));
   if (!behind && src !== null) return { state: { status: "ready", src }, title };
   const drawing = info.canEdit && failed !== attempt;
   return { state: { status: drawing ? "rendering" : "stale", src }, title };

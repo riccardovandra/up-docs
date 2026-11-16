@@ -1,4 +1,5 @@
 import type { EmbedSnapshot } from "../shared/embeds.ts";
+import type { PublicLink } from "../shared/publicLinks.ts";
 import type {
   DocMember,
   DocRole,
@@ -96,6 +97,14 @@ const membersPath = (target: ShareTarget) =>
   `/api/${target.kind === "doc" ? "docs" : "diagrams"}/${target.id}/members`;
 
 export const api = {
+  /** The doc's public link, or null. Owners only, from a browser session. */
+  publicLink: (docId: string) =>
+    request<{ link: PublicLink | null }>("GET", `/api/docs/${docId}/public-link`),
+  /** Turns the public link on, or replaces it with a new one; the old one stops working. */
+  createPublicLink: (docId: string) =>
+    request<{ link: PublicLink }>("PUT", `/api/docs/${docId}/public-link`),
+  removePublicLink: (docId: string) =>
+    request<{ link: null }>("DELETE", `/api/docs/${docId}/public-link`),
   me: () => request<Me>("GET", "/api/me"),
   setName: (name: string) => request<Me>("PATCH", "/api/me", { name }),
   /** People on any doc the caller is on, for the share picker. */

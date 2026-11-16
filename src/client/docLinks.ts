@@ -1,4 +1,5 @@
 import { isSafeUrl } from "../shared/table.ts";
+import { followPublicLink } from "./publicMode.ts";
 import { navigate, parseRoute } from "./router.ts";
 
 export interface DocLink {
@@ -62,7 +63,9 @@ export function followClickedLink(event: MouseEvent): boolean {
   event.preventDefault();
   const link = resolveDocLink(anchor.getAttribute("href") ?? "", window.location);
   if (!link) return true;
-  if (link.appPath !== null && !event.metaKey && !event.ctrlKey) navigate(link.appPath);
+  if (link.appPath !== null && !event.metaKey && !event.ctrlKey) {
+    if (!followPublicLink(link.appPath, link.url)) navigate(link.appPath);
+  }
   else window.open(link.url, "_blank", "noopener,noreferrer");
   return true;
 }
@@ -71,7 +74,9 @@ export function followClickedLink(event: MouseEvent): boolean {
 export function openDocLink(href: string): void {
   const link = resolveDocLink(href, window.location);
   if (!link) return;
-  if (link.appPath !== null) navigate(link.appPath);
+  if (link.appPath !== null) {
+    if (!followPublicLink(link.appPath, link.url)) navigate(link.appPath);
+  }
   else window.open(link.url, "_blank", "noopener,noreferrer");
 }
 

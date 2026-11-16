@@ -13,6 +13,7 @@ import {
   PROVIDER_NAMES,
 } from "../../../shared/embeds.ts";
 import { isDocImageSrc } from "../../../shared/images.ts";
+import { assetSrc } from "../../publicMode.ts";
 import type { EmbedSupportStorage } from "./embedSupport.ts";
 import "./embed.css";
 
@@ -454,9 +455,13 @@ export class EmbedView implements NodeView {
   private head(target: EmbedTarget, snapshot: EmbedSnapshot) {
     const head = el("header", "embed-head");
     const person = el("div", "embed-person");
-    if (snapshot.authorImage && isDocImageSrc(snapshot.authorImage)) {
+    const authorImage =
+      snapshot.authorImage && isDocImageSrc(snapshot.authorImage)
+        ? assetSrc(snapshot.authorImage)
+        : null;
+    if (authorImage) {
       const photo = el("img", "embed-avatar");
-      photo.src = snapshot.authorImage;
+      photo.src = authorImage;
       photo.alt = "";
       photo.decoding = "async";
       person.append(photo);
@@ -484,9 +489,11 @@ export class EmbedView implements NodeView {
       card.append(el("p", "embed-title", snapshot.title));
     }
     if (snapshot.text) card.append(this.postText(snapshot.text));
-    if (snapshot.image && isDocImageSrc(snapshot.image)) {
+    const imageSrc =
+      snapshot.image && isDocImageSrc(snapshot.image) ? assetSrc(snapshot.image) : null;
+    if (imageSrc) {
       const image = el("img", "embed-image");
-      image.src = snapshot.image;
+      image.src = imageSrc;
       image.alt = snapshot.author
         ? `Image from ${snapshot.author}'s post`
         : `Image from the ${provider} post`;

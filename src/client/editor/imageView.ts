@@ -3,6 +3,7 @@ import type { Node as ProseMirrorNode } from "@tiptap/pm/model";
 import type { NodeView } from "@tiptap/pm/view";
 
 import { isDocImageSrc, MAX_IMAGE_WIDTH, MIN_IMAGE_WIDTH } from "../../shared/images.ts";
+import { assetSrc } from "../publicMode.ts";
 
 const blockedLabel = (node: ProseMirrorNode) =>
   node.attrs.alt ? `[Image: ${String(node.attrs.alt)}]` : "[Image]";
@@ -26,11 +27,13 @@ export class ImageView implements NodeView {
     this.editor = editor;
     this.getPos = getPos;
 
-    const src = String(node.attrs.src ?? "");
-    if (!isDocImageSrc(src)) {
+    const stored = String(node.attrs.src ?? "");
+    // On a public page, only the shared doc's own uploads load.
+    const src = isDocImageSrc(stored) ? assetSrc(stored) : null;
+    if (src === null) {
       this.dom = document.createElement("span");
       this.dom.className = "doc-image-blocked";
-      this.dom.title = src;
+      this.dom.title = stored;
       this.dom.textContent = blockedLabel(node);
       return;
     }

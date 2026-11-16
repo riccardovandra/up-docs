@@ -228,6 +228,43 @@ export async function diagramUsage(
 }
 
 /**
+ * The diagrams a doc's public link may show, without their source: those a
+ * ```t3-drawio block in `markdowns` (the doc's tabs) names, where someone who
+ * can edit the diagram is an owner or editor of the doc. That is
+ * `diagramAccess`'s rule for a doc's own viewers, so a public link never shows
+ * a diagram a doc editor pasted the id of without being given it.
+ */
+export async function publicDocDiagrams(
+  db: D1Database,
+  docId: string,
+  markdowns: ReadonlyArray<string>,
+): Promise<ReadonlyArray<DiagramSummary>> {
+  const ids = new Set<string>();
+  for (const markdown of markdowns) {
+    for (const fence of findFences(markdown)) {
+      if (fence.language !== DRAWIO_LANGUAGE) continue;
+      const block = parseDrawioBlock(fence.body);
+      if (block) ids.add(block.diagramId);
+    }
+  }
+  if (ids.size === 0) return [];
+  const statements = [...ids].map((diagramId) =>
+    db
+      .prepare(
+        `SELECT ${SUMMARY_COLUMNS} FROM diagrams
+         WHERE id = ?1 AND EXISTS (
+           SELECT 1 FROM doc_members c
+           JOIN diagram_members g ON g.user_id = c.user_id
+           WHERE c.doc_id = ?2 AND c.role IN ('owner', 'editor')
+             AND g.diagram_id = ?1 AND g.role IN ('owner', 'editor'))`,
+      )
+      .bind(diagramId, docId),
+  );
+  const results = await db.batch<SummaryRow>(statements);
+  return results.flatMap((result) => result.results.map(toSummary));
+}
+
+/**
  * For every linked diagram, the tabs that link it in docs `userId` is on. One scan serves a
  * whole list.
  */

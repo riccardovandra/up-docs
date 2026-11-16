@@ -5,6 +5,7 @@
 // the notice board in `diagramsApi.ts`, which the pictures and blocks hear.
 
 import type { DiagramRefresh } from "../../shared/drawio.ts";
+import { publicShare } from "../publicMode.ts";
 import { diagramsApi, rereadDiagrams, type DiagramsApi } from "./diagramsApi.ts";
 
 /** How often a page that can be seen asks. */
@@ -135,7 +136,9 @@ function refresher(): DiagramRefresher {
 }
 
 /** See `DiagramRefresher.watch`. */
-export const watchDiagram = (diagramId: string) => refresher().watch(diagramId);
+export const watchDiagram = (diagramId: string) =>
+  // A public page shows the diagrams as the link loaded them; it has no session to re-read with.
+  publicShare() ? () => undefined : refresher().watch(diagramId);
 /** See `DiagramRefresher.subscribe`. */
 export const subscribeRefresh = (listener: RefreshListener) => refresher().subscribe(listener);
 /** See `DiagramRefresher.refresh`. */

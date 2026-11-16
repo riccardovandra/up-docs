@@ -14,6 +14,7 @@ import {
   searchForPage,
   steppedPage,
 } from "./pageTabsLogic.ts";
+import { assetSrc } from "../publicMode.ts";
 import "./diagrams.css";
 
 const searchListeners = new Set<() => void>();
@@ -65,7 +66,7 @@ export function usePreloadedPages(
       if (!diagram || !isPictureCurrent(diagram) || diagram.pictureVersion === null) return null;
       const shown = pagePicture(diagram, names[at] ?? null);
       return shown.kind === "picture"
-        ? diagramPictureUrl(diagram.id, "svg", diagram.pictureVersion, shown.index)
+        ? assetSrc(diagramPictureUrl(diagram.id, "svg", diagram.pictureVersion, shown.index))
         : null;
     })
     .filter((url): url is string => url !== null);
