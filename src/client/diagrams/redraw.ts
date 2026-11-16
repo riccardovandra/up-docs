@@ -22,11 +22,12 @@ const LOAD_MS = 20_000;
 
 /**
  * Whether the stored picture is all a page needs: it shows the current source
- * and says which page is which. A picture from before pages shows the first
- * page and is drawn again only when a block asks for another.
+ * and says which page is which and where its parts are. A picture from before
+ * pages or parts is drawn again only when a block asks for what it lacks.
  */
 const isDrawn = (diagram: DiagramSummary) =>
-  !diagram.hasSource || (isPictureCurrent(diagram) && diagram.picturePages !== null);
+  !diagram.hasSource ||
+  (isPictureCurrent(diagram) && diagram.picturePages !== null && diagram.pictureParts !== null);
 /** The frame is kept this long after the queue empties, then removed. */
 const IDLE_MS = 30_000;
 

@@ -6,8 +6,10 @@ import {
   DRAWIO_LANGUAGE,
   MAX_DIAGRAM_TITLE_LENGTH,
   drawioBlockBody,
+  findPart,
   pageIndexOf,
   pageNameLine,
+  partOptions,
   type DiagramSummary,
   type DiagramUsage,
   type DiagramView,
@@ -157,6 +159,38 @@ export function pageChoices(
       ? [...names, current]
       : names;
   return choices.length < 2 ? [] : choices;
+}
+
+/** One choice of the Part menu: its value, what it says, and the `part:` line it writes. */
+export interface PartChoice {
+  readonly value: string;
+  readonly label: string;
+  readonly line: string;
+}
+
+/** The value of the choice for a part the block names that the page no longer has. */
+export const MISSING_PART = "\n";
+
+/**
+ * The parts a block on page `pageIndex` can show, as the stored picture
+ * measured them, once there is one. A part the block names that is gone stays
+ * on offer, so the choice shows what the block says.
+ */
+export function partChoices(
+  diagram: Pick<DiagramSummary, "pictureParts"> | null,
+  pageIndex: number,
+  current: string | null,
+): ReadonlyArray<PartChoice> {
+  const parts = diagram?.pictureParts?.[pageIndex]?.parts ?? [];
+  if (parts.length === 0) return [];
+  const choices: Array<PartChoice> = partOptions(parts).map((option) => ({
+    value: option.id,
+    label: option.label,
+    line: option.line,
+  }));
+  return current !== null && findPart(parts, current) === null
+    ? [...choices, { value: MISSING_PART, label: `${current} (not found)`, line: current }]
+    : choices;
 }
 
 /**

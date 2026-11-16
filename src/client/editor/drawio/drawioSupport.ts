@@ -139,14 +139,15 @@ export function removeBlockStep(state: EditorState, pos: number): Transaction | 
 
 /**
  * The change that points the block at `pos` at another diagram, or at another
- * page of it (null: the first), keeping its caption; null when no linked
- * diagram is there. The page is kept unless one is given: a copy has the same pages.
+ * page (null: the first) or part (null: the whole page) of it, keeping its
+ * caption; null when no linked diagram is there or nothing changes. What is
+ * not given is kept: a copy has the same pages and parts.
  */
 export function relinkBlockStep(
   state: EditorState,
   pos: number,
   diagramId: string,
-  page?: string | null,
+  change: { readonly page?: string | null; readonly part?: string | null } = {},
 ): Transaction | null {
   const node = blockAt(state.doc, pos);
   if (!node) return null;
@@ -154,7 +155,8 @@ export function relinkBlockStep(
   const body = drawioBlockBody(
     diagramId,
     block?.caption ?? null,
-    page === undefined ? (block?.page ?? null) : page,
+    change.page === undefined ? (block?.page ?? null) : change.page,
+    change.part === undefined ? (block?.part ?? null) : change.part,
   );
   if (body === node.textContent) return null;
   const from = pos + 1;
@@ -175,7 +177,10 @@ export const removeDrawioBlock = (editor: Editor, pos: number): boolean =>
 export const relinkDrawioBlock = (editor: Editor, pos: number, diagramId: string): boolean =>
   changeable(editor) && apply(editor, relinkBlockStep(editor.state, pos, diagramId));
 
-/** The change that points the block at `pos` at another page of its diagram; null when none. */
+/**
+ * The change that points the block at `pos` at another page of its diagram;
+ * null when none. The part goes: another page has other parts.
+ */
 export function pageBlockStep(
   state: EditorState,
   pos: number,
@@ -183,7 +188,7 @@ export function pageBlockStep(
 ): Transaction | null {
   const block = blockAt(state.doc, pos);
   const diagramId = block ? parseDrawioBlock(block.textContent)?.diagramId : undefined;
-  return diagramId === undefined ? null : relinkBlockStep(state, pos, diagramId, page);
+  return diagramId === undefined ? null : relinkBlockStep(state, pos, diagramId, { page, part: null });
 }
 
 /**
@@ -192,3 +197,22 @@ export function pageBlockStep(
  */
 export const setDrawioBlockPage = (editor: Editor, pos: number, page: string | null): boolean =>
   changeable(editor) && apply(editor, pageBlockStep(editor.state, pos, page));
+
+/** The change that points the block at `pos` at a part of its page (null: the whole page); null when none. */
+export function partBlockStep(
+  state: EditorState,
+  pos: number,
+  part: string | null,
+): Transaction | null {
+  const block = blockAt(state.doc, pos);
+  const diagramId = block ? parseDrawioBlock(block.textContent)?.diagramId : undefined;
+  return diagramId === undefined ? null : relinkBlockStep(state, pos, diagramId, { part });
+}
+
+/**
+ * Points the block at `pos` at a part of its page, or at the whole page for
+ * null. False when the tab cannot be changed, the block is gone, or it
+ * already shows that.
+ */
+export const setDrawioBlockPart = (editor: Editor, pos: number, part: string | null): boolean =>
+  changeable(editor) && apply(editor, partBlockStep(editor.state, pos, part));

@@ -65,9 +65,10 @@ describe("redraw on demand", () => {
   });
 
   it("returns the same redraw when asked twice, and draws nothing for a current one", async () => {
+    const parts = [{ width: 100, height: 100, parts: [] }];
     const { api, frames, queue } = setup([
       view({ id: "stale" }),
-      view({ id: "current", version: 2, pictureVersion: 2, picturePages: ["Page-1"] }),
+      view({ id: "current", version: 2, pictureVersion: 2, picturePages: ["Page-1"], pictureParts: parts }),
       view({ id: "empty", xml: "", hasSource: false }),
     ]);
     const first = queue.request("stale");
@@ -77,6 +78,14 @@ describe("redraw on demand", () => {
     await queue.request("empty");
     expect(api.calls).toHaveLength(1);
     expect(frames[0]!.posted.filter((action) => action.action === "load")).toHaveLength(1);
+  });
+
+  it("draws a current picture again when it does not say where its parts are", async () => {
+    const { api, queue } = setup([
+      view({ id: "old", version: 2, pictureVersion: 2, picturePages: ["Page-1"], pictureParts: null }),
+    ]);
+    await queue.request("old");
+    expect(api.calls).toHaveLength(1);
   });
 
   it("draws each page on its own and uploads one picture per page with every page's name", async () => {

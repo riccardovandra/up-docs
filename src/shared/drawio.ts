@@ -1,6 +1,6 @@
 // Draw.io diagrams: library items of their own. A doc links one with a
 // ```t3-drawio block whose first line is the diagram's id, then an optional
-// `page: <name>` line, then an optional caption. The diagram (its Draw.io XML and the picture drawn
+// `page: <name>` line, an optional `part: <name>` line, then an optional caption. The diagram (its Draw.io XML and the picture drawn
 // from it) is stored once, so one save updates every doc that links it.
 
 import type { DocRole } from "./access.ts";
@@ -19,6 +19,8 @@ export const MAX_DIAGRAM_PICTURE_BYTES = 10 * 1024 * 1024;
 
 /** A page name in a block's `page:` line. */
 export const MAX_DRAWIO_PAGE_NAME_LENGTH = 200;
+/** A part name in a block's `part:` line. */
+export const MAX_DRAWIO_PART_NAME_LENGTH = 200;
 /**
  * The pages a diagram written over MCP may hold, and how many pages get a
  * picture. A person can draw more in the editor; pages past this have no picture.
@@ -49,6 +51,13 @@ export interface DiagramSummary {
    * shows the first page), and when there is no picture.
    */
   readonly picturePages: ReadonlyArray<string | null> | null;
+  /**
+   * Where each pictured page's parts sit in its picture, in page order, as
+   * the picture at `pictureVersion` was drawn. Null when that is not known
+   * (a picture from before parts, or no picture): a block that shows a part
+   * then has the picture drawn again.
+   */
+  readonly pictureParts: ReadonlyArray<PictureParts | null> | null;
   /** False for a diagram nobody has drawn in yet. */
   readonly hasSource: boolean;
   /** The user who created it; null once that account is gone. */
@@ -183,6 +192,129 @@ export function pagePicture(
   return index < MAX_DIAGRAM_PAGES ? { kind: "picture", index } : { kind: "no_picture" };
 }
 
+/** A part's box in its page's picture, in the picture's own units from its top-left corner. */
+export interface PicturePart {
+  /** The container's cell id. */
+  readonly id: string;
+  /** The container's label, as plain words. */
+  readonly name: string;
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+}
+
+/** One page's picture size and its parts, in the picture's own units. */
+export interface PictureParts {
+  readonly width: number;
+  readonly height: number;
+  readonly parts: ReadonlyArray<PicturePart>;
+}
+
+const partKey = (name: string) => pageNameLine(name).toLowerCase();
+
+/**
+ * The part a block's `part:` line names, among `parts` (in file order).
+ * A container's cell id wins (two parts can share a name, never an id); then,
+ * case and spacing aside, the same name; failing that, the one part
+ * whose name starts with it at a word's end, so `part: Workflow 3` finds
+ * "Workflow 3 · Received today · Live" and keeps finding it when the rest of
+ * the title changes. A name cut short for length ("…") matches a block that
+ * gives the whole of it. Null when none, or more than one, fits.
+ */
+export function findPart<T extends { readonly name: string; readonly id?: string }>(
+  parts: ReadonlyArray<T>,
+  wanted: string,
+): T | null {
+  const key = partKey(wanted);
+  if (key === "") return null;
+  const byId = parts.find((part) => part.id !== undefined && part.id === pageNameLine(wanted));
+  if (byId) return byId;
+  const same = parts.find((part) => partKey(part.name) === key);
+  if (same) return same;
+  const starts = parts.filter((part) => {
+    const name = partKey(part.name);
+    if (name.endsWith("…") && key.startsWith(name.slice(0, -1).trimEnd())) return true;
+    return name.startsWith(key) && !/[\p{L}\p{N}]/u.test(name.charAt(key.length));
+  });
+  return starts.length === 1 ? starts[0]! : null;
+}
+
+/**
+ * What a `part:` line should say to find `name` among `parts`: the title up
+ * to its first " · " when that alone finds it, so the line keeps working when
+ * the rest of the title (a status, a note) changes; the whole name otherwise.
+ */
+export function partLine(
+  parts: ReadonlyArray<{ readonly name: string; readonly id?: string }>,
+  name: string,
+): string {
+  const head = pageNameLine(name.split(" · ", 1)[0] ?? "");
+  const target = findPart(parts, name);
+  return head !== "" && head !== pageNameLine(name) && target !== null && findPart(parts, head) === target
+    ? head
+    : pageNameLine(name);
+}
+
+/**
+ * Each part of a list as one would pick it, in order: its label (its name, or
+ * "name (id <id>)" when another part has the same name) and what a `part:`
+ * line should say to find it (the short form of its name, or its id when the
+ * name is shared).
+ */
+export function partOptions(
+  parts: ReadonlyArray<{ readonly name: string; readonly id: string }>,
+): ReadonlyArray<{ readonly id: string; readonly label: string; readonly line: string }> {
+  const count = new Map<string, number>();
+  for (const { name } of parts) count.set(partKey(name), (count.get(partKey(name)) ?? 0) + 1);
+  return parts.map((part) =>
+    (count.get(partKey(part.name)) ?? 0) > 1
+      ? { id: part.id, label: `${part.name} (id ${part.id})`, line: part.id }
+      : { id: part.id, label: part.name, line: partLine(parts, part.name) },
+  );
+}
+
+/** What a block's part shows of the stored picture. */
+export type PartPicture =
+  /** The crop: the picture's size and the part's box, a margin added. */
+  | {
+      readonly kind: "part";
+      readonly width: number;
+      readonly height: number;
+      readonly box: { readonly x: number; readonly y: number; readonly width: number; readonly height: number };
+    }
+  /** The page has no part of that name: the whole page shows. */
+  | { readonly kind: "not_found" }
+  /** The stored picture does not say where its parts are: it must be drawn again. */
+  | { readonly kind: "unknown" };
+
+/** Space kept around a part, in picture units, so its border and shadow are not cut. */
+const PART_MARGIN = 12;
+
+/** Where `part` sits in the picture of the page at `pageIndex`. */
+export function partPicture(
+  diagram: Pick<DiagramSummary, "pictureParts">,
+  pageIndex: number,
+  part: string,
+): PartPicture {
+  if (diagram.pictureParts === null) return { kind: "unknown" };
+  const page = diagram.pictureParts[pageIndex] ?? null;
+  if (page === null) return { kind: "not_found" };
+  const found = findPart(page.parts, part);
+  if (!found) return { kind: "not_found" };
+  const x = Math.max(0, found.x - PART_MARGIN);
+  const y = Math.max(0, found.y - PART_MARGIN);
+  const right = Math.min(page.width, found.x + found.width + PART_MARGIN);
+  const bottom = Math.min(page.height, found.y + found.height + PART_MARGIN);
+  if (!(right > x && bottom > y)) return { kind: "not_found" };
+  return {
+    kind: "part",
+    width: page.width,
+    height: page.height,
+    box: { x, y, width: right - x, height: bottom - y },
+  };
+}
+
 /** Whether the stored picture shows the current source. */
 export const isPictureCurrent = (
   diagram: Pick<DiagramSummary, "version" | "pictureVersion" | "hasSource">,
@@ -232,17 +364,22 @@ export interface DrawioBlock {
   readonly diagramId: string;
   /** The page the block shows, by name; null for the first page. */
   readonly page: string | null;
+  /** The part of that page the block shows, by name; null for the whole page. */
+  readonly part: string | null;
   readonly caption: string | null;
 }
 
 const PAGE_LINE = "page:";
+const PART_LINE = "part:";
 
 /**
  * Reads a block's text: a diagram id line, an optional `page: <name>` line,
- * then an optional caption line, nothing else. The line after the id is the
- * page line whenever it starts with "page:" (lower case); an empty `page:`
- * means the first page, which is how a caption that itself starts with
- * "page:" is written: on the line after an empty `page:`.
+ * an optional `part: <name>` line, then an optional caption line, nothing
+ * else. The line after the id is the page line whenever it starts with
+ * "page:" (lower case), and the next one the part line whenever it starts
+ * with "part:". An empty `page:` means the first page and an empty `part:`
+ * the whole page, which is how a caption that itself starts with "page:" or
+ * "part:" is written: after an empty line of that kind.
  */
 export function parseDrawioBlock(body: string): DrawioBlock | null {
   const lines = body.split("\n").map((line) => line.trim());
@@ -256,10 +393,17 @@ export function parseDrawioBlock(body: string): DrawioBlock | null {
     page = name === "" ? null : name;
     at += 1;
   }
+  let part: string | null = null;
+  if (lines[at]?.startsWith(PART_LINE)) {
+    const name = pageNameLine(lines[at]!.slice(PART_LINE.length));
+    if (name.length > MAX_DRAWIO_PART_NAME_LENGTH) return null;
+    part = name === "" ? null : name;
+    at += 1;
+  }
   const caption = lines[at] ?? "";
   if (lines.slice(at + 1).some((line) => line !== "")) return null;
   if (caption.length > MAX_DRAWIO_CAPTION_LENGTH) return null;
-  return { diagramId: first, page, caption: caption === "" ? null : caption };
+  return { diagramId: first, page, part, caption: caption === "" ? null : caption };
 }
 
 /** A block's language, ignoring anything after the first word of the info string. */
@@ -267,19 +411,25 @@ export const isDrawioLanguage = (language: string | null | undefined) =>
   language?.trim().split(/\s+/, 1)[0] === DRAWIO_LANGUAGE;
 
 /**
- * A block's text for a diagram, a page (null: the first) and a caption, each
- * one line. A caption that starts with "page:" goes after an empty page line,
- * so it is never read as one.
+ * A block's text for a diagram, a page (null: the first), a part (null: the
+ * whole page) and a caption, each one line. A caption that starts with
+ * "page:" or "part:" goes after an empty line of that kind, so it is never
+ * read as one.
  */
 export function drawioBlockBody(
   diagramId: string,
   caption: string | null = null,
   page: string | null = null,
+  part: string | null = null,
 ): string {
   const line = caption?.replace(/\s+/g, " ").trim() ?? "";
-  const name = page === null ? "" : pageNameLine(page);
+  const pageName = page === null ? "" : pageNameLine(page);
+  const partName = part === null ? "" : pageNameLine(part);
+  const withPart = partName !== "" || line.startsWith(PART_LINE);
+  const withPage = pageName !== "" || (line.startsWith(PAGE_LINE) && !withPart);
   const lines = [diagramId];
-  if (name !== "" || line.startsWith(PAGE_LINE)) lines.push(name === "" ? PAGE_LINE : `${PAGE_LINE} ${name}`);
+  if (withPage) lines.push(pageName === "" ? PAGE_LINE : `${PAGE_LINE} ${pageName}`);
+  if (withPart) lines.push(partName === "" ? PART_LINE : `${PART_LINE} ${partName}`);
   if (line !== "") lines.push(line);
   return lines.join("\n");
 }
@@ -289,7 +439,8 @@ export const drawioBlock = (
   diagramId: string,
   caption: string | null = null,
   page: string | null = null,
-) => `\`\`\`${DRAWIO_LANGUAGE}\n${drawioBlockBody(diagramId, caption, page)}\n\`\`\``;
+  part: string | null = null,
+) => `\`\`\`${DRAWIO_LANGUAGE}\n${drawioBlockBody(diagramId, caption, page, part)}\n\`\`\``;
 
 /**
  * The id of every diagram `markdown` links, in order, each once.
@@ -327,8 +478,8 @@ export function checkDrawioIn(markdown: string, previous?: string): string | nul
     const which = blocks.length === 1 ? "The t3-drawio block" : `t3-drawio block ${index + 1}`;
     return (
       `${which}: the first line must be the id of a diagram. Only an optional ` +
-      `"page: <page name>" line and then a caption of up to ${MAX_DRAWIO_CAPTION_LENGTH} ` +
-      `characters may follow it.`
+      `"page: <page name>" line, an optional "part: <part name>" line and then a caption ` +
+      `of up to ${MAX_DRAWIO_CAPTION_LENGTH} characters may follow it.`
     );
   }
   return null;

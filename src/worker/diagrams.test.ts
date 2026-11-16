@@ -554,6 +554,39 @@ describe("a picture per page", () => {
     expect(read.body.diagram.picturePages).toEqual(["Overview", "Detail", "Notes"]);
   });
 
+  it("measures where each page's parts sit in its picture", async () => {
+    const { creator, create, send } = await setup();
+    const cell = (id: string, label: string, x: number, y: number, style: string, parent = "1") =>
+      `<mxCell id="${id}" value="${label}" style="${style}" vertex="1" parent="${parent}">` +
+      `<mxGeometry x="${x}" y="${y}" width="200" height="100" as="geometry"/></mxCell>`;
+    const page = (name: string, cells: string) =>
+      `<diagram name="${name}" id="${name}"><mxGraphModel><root><mxCell id="0"/><mxCell id="1" parent="0"/>` +
+      `${cells}</root></mxGraphModel></diagram>`;
+    const xml =
+      "<mxfile>" +
+      page("Workflows", cell("wf1", "Workflow 1 · Intake", 100, 50, "swimlane;") + cell("s", "Step", 10, 30, "rounded=1;", "wf1")) +
+      page("Notes", cell("n", "Just a box", 0, 0, "rounded=1;")) +
+      "</mxfile>";
+    const diagram = await create(creator, { xml });
+    // Draw.io drew the lane's box at (10, 10): the drawing starts 90, 40 further left and up.
+    const svg =
+      '<svg xmlns="http://www.w3.org/2000/svg" width="220px" height="120px" viewBox="0 0 220 120">' +
+      '<g data-cell-id="wf1"><rect x="10" y="10" width="200" height="100"/></g></svg>';
+    const saved = await send<{ diagram: DiagramSummary }>(creator, "PUT", `/api/diagrams/${diagram.id}/picture`, {
+      version: 1,
+      svg,
+      pageNames: ["Workflows", "Notes"],
+      morePages: [{ svg: SVG, png: null }],
+    });
+    expect(saved.status).toBe(200);
+    expect(saved.body.diagram.pictureParts).toEqual([
+      { width: 220, height: 120, parts: [{ id: "wf1", name: "Workflow 1 · Intake", x: 10, y: 10, width: 200, height: 100 }] },
+      { width: 10, height: 10, parts: [] },
+    ]);
+    const read = await send<{ diagram: DiagramView }>(creator, "GET", `/api/diagrams/${diagram.id}`);
+    expect(read.body.diagram.pictureParts).toEqual(saved.body.diagram.pictureParts);
+  });
+
   it("drops the pictures of pages that are gone, and of the version replaced", async () => {
     const { api, creator, create, send } = await setup();
     const diagram = await create(creator, { xml: XML });

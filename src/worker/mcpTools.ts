@@ -61,6 +61,8 @@ import {
   MAX_DRAWIO_PAGE_NAME_LENGTH,
   pageIndexOf,
   pagePicture,
+  findPart,
+  partOptions,
   type Diagram,
   type DiagramSummary,
   type DiagramUse,
@@ -83,7 +85,7 @@ import {
   type DiagramComment,
   type DiagramThread,
 } from "../shared/diagramComments.ts";
-import { readDrawioLayout, type DrawioPageLayout } from "../shared/drawioModel.ts";
+import { readDrawioLayout, type DrawioPageLayout, type DrawioShapeBox } from "../shared/drawioModel.ts";
 import { describeWidgetProblems } from "../shared/widget/check.ts";
 import { findWidgetFences, spliceFenceSource } from "../shared/widget/fence.ts";
 import { MAX_LABEL_LENGTH, rewriteLabel } from "../shared/widget/rewrite.ts";
@@ -374,7 +376,7 @@ function checkMediaBlocks(markdown: string, previous?: string): void {
   if (drawioProblem) {
     fail("drawio_invalid", `${drawioProblem} Nothing was written.`, {
       format:
-        "```t3-drawio\n<diagram id from list_drawio or create_drawio>\npage: <page name, optional>\nOptional caption\n```",
+        "```t3-drawio\n<diagram id from list_drawio or create_drawio>\npage: <page name, optional>\npart: <part name, optional>\nOptional caption\n```",
     });
   }
 }
@@ -396,15 +398,15 @@ async function checkDrawioLinks(
       `One write can link at most ${MAX_NEW_DRAWIO_LINKS} new Draw.io diagrams. Nothing was written; add them over several writes.`,
     );
   }
-  // A block that names a page it did not name before must name one the diagram has.
-  const pageKey = (block: { diagramId: string; page: string | null }) =>
-    `${block.diagramId}\n${block.page}`;
+  // A block that names a page or part it did not name before must name one the diagram has.
+  const pageKey = (block: { diagramId: string; page: string | null; part: string | null }) =>
+    `${block.diagramId}\n${block.page}\n${block.part}`;
   const named = new Set(drawioBlocks(previous).map(pageKey));
-  const pagesAsked = new Map<string, Set<string>>();
+  const pagesAsked = new Map<string, Map<string, { page: string | null; part: string | null }>>();
   for (const block of drawioBlocks(markdown)) {
-    if (block.page === null || named.has(pageKey(block))) continue;
-    const pages = pagesAsked.get(block.diagramId) ?? new Set();
-    pages.add(block.page);
+    if ((block.page === null && block.part === null) || named.has(pageKey(block))) continue;
+    const pages = pagesAsked.get(block.diagramId) ?? new Map();
+    pages.set(pageKey(block), { page: block.page, part: block.part });
     pagesAsked.set(block.diagramId, pages);
   }
   if (pagesAsked.size > MAX_NEW_DRAWIO_LINKS) {
@@ -433,12 +435,24 @@ async function checkDrawioLinks(
     if (!asked) continue;
     const model = await readDrawio(diagram.xml);
     const names = model.ok ? model.pages.map((page) => page.name) : [];
-    for (const page of asked) {
-      if (pageIndexOf(names, page) !== -1) continue;
+    const layouts = (await readDrawioLayout(diagram.xml)) ?? [];
+    for (const { page, part } of asked.values()) {
+      const index = page === null ? 0 : pageIndexOf(names, page);
+      if (index === -1) {
+        fail(
+          "drawio_page_not_found",
+          `The t3-drawio block names page "${page}", which diagram "${diagramId}" does not have. Nothing was written. Use one of its page names, or leave the page line out for the first page.`,
+          { diagramId, pages: names },
+        );
+      }
+      if (part === null) continue;
+      const boxes = layouts[index]?.parts ?? [];
+      if (findPart(boxes.map((box) => ({ id: box.id, name: box.label })), part) !== null) continue;
+      const where = page === null ? "the first page" : `page "${page}"`;
       fail(
-        "drawio_page_not_found",
-        `The t3-drawio block names page "${page}", which diagram "${diagramId}" does not have. Nothing was written. Use one of its page names, or leave the page line out for the first page.`,
-        { diagramId, pages: names },
+        "drawio_part_not_found",
+        `The t3-drawio block names part "${part}", which ${where} of diagram "${diagramId}" does not have, or which more than one part starts with. Nothing was written. Use one of the part names listed (the start of one is enough when only that part starts so), or leave the part line out for the whole page. A part is a top-level container with a label.`,
+        { diagramId, page, parts: partLabels(boxes) },
       );
     }
   }
@@ -1062,6 +1076,10 @@ async function drawioXmlArg(args: Args): Promise<{
   return { xml, model, root };
 }
 
+/** A page's parts as read_drawio lists them: the name, or "name (id <id>)" when a name is shared. */
+const partLabels = (boxes: ReadonlyArray<DrawioShapeBox>): ReadonlyArray<string> =>
+  partOptions(boxes.map((box) => ({ id: box.id, name: box.label }))).map((option) => option.label);
+
 /** Each page's name, in order: null for a page with none (a bare `<mxGraphModel>`). */
 const pageNames = (model: DrawioModel): ReadonlyArray<string | null> =>
   model.ok ? model.pages.map((page) => page.name) : [];
@@ -1174,7 +1192,7 @@ function drawioWritten(
       diagram.hasSource && isPictureCurrent(diagram)
         ? "Unchanged: the stored picture shows this version."
         : PICTURE_PENDING,
-    next: "Paste `block` into a tab with edit_tab or write_tab to show the diagram in a doc. It shows the first page; to show another, add a `page: <page name>` line after the id. The last line inside the block is its caption.",
+    next: "Paste `block` into a tab with edit_tab or write_tab to show the diagram in a doc. It shows the first page; to show another, add a `page: <page name>` line after the id, and to show only one part of the page (a container, from read_drawio's parts), a `part: <part name>` line after that. The last line inside the block is its caption.",
   };
 }
 
@@ -3131,7 +3149,7 @@ const handlers: Record<
       args.downloadLink === true
         ? await drawioLinkFor(ctx, "download", { diagramId })
         : null;
-    const [project, usage, picture, model, comments] = await Promise.all([
+    const [project, usage, picture, model, comments, layouts] = await Promise.all([
       drawioProject(ctx, diagram.projectId),
       Diagrams.diagramUsage(ctx.deps.db, {
         diagramId,
@@ -3140,11 +3158,17 @@ const handlers: Record<
       drawioPicture(ctx, diagram, page),
       readDrawio(diagram.xml),
       diagramThreads(ctx, diagram, false),
+      readDrawioLayout(diagram.xml),
     ]);
     const names = pageNames(model);
+    // The parts a doc block can show alone, per page: top-level containers with a label.
+    const parts = (layouts ?? [])
+      .filter((layout) => layout.parts.length > 0)
+      .map((layout) => ({ page: layout.name, parts: partLabels(layout.parts) }));
     const body = {
       ...drawioSummary(ctx, diagram),
       pageNames: names,
+      ...(parts.length > 0 ? { parts } : {}),
       project,
       canEdit,
       usedIn: usage.uses.map((use) => drawioUse(ctx, use)),

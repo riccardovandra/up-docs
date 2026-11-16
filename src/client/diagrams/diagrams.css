@@ -85,7 +85,8 @@
 }
 
 /* Over the older picture while the new one is drawn. */
-.diagram-picture img + .diagram-picture-note {
+.diagram-picture img + .diagram-picture-note,
+.diagram-picture .diagram-part + .diagram-picture-note {
   align-self: end;
   margin-bottom: 0.5rem;
   padding: 0.1rem 0.5rem;
@@ -1005,4 +1006,25 @@ button.diagram-canvas:hover {
 
 .diagram-chip.comments {
   color: var(--accent);
+}
+
+/* One part of a page: a box the part's shape, the whole picture placed so only the part shows. */
+.diagram-part {
+  position: relative;
+  display: block;
+  overflow: hidden;
+  justify-self: center;
+}
+
+.diagram-picture .diagram-part img {
+  position: absolute;
+  max-width: none;
+  max-height: none;
+  height: auto;
+}
+
+/* Over the top of the whole page, which shows in place of a part that is gone. */
+.diagram-picture img + .diagram-part-missing.diagram-picture-note {
+  align-self: start;
+  margin: 0.5rem 0 0;
 }

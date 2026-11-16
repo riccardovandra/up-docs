@@ -20,6 +20,7 @@ import {
   newDiagramTarget,
   otherDocs,
   pageChoices,
+  partChoices,
   pickerLists,
   usageLine,
 } from "./blockLogic.ts";
@@ -31,6 +32,7 @@ import {
   removeBlockStep,
   removeDrawioBlock,
   pageBlockStep,
+  partBlockStep,
   setDrawioBlockPage,
 } from "./drawioSupport.ts";
 import { loadLinkedDiagrams } from "./linkedDiagrams.ts";
@@ -194,6 +196,19 @@ describe("linking, relinking and removing a block", () => {
     expect(pageBlockStep(linked.state, blockPos(linked), "Overview")).toBeNull();
     linked.destroy();
 
+    const parted = editorOn(drawioBlock(ID, "The flow", "Workflows"));
+    expect(apply(parted, partBlockStep(parted.state, blockPos(parted), "Workflow 3"))).toBe(true);
+    expect(parted.getMarkdown()).toBe(drawioBlock(ID, "The flow", "Workflows", "Workflow 3"));
+    // A copy keeps the part; another page drops it; the whole page is no part line.
+    expect(apply(parted, relinkBlockStep(parted.state, blockPos(parted), OTHER))).toBe(true);
+    expect(parted.getMarkdown()).toBe(drawioBlock(OTHER, "The flow", "Workflows", "Workflow 3"));
+    expect(apply(parted, partBlockStep(parted.state, blockPos(parted), null))).toBe(true);
+    expect(parted.getMarkdown()).toBe(drawioBlock(OTHER, "The flow", "Workflows"));
+    expect(apply(parted, partBlockStep(parted.state, blockPos(parted), "Seller"))).toBe(true);
+    expect(apply(parted, pageBlockStep(parted.state, blockPos(parted), "Database"))).toBe(true);
+    expect(parted.getMarkdown()).toBe(drawioBlock(OTHER, "The flow", "Database"));
+    parted.destroy();
+
     const captioned = editorOn(drawioBlock(ID, "The flow"));
     expect(apply(captioned, pageBlockStep(captioned.state, blockPos(captioned), "Detail"))).toBe(true);
     expect(captioned.getMarkdown()).toBe(drawioBlock(ID, "The flow", "Detail"));
@@ -202,6 +217,19 @@ describe("linking, relinking and removing a block", () => {
   });
 
   it("offers the pages of a diagram of several, and keeps a page that is gone on offer", () => {
+    const pictureParts = [
+      { width: 100, height: 100, parts: [{ id: "wf3", name: "Workflow 3 · Live", x: 0, y: 0, width: 10, height: 10 }] },
+      null,
+    ];
+    const lane = { value: "wf3", label: "Workflow 3 · Live", line: "Workflow 3" };
+    expect(partChoices({ pictureParts }, 0, null)).toEqual([lane]);
+    expect(partChoices({ pictureParts }, 0, "Workflow 3")).toEqual([lane]);
+    expect(partChoices({ pictureParts }, 0, "Gone")).toEqual([
+      lane,
+      { value: "\n", label: "Gone (not found)", line: "Gone" },
+    ]);
+    expect(partChoices({ pictureParts }, 1, null)).toEqual([]);
+    expect(partChoices({ pictureParts: null }, 0, null)).toEqual([]);
     expect(pageChoices(null, null)).toEqual([]);
     expect(pageChoices({ picturePages: ["Page-1"] }, null)).toEqual([]);
     expect(pageChoices({ picturePages: null }, "A")).toEqual([]);
