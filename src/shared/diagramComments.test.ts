@@ -5,6 +5,7 @@ import {
   diagramToPicture,
   parseDiagramAnchor,
   pictureFrame,
+  pictureParts,
   pictureToDiagram,
   pinPlacement,
   shapeAt,
@@ -121,6 +122,40 @@ describe("picture frame", () => {
     });
     expect(pictureFrame("<svg></svg>", flow!)).toBeNull();
     expect(pictureFrame("not svg", flow!)).toBeNull();
+  });
+});
+
+describe("diagram parts", () => {
+  it("are the page's top-level containers with a label", async () => {
+    const xml =
+      "<mxfile>" +
+      page(
+        shape("lane", "Workflow 1 · Intake", 0, 0, 400, 200, "1", "swimlane;html=1;") +
+        shape("step", "Save the email", 20, 40) +
+        shape("inner", "Nested", 10, 10, 100, 80, "lane", "swimlane;html=1;") +
+        shape("box", "Plain box", 500, 0) +
+        shape("tbl", "&lt;b&gt;seller&lt;/b&gt;", 500, 100, 160, 120, "1", "shape=table;html=1;") +
+        shape("frame", "Frame", 700, 0, 200, 200, "1", "rounded=0;container=1;") +
+        shape("bare", "", 900, 0, 200, 200, "1", "swimlane;"),
+      ) +
+      "</mxfile>";
+    const [only] = (await readDrawioLayout(xml))!;
+    expect(only!.parts.map((part) => part.label)).toEqual(["Workflow 1 · Intake", "seller", "Frame"]);
+  });
+
+  it("are measured in the picture's units from its top-left corner", async () => {
+    const [flow] = await layouts();
+    // The picture's viewBox starts at (-0.5, -0.5): Draw.io's usual export.
+    const svg =
+      '<svg xmlns="http://www.w3.org/2000/svg" width="442px" height="362px" viewBox="-0.5 -0.5 442 362">' +
+      '<g data-cell-id="a"><rect x="0" y="60" width="140" height="60" rx="9"/></g></svg>';
+    expect(pictureParts(svg, flow!)).toEqual({
+      width: 442,
+      height: 362,
+      parts: [{ id: "grp", name: "Store", x: 0.5, y: 200.5, width: 440, height: 160 }],
+    });
+    expect(pictureParts("not svg", flow!)).toBeNull();
+    expect(pictureParts(svg, null)).toEqual({ width: 442, height: 362, parts: [] });
   });
 });
 

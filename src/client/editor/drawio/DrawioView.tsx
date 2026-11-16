@@ -6,8 +6,10 @@ import { createRoot, type Root } from "react-dom/client";
 
 import {
   diagramPath,
+  findPart,
   isDrawioLanguage,
   pageIndexOf,
+  pagePicture,
   parseDrawioBlock,
   type DiagramUsage,
   type DrawioBlock,
@@ -24,7 +26,9 @@ import {
   blockDiagram,
   detachCopy,
   mergeDiagram,
+  MISSING_PART,
   pageChoices,
+  partChoices,
   usageLine,
   type BlockAction,
   type BlockDiagram,
@@ -33,6 +37,7 @@ import {
   relinkDrawioBlock,
   removeDrawioBlock,
   setDrawioBlockPage,
+  setDrawioBlockPart,
   type DrawioSupportStorage,
 } from "./drawioSupport.ts";
 import "./drawio.css";
@@ -93,6 +98,7 @@ function LinkedFigure(props: {
   readonly onRemove: () => boolean;
   readonly onRelink: (diagramId: string) => boolean;
   readonly onSetPage: (page: string) => boolean;
+  readonly onSetPart: (part: string | null) => boolean;
 }) {
   const { block, support } = props;
   const { diagramId } = block;
@@ -178,14 +184,24 @@ function LinkedFigure(props: {
     navigate(diagramPath(diagramId));
   };
 
+  // Which part of its page the block shows, once the stored picture says where the page's parts are.
+  const shown = diagram ? pagePicture(diagram, block.page) : null;
+  const pageParts =
+    diagram && shown?.kind === "picture" ? (diagram.pictureParts?.[shown.index]?.parts ?? []) : [];
+  const shownPartBox = block.part === null ? null : findPart(pageParts, block.part);
   const caption =
     block.caption ??
-    (diagram ? (block.page === null ? diagram.title : `${diagram.title} · ${block.page}`) : null);
+    (diagram
+      ? [diagram.title, block.page, shownPartBox?.name ?? block.part]
+          .filter((each) => each !== null)
+          .join(" · ")
+      : null);
   const picture = diagram ? (
     <DiagramPicture
       diagramId={diagramId}
       diagram={diagram}
       page={block.page}
+      part={block.part}
       className="drawio-picture"
       {...(block.caption ? { alt: block.caption } : {})}
     />
@@ -196,6 +212,15 @@ function LinkedFigure(props: {
   const choosePage = (page: string) => {
     if (busy || page === shownPage || !props.canChange()) return;
     if (!props.onSetPage(page)) {
+      support?.context()?.notify("This block is no longer in the tab.");
+    }
+  };
+  const parts = props.editable && shown?.kind === "picture" ? partChoices(diagram, shown.index, block.part) : [];
+  const shownPart = block.part === null ? "" : (shownPartBox?.id ?? MISSING_PART);
+  const choosePart = (value: string) => {
+    if (busy || value === shownPart || value === MISSING_PART || !props.canChange()) return;
+    const part = value === "" ? null : (parts.find((choice) => choice.value === value)?.line ?? null);
+    if (!props.onSetPart(part)) {
       support?.context()?.notify("This block is no longer in the tab.");
     }
   };
@@ -222,6 +247,24 @@ function LinkedFigure(props: {
                     {pageIndexOf(diagram?.picturePages ?? [], name) === -1
                       ? `${name} (not found)`
                       : name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
+          {parts.length > 0 ? (
+            <label className="drawio-page-choice">
+              <span>Part</span>
+              <select
+                className="drawio-page-select"
+                aria-label="Part of the page shown in this doc"
+                value={shownPart}
+                onChange={(event) => choosePart(event.target.value)}
+              >
+                <option value="">Whole page</option>
+                {parts.map((choice) => (
+                  <option key={choice.value} value={choice.value}>
+                    {choice.label}
                   </option>
                 ))}
               </select>
@@ -399,6 +442,12 @@ export class DrawioView implements NodeView {
     return pos !== null && setDrawioBlockPage(this.editor, pos, page);
   };
 
+  /** Points the block at a part of its page, or the whole page for null. False when the block is gone. */
+  private readonly setPart = (part: string | null): boolean => {
+    const pos = this.position();
+    return pos !== null && setDrawioBlockPart(this.editor, pos, part);
+  };
+
   /** Repaints when the source or the right to edit changed, and tracks the caret. */
   private readonly sync = () => {
     if (this.destroyed) return;
@@ -421,6 +470,7 @@ export class DrawioView implements NodeView {
             onRemove={this.remove}
             onRelink={this.relink}
             onSetPage={this.setPage}
+            onSetPart={this.setPart}
           />
         ) : (
           <p className="drawio-message">

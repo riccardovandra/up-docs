@@ -67,6 +67,7 @@ export const summary = (overrides: Partial<DiagramSummary> = {}): DiagramSummary
   version: 1,
   pictureVersion: null,
   picturePages: null,
+  pictureParts: null,
   hasSource: true,
   createdBy: "owner",
   createdAt: 1,

@@ -25,7 +25,7 @@ const having = (...diagrams: Array<ExportDiagram>): ExportDiagrams =>
 describe("a linked diagram in an export", () => {
   it("is its picture and its caption", () => {
     expect(
-      drawioExport({ diagramId: "g1", page: null, caption: "How a client starts" }, having(diagram()), ORIGIN),
+      drawioExport({ diagramId: "g1", page: null, part: null, caption: "How a client starts" }, having(diagram()), ORIGIN),
     ).toEqual({
       title: "Onboarding flow",
       caption: "How a client starts",
@@ -36,13 +36,13 @@ describe("a linked diagram in an export", () => {
   });
 
   it("links the PNG when asked, and never pins a version, so the link shows later saves", () => {
-    const out = drawioExport({ diagramId: "g1", page: null, caption: null }, having(diagram()), ORIGIN, "png");
+    const out = drawioExport({ diagramId: "g1", page: null, part: null, caption: null }, having(diagram()), ORIGIN, "png");
     expect(out.pictureUrl).toBe("https://docs.test/api/diagrams/g1/picture.png");
   });
 
   it("is the title and a note while there is no picture", () => {
     const undrawn = drawioExport(
-      { diagramId: "g1", page: null, caption: null },
+      { diagramId: "g1", page: null, part: null, caption: null },
       having(diagram({ pictureVersion: null })),
       ORIGIN,
     );
@@ -53,7 +53,7 @@ describe("a linked diagram in an export", () => {
       note: "Diagram: its picture has not been drawn yet.",
     });
     const empty = drawioExport(
-      { diagramId: "g1", page: null, caption: null },
+      { diagramId: "g1", page: null, part: null, caption: null },
       having(diagram({ pictureVersion: null, hasSource: false })),
       ORIGIN,
     );
@@ -61,7 +61,7 @@ describe("a linked diagram in an export", () => {
   });
 
   it("says so when the diagram is gone, and keeps the caption", () => {
-    expect(drawioExport({ diagramId: "gone", page: null, caption: "The flow" }, having(), ORIGIN)).toEqual({
+    expect(drawioExport({ diagramId: "gone", page: null, part: null, caption: "The flow" }, having(), ORIGIN)).toEqual({
       title: null,
       caption: "The flow",
       pictureUrl: null,
@@ -113,20 +113,20 @@ describe("a block that names a page, in an export", () => {
   const paged = diagram({ picturePages: ["Overview", "Sales detail"] });
 
   it("is that page's picture", () => {
-    const out = drawioExport({ diagramId: "g1", page: "Sales detail", caption: null }, having(paged), ORIGIN);
+    const out = drawioExport({ diagramId: "g1", page: "Sales detail", part: null, caption: null }, having(paged), ORIGIN);
     expect(out.pictureUrl).toBe("https://docs.test/api/diagrams/g1/picture.svg?page=1");
-    const first = drawioExport({ diagramId: "g1", page: "Overview", caption: null }, having(paged), ORIGIN);
+    const first = drawioExport({ diagramId: "g1", page: "Overview", part: null, caption: null }, having(paged), ORIGIN);
     expect(first.pictureUrl).toBe("https://docs.test/api/diagrams/g1/picture.svg");
   });
 
   it("says the page is not found, or that its picture is not drawn yet", () => {
-    const gone = drawioExport({ diagramId: "g1", page: "Pricing", caption: "P" }, having(paged), ORIGIN);
+    const gone = drawioExport({ diagramId: "g1", page: "Pricing", part: null, caption: "P" }, having(paged), ORIGIN);
     expect(gone).toMatchObject({
       pictureUrl: null,
       caption: "P",
       note: 'Page not found: the diagram has no page "Pricing".',
     });
-    const unknown = drawioExport({ diagramId: "g1", page: "Overview", caption: null }, having(diagram()), ORIGIN);
+    const unknown = drawioExport({ diagramId: "g1", page: "Overview", part: null, caption: null }, having(diagram()), ORIGIN);
     expect(unknown.note).toBe('Diagram page "Overview": its picture has not been drawn yet.');
   });
 });

@@ -504,6 +504,11 @@ export interface DrawioPageLayout {
   readonly id: string | null;
   /** The shapes (vertices) with a box, in file order: later ones are drawn on top. */
   readonly shapes: ReadonlyArray<DrawioShapeBox>;
+  /**
+   * The page's parts: its top-level containers (swimlanes, containers, tables)
+   * that have a label, in file order. A doc block can show one on its own.
+   */
+  readonly parts: ReadonlyArray<DrawioShapeBox>;
   /** Every shape box and connection point, or null for a page with nothing drawn. */
   readonly bounds: { readonly x: number; readonly y: number; readonly width: number; readonly height: number } | null;
 }
@@ -539,6 +544,7 @@ function readLayout(head: PageHead, model: XmlElement): DrawioPageLayout {
     };
   };
   const shapes: Array<DrawioShapeBox> = [];
+  const parts: Array<DrawioShapeBox> = [];
   const points: Array<{ x: number; y: number }> = [];
   for (const { cell, geometry } of order) {
     // A relative vertex is a label placed along something else; an edge's geometry is always relative.
@@ -556,6 +562,9 @@ function readLayout(head: PageHead, model: XmlElement): DrawioPageLayout {
         height: numberAttribute(geometry, "height"),
       };
       shapes.push(box);
+      if (box.label !== "" && box.width > 0 && box.height > 0 && !parent?.cell.vertex && isContainer(cell.style)) {
+        parts.push(box);
+      }
       points.push({ x: box.x, y: box.y }, { x: box.x + box.width, y: box.y + box.height });
     } else if (cell.edge) {
       const all = [
@@ -571,7 +580,7 @@ function readLayout(head: PageHead, model: XmlElement): DrawioPageLayout {
       }
     }
   }
-  if (points.length === 0) return { name: head.name, id: head.id, shapes, bounds: null };
+  if (points.length === 0) return { name: head.name, id: head.id, shapes, parts, bounds: null };
   const xs = points.map((point) => point.x);
   const ys = points.map((point) => point.y);
   const x = Math.min(...xs);
@@ -580,8 +589,21 @@ function readLayout(head: PageHead, model: XmlElement): DrawioPageLayout {
     name: head.name,
     id: head.id,
     shapes,
+    parts,
     bounds: { x, y, width: Math.max(...xs) - x, height: Math.max(...ys) - y },
   };
+}
+
+/** Whether a style draws a container: a swimlane, a container or a table. */
+function isContainer(style: string): boolean {
+  const names = styleNames(style);
+  const shape = styleValue(style, "shape");
+  return (
+    names.has("swimlane") ||
+    shape === "swimlane" ||
+    shape === "table" ||
+    styleValue(style, "container") === "1"
+  );
 }
 
 /** A label's lines as drawn: each line break in the text or the HTML starts one. */
@@ -711,7 +733,7 @@ function pageLayoutProblems(model: XmlElement): ReadonlyArray<string> {
 
 const LAYOUT_READER: PageReader<DrawioPageLayout> = {
   read: readLayout,
-  empty: (head) => ({ name: head.name, id: head.id, shapes: [], bounds: null }),
+  empty: (head) => ({ name: head.name, id: head.id, shapes: [], parts: [], bounds: null }),
 };
 
 /**

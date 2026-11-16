@@ -767,6 +767,70 @@ describe("Draw.io pages over MCP", () => {
     expect(later.isError).toBe(false);
   });
 
+  it("lists each page's parts, links one in a doc, and refuses a part the page does not have", async () => {
+    const mcp = await makeMcpHarness();
+    const { tab } = await mcp.seedDoc("Intro");
+    const lane = (id: string, label: string, y: number) =>
+      `<mxCell id="${id}" value="${label}" style="swimlane;html=1;" vertex="1" parent="1">` +
+      `<mxGeometry x="0" y="${y}" width="400" height="150" as="geometry"/></mxCell>` +
+      `<mxCell id="${id}s" value="Step" style="rounded=1;html=1;" vertex="1" parent="${id}">` +
+      `<mxGeometry x="20" y="40" width="120" height="60" as="geometry"/></mxCell>`;
+    const lanes = page("Workflows", lane("w1", "Workflow 1 · Intake · Live", 0) + lane("w3", "Workflow 3 · Receipts · Not built", 200));
+    const tables = page("Tables", lane("db_product", "product", 0) + lane("v3db_product", "product", 200));
+    const created = await mcp.tool("create_drawio", { title: "Flows", xml: file(OVERVIEW, lanes, tables) });
+    const diagramId = created.body.diagramId as string;
+    expect(created.body.next).toContain("part: <part name>");
+
+    const read = await readContent(mcp, { diagramId });
+    expect(read.body.parts).toEqual([
+      { page: "Workflows", parts: ["Workflow 1 · Intake · Live", "Workflow 3 · Receipts · Not built"] },
+      { page: "Tables", parts: ["product (id db_product)", "product (id v3db_product)"] },
+    ]);
+    const byId = await mcp.tool("edit_tab", {
+      tabId: tab.tabId,
+      find: "Intro",
+      replace: `Intro\n\n${drawioBlock(diagramId, null, "Tables", "v3db_product")}`,
+    });
+    expect(byId.isError).toBe(false);
+    await mcp.tool("edit_tab", { tabId: tab.tabId, find: `\n\n${drawioBlock(diagramId, null, "Tables", "v3db_product")}`, replace: "" });
+
+    const wrong = await mcp.tool("edit_tab", {
+      tabId: tab.tabId,
+      find: "Intro",
+      replace: `Intro\n\n${drawioBlock(diagramId, null, "Workflows", "Workflow 9")}`,
+    });
+    expect(wrong).toMatchObject({
+      isError: true,
+      body: {
+        error: "drawio_part_not_found",
+        page: "Workflows",
+        parts: ["Workflow 1 · Intake · Live", "Workflow 3 · Receipts · Not built"],
+      },
+    });
+    // "Workflow" starts both: not enough to say which.
+    const vague = await mcp.tool("edit_tab", {
+      tabId: tab.tabId,
+      find: "Intro",
+      replace: `Intro\n\n${drawioBlock(diagramId, null, "Workflows", "Workflow")}`,
+    });
+    expect(vague.body.error).toBe("drawio_part_not_found");
+    // The first page has no parts.
+    const first = await mcp.tool("edit_tab", {
+      tabId: tab.tabId,
+      find: "Intro",
+      replace: `Intro\n\n${drawioBlock(diagramId, null, null, "Sales")}`,
+    });
+    expect(first.body.error).toBe("drawio_part_not_found");
+    expect(await Docs.getTabMarkdown(mcp.api.db, tab.tabId)).toBe("Intro");
+
+    const right = await mcp.tool("edit_tab", {
+      tabId: tab.tabId,
+      find: "Intro",
+      replace: `Intro\n\n${drawioBlock(diagramId, null, "Workflows", "Workflow 3")}`,
+    });
+    expect(right.isError).toBe(false);
+  });
+
   it("hands the agent the picture of the page it asks for", async () => {
     const { mcp, diagramId } = await twoPages();
     const PNG2 = new Uint8Array([...PNG, 2]);

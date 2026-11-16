@@ -23,7 +23,10 @@ import {
   type DiagramUsage,
   type DiagramUse,
   type DiagramView,
+  type PictureParts,
 } from "../shared/drawio.ts";
+import { pictureParts } from "../shared/diagramComments.ts";
+import { readDrawioLayout } from "../shared/drawioModel.ts";
 import { findFences } from "../shared/table.ts";
 import { randomId } from "./crypto.ts";
 import { getProject, NotFoundError } from "./docs.ts";
@@ -56,6 +59,7 @@ interface SummaryRow {
   version: number;
   picture_version: number | null;
   picture_pages: string | null;
+  picture_parts: string | null;
   has_source: number;
   created_by: string | null;
   created_at: number;
@@ -68,7 +72,7 @@ interface DiagramRow extends SummaryRow {
 
 // The source can be a megabyte, so lists never read it.
 const SUMMARY_COLUMNS = `id, project_id, title, version, picture_version, picture_pages,
-  (xml <> '') AS has_source, created_by, created_at, updated_at`;
+  picture_parts, (xml <> '') AS has_source, created_by, created_at, updated_at`;
 
 /** The stored page list; anything but an array of names and nulls reads as unknown. */
 function readPicturePages(raw: string | null): ReadonlyArray<string | null> | null {
@@ -84,6 +88,38 @@ function readPicturePages(raw: string | null): ReadonlyArray<string | null> | nu
   }
 }
 
+const isNumber = (value: unknown): value is number =>
+  typeof value === "number" && Number.isFinite(value);
+
+/** The stored parts; anything malformed reads as unknown, so the picture is drawn again. */
+function readPictureParts(raw: string | null): ReadonlyArray<PictureParts | null> | null {
+  if (raw === null) return null;
+  try {
+    const value: unknown = JSON.parse(raw);
+    if (!Array.isArray(value)) return null;
+    const pages = value.map((page: unknown): PictureParts | null | undefined => {
+      if (page === null) return null;
+      const { width, height, parts } = (page ?? {}) as Record<string, unknown>;
+      if (!isNumber(width) || !isNumber(height) || !Array.isArray(parts)) return undefined;
+      const ok = parts.every((part: unknown) => {
+        const each = (part ?? {}) as Record<string, unknown>;
+        return (
+          typeof each.id === "string" &&
+          typeof each.name === "string" &&
+          isNumber(each.x) &&
+          isNumber(each.y) &&
+          isNumber(each.width) &&
+          isNumber(each.height)
+        );
+      });
+      return ok ? (page as PictureParts) : undefined;
+    });
+    return pages.some((page) => page === undefined) ? null : (pages as Array<PictureParts | null>);
+  } catch {
+    return null;
+  }
+}
+
 const toSummary = (row: SummaryRow): DiagramSummary => ({
   id: row.id,
   projectId: row.project_id,
@@ -91,6 +127,7 @@ const toSummary = (row: SummaryRow): DiagramSummary => ({
   version: row.version,
   pictureVersion: row.picture_version,
   picturePages: row.picture_version === null ? null : readPicturePages(row.picture_pages),
+  pictureParts: row.picture_version === null ? null : readPictureParts(row.picture_parts),
   hasSource: row.has_source === 1,
   createdBy: row.created_by,
   createdAt: row.created_at,
@@ -101,7 +138,8 @@ const toDiagram = (row: DiagramRow): Diagram => ({ ...toSummary(row), xml: row.x
 
 /** A diagram without its source, for a caller that already holds the whole one. */
 export function diagramSummary(diagram: DiagramSummary): DiagramSummary {
-  const { id, projectId, title, version, pictureVersion, picturePages, hasSource } = diagram;
+  const { id, projectId, title, version, pictureVersion, picturePages, pictureParts, hasSource } =
+    diagram;
   const { createdBy, createdAt, updatedAt } = diagram;
   return {
     id,
@@ -110,6 +148,7 @@ export function diagramSummary(diagram: DiagramSummary): DiagramSummary {
     version,
     pictureVersion,
     picturePages,
+    pictureParts,
     hasSource,
     createdBy,
     createdAt,
@@ -438,6 +477,7 @@ export async function createDiagram(
     version: 1,
     pictureVersion: null,
     picturePages: null,
+    pictureParts: null,
     hasSource: xml !== "",
     createdBy: input.createdBy,
     createdAt: input.now,
@@ -651,13 +691,21 @@ export async function saveDiagramPicture(
     // A repeat upload for this version may come without the PNG the first one had.
     else await images.delete(key("png", page));
   }
+  // Where each page's parts sit, read from the source this picture was drawn from.
+  const layouts = (await readDrawioLayout(current.xml)) ?? [];
+  const measured = input.pages.map((page, index) => pictureParts(page.svg, layouts[index] ?? null));
   const row = await db
     .prepare(
-      `UPDATE diagrams SET picture_version = ?1, picture_pages = ?3
+      `UPDATE diagrams SET picture_version = ?1, picture_pages = ?3, picture_parts = ?4
        WHERE id = ?2 AND version = ?1
        RETURNING ${SUMMARY_COLUMNS}`,
     )
-    .bind(input.version, input.diagramId, pageNames === null ? null : JSON.stringify(pageNames))
+    .bind(
+      input.version,
+      input.diagramId,
+      pageNames === null ? null : JSON.stringify(pageNames),
+      JSON.stringify(measured),
+    )
     .first<SummaryRow>();
   if (!row) return { ok: false, conflict: diagramSummary(await getDiagram(db, input.diagramId)) };
   // The pictures this one replaces are no longer served: an older version's, and

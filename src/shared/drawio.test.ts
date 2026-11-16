@@ -8,6 +8,7 @@ import {
   drawioBlockBody,
   drawioBlocks,
   drawioDiagramIds,
+  findPart,
   isDrawioLanguage,
   isPictureCurrent,
   MAX_DIAGRAM_PAGES,
@@ -15,36 +16,43 @@ import {
   pageIndexOf,
   pagePicture,
   parseDrawioBlock,
+  partLine,
+  partOptions,
+  partPicture,
 } from "./drawio.ts";
 
 const ID = "3f2c1a9e-5b7d-4c21-9e0f-6a8b7c5d4e3f";
 
 describe("parseDrawioBlock", () => {
   it("reads the diagram id, and a caption when there is one", () => {
-    expect(parseDrawioBlock(ID)).toEqual({ diagramId: ID, page: null, caption: null });
+    expect(parseDrawioBlock(ID)).toEqual({ diagramId: ID, page: null, part: null, caption: null });
     expect(parseDrawioBlock(`  ${ID}  \n  How a client is onboarded  \n`)).toEqual({
       diagramId: ID,
       page: null,
+      part: null,
       caption: "How a client is onboarded",
     });
-    expect(parseDrawioBlock(`${ID}\n\n`)).toEqual({ diagramId: ID, page: null, caption: null });
+    expect(parseDrawioBlock(`${ID}\n\n`)).toEqual({ diagramId: ID, page: null, part: null, caption: null });
   });
 
   it("reads a page line after the id, then the caption", () => {
     expect(parseDrawioBlock(`${ID}\npage: Sales detail`)).toEqual({
       diagramId: ID,
       page: "Sales detail",
+      part: null,
       caption: null,
     });
     expect(parseDrawioBlock(`${ID}\n  page:   Sales   detail \nThe sales steps`)).toEqual({
       diagramId: ID,
       page: "Sales detail",
+      part: null,
       caption: "The sales steps",
     });
     // An empty page line is the first page.
     expect(parseDrawioBlock(`${ID}\npage:\nCaption`)).toEqual({
       diagramId: ID,
       page: null,
+      part: null,
       caption: "Caption",
     });
   });
@@ -53,6 +61,7 @@ describe("parseDrawioBlock", () => {
     // The rule: the line after the id is the page line whenever it starts with "page:".
     expect(parseDrawioBlock(`${ID}\npage: one of three`)).toMatchObject({
       page: "one of three",
+      part: null,
       caption: null,
     });
     // Such a caption is written after an empty page line, and reads back as written.
@@ -61,11 +70,13 @@ describe("parseDrawioBlock", () => {
     expect(parseDrawioBlock(body)).toEqual({
       diagramId: ID,
       page: null,
+      part: null,
       caption: "page: one of three",
     });
     // "Page:" in another case, or later in the line, is a caption as before.
     expect(parseDrawioBlock(`${ID}\nPage: 3 of the flow`)).toMatchObject({
       page: null,
+      part: null,
       caption: "Page: 3 of the flow",
     });
   });
@@ -76,6 +87,7 @@ describe("parseDrawioBlock", () => {
     expect(parseDrawioBlock(drawioBlockBody(ID, "Flow", "Detail"))).toEqual({
       diagramId: ID,
       page: "Detail",
+      part: null,
       caption: "Flow",
     });
   });
@@ -105,6 +117,7 @@ describe("parseDrawioBlock", () => {
     expect(parseDrawioBlock(drawioBlockBody(ID, "Flow"))).toEqual({
       diagramId: ID,
       page: null,
+      part: null,
       caption: "Flow",
     });
   });
@@ -227,9 +240,118 @@ describe("a block's page", () => {
   it("lists every block with its page", () => {
     const markdown = [drawioBlock("one"), drawioBlock("two", "Caption", "Detail")].join("\n\n");
     expect(drawioBlocks(markdown)).toEqual([
-      { diagramId: "one", page: null, caption: null },
-      { diagramId: "two", page: "Detail", caption: "Caption" },
+      { diagramId: "one", page: null, part: null, caption: null },
+      { diagramId: "two", page: "Detail", part: null, caption: "Caption" },
     ]);
     expect(checkDrawioIn(markdown)).toBeNull();
+  });
+});
+
+describe("parts", () => {
+  it("reads a part line after the page line, or straight after the id", () => {
+    expect(parseDrawioBlock(`${ID}\npage: Workflows\npart: Workflow 3\nThe receipts`)).toEqual({
+      diagramId: ID,
+      page: "Workflows",
+      part: "Workflow 3",
+      caption: "The receipts",
+    });
+    expect(parseDrawioBlock(`${ID}\npart:  Workflow   3 `)).toEqual({
+      diagramId: ID,
+      page: null,
+      part: "Workflow 3",
+      caption: null,
+    });
+    expect(parseDrawioBlock(`${ID}\npart:\nCaption`)).toMatchObject({ part: null, caption: "Caption" });
+    expect(parseDrawioBlock(`${ID}\npart: ${"p".repeat(201)}`)).toBeNull();
+    // Out of order: a page line after the part line is a caption, and a third line is refused.
+    expect(parseDrawioBlock(`${ID}\npart: A\npage: B\nmore`)).toBeNull();
+  });
+
+  it("writes a part, and keeps captions that start with page: or part: as captions", () => {
+    expect(drawioBlockBody(ID, null, "Workflows", "Workflow 3")).toBe(
+      `${ID}\npage: Workflows\npart: Workflow 3`,
+    );
+    expect(drawioBlock(ID, null, null, "Seller")).toBe(`\`\`\`t3-drawio\n${ID}\npart: Seller\n\`\`\``);
+    for (const [caption, page, part] of [
+      ["part: one", null, null],
+      ["page: one", null, null],
+      ["page: one", null, "Seller"],
+      ["part: one", "Detail", null],
+      ["part: one", "Detail", "Seller"],
+    ] as const) {
+      expect(parseDrawioBlock(drawioBlockBody(ID, caption, page, part))).toEqual({
+        diagramId: ID,
+        page,
+        part,
+        caption,
+      });
+    }
+    expect(drawioBlockBody(ID, "part: one")).toBe(`${ID}\npart:\npart: one`);
+  });
+
+  const parts = [
+    { name: "Workflow 1 · Email intake · Live" },
+    { name: "Workflow 10 · Alerts · Live" },
+    { name: "Workflow 3 · Received today · Studied, not built" },
+    { name: "seller" },
+    { name: "seller_offer" },
+    { name: `Long ${"x".repeat(113)}…` },
+  ];
+
+  it("finds a part by its name, or by the start of it up to a word's end", () => {
+    expect(findPart(parts, "workflow 3 · RECEIVED today · studied, not built")).toBe(parts[2]);
+    expect(findPart(parts, "Workflow 3")).toBe(parts[2]);
+    // Not "Workflow 10": the name goes on with a digit there.
+    expect(findPart(parts, "Workflow 1")).toBe(parts[0]);
+    expect(findPart(parts, "seller")).toBe(parts[3]);
+    expect(findPart(parts, "Workflow")).toBeNull();
+    expect(findPart(parts, "Workflow 9")).toBeNull();
+    expect(findPart(parts, "")).toBeNull();
+    // A label cut for length matches the whole of it.
+    expect(findPart(parts, `Long ${"x".repeat(150)}`)).toBe(parts[5]);
+    // Two parts may share a name: each is found by its id, and offered by it.
+    const twinTables = [
+      { id: "db_product", name: "product" },
+      { id: "v3db_product", name: "product" },
+      { id: "wf3", name: "Workflow 3 · Receipts · Live" },
+    ];
+    expect(findPart(twinTables, "product")).toBe(twinTables[0]);
+    expect(findPart(twinTables, "v3db_product")).toBe(twinTables[1]);
+    expect(partOptions(twinTables)).toEqual([
+      { id: "db_product", label: "product (id db_product)", line: "db_product" },
+      { id: "v3db_product", label: "product (id v3db_product)", line: "v3db_product" },
+      { id: "wf3", label: "Workflow 3 · Receipts · Live", line: "Workflow 3" },
+    ]);
+    expect(partLine(parts, parts[2]!.name)).toBe("Workflow 3");
+    expect(partLine(parts, "seller_offer")).toBe("seller_offer");
+    // "Workflow" alone would not find it: the whole name stays.
+    const twins = [{ name: "Intake · email" }, { name: "Intake · upload" }];
+    expect(partLine(twins, "Intake · upload")).toBe("Intake · upload");
+  });
+
+  it("crops to a part with a margin, kept inside the picture", () => {
+    const pictureParts = [
+      {
+        width: 800,
+        height: 600,
+        parts: [
+          { id: "l", name: "Left", x: 5, y: 20, width: 200, height: 100 },
+          { id: "r", name: "Right", x: 500, y: 300, width: 300, height: 300 },
+        ],
+      },
+      null,
+    ];
+    expect(partPicture({ pictureParts }, 0, "Left")).toEqual({
+      kind: "part",
+      width: 800,
+      height: 600,
+      box: { x: 0, y: 8, width: 217, height: 124 },
+    });
+    expect(partPicture({ pictureParts }, 0, "Right")).toMatchObject({
+      box: { x: 488, y: 288, width: 312, height: 312 },
+    });
+    expect(partPicture({ pictureParts }, 0, "Gone")).toEqual({ kind: "not_found" });
+    expect(partPicture({ pictureParts }, 1, "Left")).toEqual({ kind: "not_found" });
+    expect(partPicture({ pictureParts: null }, 0, "Left")).toEqual({ kind: "unknown" });
   });
 });

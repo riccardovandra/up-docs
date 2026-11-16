@@ -2,7 +2,7 @@
 // how a click on the picture becomes a point on the diagram, and what goes to
 // the T3 Code chat. Shared by the Worker (store, API, MCP) and the page.
 
-import { MAX_DRAWIO_PAGE_NAME_LENGTH, diagramPath } from "./drawio.ts";
+import { MAX_DRAWIO_PAGE_NAME_LENGTH, diagramPath, type PictureParts } from "./drawio.ts";
 import type { DrawioPageLayout, DrawioShapeBox } from "./drawioModel.ts";
 import { isAgentAuthor } from "./threads.ts";
 
@@ -203,6 +203,32 @@ function shapeOffset(svg: string, shape: DrawioShapeBox): { dx: number; dy: numb
     }
   }
   return null;
+}
+
+/** The most parts kept per page, so a diagram's row stays small. */
+export const MAX_PICTURE_PARTS = 200;
+const round = (value: number) => Math.round(value * 10) / 10;
+
+/**
+ * Where a page's parts sit in its SVG picture, in the picture's units from
+ * its top-left corner, with the picture's size. Null when the text is not an
+ * SVG with a size.
+ */
+export function pictureParts(svg: string, layout: DrawioPageLayout | null): PictureParts | null {
+  const frame = pictureFrame(svg, layout);
+  if (!frame) return null;
+  return {
+    width: round(frame.width),
+    height: round(frame.height),
+    parts: (layout?.parts ?? []).slice(0, MAX_PICTURE_PARTS).map((part) => ({
+      id: part.id,
+      name: part.label,
+      x: round(part.x + frame.dx - frame.viewX),
+      y: round(part.y + frame.dy - frame.viewY),
+      width: round(part.width),
+      height: round(part.height),
+    })),
+  };
 }
 
 /** A point on the shown picture (fractions 0..1 of its width and height) as diagram coordinates. */

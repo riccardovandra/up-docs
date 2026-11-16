@@ -1,9 +1,10 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type CSSProperties } from "react";
 
 import {
   diagramPictureUrl,
   isPictureCurrent,
   pagePicture,
+  partPicture,
   type DiagramSummary,
 } from "../../shared/drawio.ts";
 import { diagramsApi, subscribeDiagram } from "./diagramsApi.ts";
@@ -14,8 +15,15 @@ import "./diagrams.css";
 /** What a picture needs to know about its diagram. A list item and a `DiagramView` both fit. */
 export type DiagramPictureInfo = Pick<
   DiagramSummary,
-  "id" | "title" | "version" | "pictureVersion" | "picturePages" | "hasSource"
+  "id" | "title" | "version" | "pictureVersion" | "picturePages" | "pictureParts" | "hasSource"
 > & { readonly canEdit: boolean };
+
+/** The part of the page's picture to show: the picture's size and the box to crop to. */
+export interface PictureCrop {
+  readonly width: number;
+  readonly height: number;
+  readonly box: { readonly x: number; readonly y: number; readonly width: number; readonly height: number };
+}
 
 export type DiagramPictureState =
   /** Not known yet. */
@@ -44,6 +52,7 @@ const pick = (
   version: diagram.version,
   pictureVersion: diagram.pictureVersion,
   picturePages: diagram.picturePages,
+  pictureParts: diagram.pictureParts,
   hasSource: diagram.hasSource,
   canEdit: "canEdit" in diagram ? diagram.canEdit : canEdit,
 });
@@ -66,7 +75,16 @@ export function useDiagramPicture(
   known?: DiagramPictureInfo,
   /** The page to show, by name; null or absent for the first page. */
   page: string | null = null,
-): { readonly state: DiagramPictureState; readonly title: string | null } {
+  /** The part of that page to show, by name; null or absent for the whole page. */
+  part: string | null = null,
+): {
+  readonly state: DiagramPictureState;
+  readonly title: string | null;
+  /** Where the part sits in the picture; null for the whole page. */
+  readonly crop: PictureCrop | null;
+  /** True when the block names a part the page does not have: the whole page shows. */
+  readonly partMissing: boolean;
+} {
   const [heard, setHeard] = useState<DiagramPictureInfo | "missing" | null>(null);
   /** The `id:version` a redraw was last asked for, and the one that failed. */
   const [asked, setAsked] = useState<string | null>(null);
@@ -109,9 +127,16 @@ export function useDiagramPicture(
         ? later(known, heard)
         : (heard ?? (known?.id === diagramId ? known : null));
   const shown = info === null ? null : pagePicture(info, page);
-  // A picture that does not say which page is which is drawn again for a block that names one.
+  const cut =
+    info === null || part === null || shown?.kind !== "picture"
+      ? null
+      : partPicture(info, shown.index, part);
+  // A picture that does not say which page is which, or where its parts are, is drawn again for
+  // a block that names one.
   const behind =
-    info !== null && info.hasSource && (!isPictureCurrent(info) || shown?.kind === "unknown");
+    info !== null &&
+    info.hasSource &&
+    (!isPictureCurrent(info) || shown?.kind === "unknown" || cut?.kind === "unknown");
   const attempt = info ? `${info.id}:${info.version}` : null;
 
   const canDraw = behind && info.canEdit;
@@ -126,21 +151,47 @@ export function useDiagramPicture(
     );
   }, [canDraw, diagramId, attempt, asked]);
 
-  if (heard === "missing") return { state: { status: "missing" }, title: null };
-  if (!info) return { state: { status: "loading" }, title: null };
+  const crop = cut?.kind === "part" ? cut : null;
+  const partMissing = cut?.kind === "not_found";
+  const none = { crop: null, partMissing: false };
+  if (heard === "missing") return { state: { status: "missing" }, title: null, ...none };
+  if (!info) return { state: { status: "loading" }, title: null, ...none };
   const { title } = info;
-  if (!info.hasSource) return { state: { status: "empty" }, title };
-  if (!behind && shown?.kind === "not_found") return { state: { status: "page_missing" }, title };
+  if (!info.hasSource) return { state: { status: "empty" }, title, ...none };
+  if (!behind && shown?.kind === "not_found") {
+    return { state: { status: "page_missing" }, title, ...none };
+  }
   if (!behind && shown?.kind === "no_picture") {
-    return { state: { status: "page_unpictured" }, title };
+    return { state: { status: "page_unpictured" }, title, ...none };
   }
   const src =
     info.pictureVersion === null || shown?.kind !== "picture"
       ? null
       : assetSrc(diagramPictureUrl(info.id, "svg", info.pictureVersion, shown.index));
-  if (!behind && src !== null) return { state: { status: "ready", src }, title };
+  if (!behind && src !== null) return { state: { status: "ready", src }, title, crop, partMissing };
   const drawing = info.canEdit && failed !== attempt;
-  return { state: { status: drawing ? "rendering" : "stale", src }, title };
+  return { state: { status: drawing ? "rendering" : "stale", src }, title, crop, partMissing };
+}
+
+/**
+ * How the picture sits in a box the part's size: the box keeps the part's
+ * shape and shows it at its own size, down to the column's width, and the
+ * whole picture is placed so only the part shows.
+ */
+export function cropStyles(crop: PictureCrop): {
+  readonly frame: CSSProperties;
+  readonly picture: CSSProperties;
+} {
+  const { box } = crop;
+  const percent = (value: number) => `${(value * 100).toFixed(4)}%`;
+  return {
+    frame: { width: `min(100%, ${box.width}px)`, aspectRatio: `${box.width} / ${box.height}` },
+    picture: {
+      width: percent(crop.width / box.width),
+      left: percent(-box.x / box.width),
+      top: percent(-box.y / box.height),
+    },
+  };
 }
 
 const NOTES: Readonly<Record<DiagramPictureState["status"], string | null>> = {
@@ -166,11 +217,18 @@ export function DiagramPicture(props: {
   readonly diagram?: DiagramPictureInfo;
   /** The page to show, by name; absent or null for the first page. */
   readonly page?: string | null;
+  /** The part of the page to show, by name; absent or null for the whole page. */
+  readonly part?: string | null;
   /** Defaults to the diagram's title. */
   readonly alt?: string;
   readonly className?: string;
 }) {
-  const { state, title } = useDiagramPicture(props.diagramId, props.diagram, props.page ?? null);
+  const { state, title, crop, partMissing } = useDiagramPicture(
+    props.diagramId,
+    props.diagram,
+    props.page ?? null,
+    props.part ?? null,
+  );
   const [broken, setBroken] = useState<string | null>(null);
   const src = "src" in state && state.src !== broken ? state.src : null;
   // An older picture is better than a note; "Rendering diagram" shows over it all the same.
@@ -180,18 +238,30 @@ export function DiagramPicture(props: {
         ? (NOTES[state.status] ?? "Picture not available")
         : null
       : NOTES[state.status];
+  const alt = props.alt ?? title ?? "Diagram";
+  const styles = crop === null ? null : cropStyles(crop);
   return (
     <span
       className={props.className ? `diagram-picture ${props.className}` : "diagram-picture"}
       data-status={state.status}
     >
-      {src !== null ? (
-        <img
-          src={src}
-          alt={props.alt ?? title ?? "Diagram"}
-          draggable={false}
-          onError={() => setBroken(src)}
-        />
+      {src !== null && styles !== null ? (
+        <span className="diagram-part" style={styles.frame}>
+          <img
+            src={src}
+            alt={alt}
+            draggable={false}
+            style={styles.picture}
+            onError={() => setBroken(src)}
+          />
+        </span>
+      ) : src !== null ? (
+        <img src={src} alt={alt} draggable={false} onError={() => setBroken(src)} />
+      ) : null}
+      {note === null && partMissing ? (
+        <span className="diagram-picture-note diagram-part-missing" role="status">
+          Part not found: showing the whole page
+        </span>
       ) : null}
       {note !== null ? (
         <span className="diagram-picture-note" role="status">
