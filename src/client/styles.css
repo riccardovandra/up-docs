@@ -1973,3 +1973,15 @@ span.tab-row-toggle {
     display: none;
   }
 }
+
+/* A public link's page: one doc, read-only, no account controls. */
+.public-doc-badge {
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.public-doc-missing {
+  max-width: 32rem;
+  margin: 15vh auto 0;
+  padding: 0 1rem;
+}

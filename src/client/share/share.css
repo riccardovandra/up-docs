@@ -481,3 +481,33 @@
     overflow-y: auto;
   }
 }
+
+/* Anyone with the link: a doc owner's public, read-only link. */
+.share-public {
+  margin-top: 1rem;
+}
+
+.share-public-row,
+.share-public-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  font-size: 0.8rem;
+}
+
+.share-public-actions {
+  justify-content: flex-start;
+}
+
+.share-public-warning {
+  margin: 0 0 0.4rem;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.share-public-url {
+  margin: 0 0 0.5rem;
+  font-size: 0.8rem;
+}

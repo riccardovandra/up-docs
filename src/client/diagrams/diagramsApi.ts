@@ -18,6 +18,7 @@ import type {
   RestyleSummary,
 } from "../../shared/diagramTheme.ts";
 import { ApiError, request } from "../api.ts";
+import { publicShare } from "../publicMode.ts";
 
 type DiagramListener = (diagram: DiagramSummary | null) => void;
 
@@ -107,8 +108,16 @@ export const diagramsApi = {
       .diagrams;
   },
   /** The diagram as the caller may see it: `xml` is null unless they manage it. */
-  get: async (diagramId: string): Promise<DiagramView> =>
-    (await request<{ diagram: DiagramView }>("GET", `/api/diagrams/${diagramId}`)).diagram,
+  get: async (diagramId: string): Promise<DiagramView> => {
+    // A public page knows the diagrams its link may show; it never asks the signed-in API.
+    const share = publicShare();
+    if (share) {
+      const diagram = share.diagrams.get(diagramId);
+      if (!diagram) throw new ApiError(404, { error: "not_found" });
+      return { ...diagram, canEdit: false, role: "viewer", member: false, xml: null };
+    }
+    return (await request<{ diagram: DiagramView }>("GET", `/api/diagrams/${diagramId}`)).diagram;
+  },
   /**
    * The diagrams among `diagramIds` the caller may see, as they are now and
    * without their source. One that is gone or not shared is left out.

@@ -11,6 +11,7 @@ import { resolvePublicOrigin, type Env } from "./env.ts";
 import { withEmbedPolicy } from "./embed.ts";
 import { d1ImageStore, r2ImageStore } from "./images.ts";
 import { handleDrawioLink, handleMcp } from "./mcp.ts";
+import { PUBLIC_HEADERS } from "./publicLinks.ts";
 import { r2VideoStore } from "./videos.ts";
 import { emailEnabled, isLocalRequest, sendDocInvite, sendLoginCode } from "./email.ts";
 
@@ -76,6 +77,12 @@ function apiDeps(request: Request, env: Env, ctx: ExecutionContext): ApiDeps {
   };
 }
 
+function withPublicPageHeaders(response: Response): Response {
+  const headers = new Headers(response.headers);
+  for (const [name, value] of Object.entries(PUBLIC_HEADERS)) headers.set(name, value);
+  return new Response(response.body, { status: response.status, headers });
+}
+
 export default {
   async fetch(request, env, ctx): Promise<Response> {
     const { pathname } = new URL(request.url);
@@ -87,7 +94,7 @@ export default {
     if (pathname === "/mcp" || pathname.startsWith("/mcp/")) {
       return handleMcp(request, apiDeps(request, env, ctx));
     }
-    return withAssetCaching(
+    const page = withAssetCaching(
       await withEmbedPolicy(
         await env.ASSETS.fetch(request),
         parseEmbedOrigins(env.FRAME_ANCESTORS),
@@ -95,5 +102,8 @@ export default {
       ),
       pathname,
     );
+    // A public link's page: the token in its URL must not leak as a Referer,
+    // and search engines must not index it.
+    return pathname.startsWith("/p/") ? withPublicPageHeaders(page) : page;
   },
 } satisfies ExportedHandler<Env>;

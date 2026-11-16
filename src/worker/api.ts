@@ -61,6 +61,7 @@ import {
 } from "../shared/drawio.ts";
 import { diagramUrl, MAX_DIAGRAM_COMMENT_LENGTH } from "../shared/diagramComments.ts";
 import { readDrawioLayout } from "../shared/drawioModel.ts";
+import * as PublicLinks from "./publicLinks.ts";
 import * as Sheets from "./sheets.ts";
 import {
   DEFAULT_SHEET_TITLE,
@@ -386,6 +387,15 @@ export async function handleApi(
   if (path.startsWith("/api/auth/")) return handleAuth(request, path, deps);
   const uploadLink = /^\/api\/image-uploads\/([^/]+)$/.exec(path);
   if (uploadLink) return handleImageUploadLink(request, uploadLink[1]!, deps);
+  // Public links run before sign-in: the token is the only credential, and
+  // these routes never read a cookie or bearer token.
+  if (path === "/api/public" || path.startsWith("/api/public/")) {
+    return PublicLinks.handlePublic(request, path.split("/").slice(3), {
+      db: deps.db,
+      images: deps.images,
+      videos: deps.videos,
+    });
+  }
 
   const principal = await Auth.authenticate(deps.db, request, {
     owners: deps.owners,
@@ -589,6 +599,30 @@ export async function handleApi(
       }
       const owner = await Access.docOwner(deps.db, id, deps.owners);
       return json({ ...(await Docs.getDoc(deps.db, id)), role, owner });
+    }
+
+    // The doc's public link. Only an owner, and only from a browser session:
+    // a leaked agent token must not be able to publish a doc.
+    if (resource === "docs" && id && sub === "public-link" && segments.length === 3) {
+      if (principal.kind !== "session") return error(403, "session_required");
+      await need(id, "owner");
+      if (method === "GET") {
+        return json({ link: await PublicLinks.getPublicLink(deps.db, id, deps.publicOrigin) });
+      }
+      if (method === "PUT") {
+        const link = await PublicLinks.createPublicLink(deps.db, {
+          docId: id,
+          userId: principal.userId,
+          now,
+          publicOrigin: deps.publicOrigin,
+        });
+        return json({ link });
+      }
+      if (method === "DELETE") {
+        await PublicLinks.deletePublicLink(deps.db, id);
+        return json({ link: null });
+      }
+      return error(405, "method_not_allowed");
     }
 
     if (resource === "docs" && id && sub === "members") {
