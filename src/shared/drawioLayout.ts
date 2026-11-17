@@ -1,10 +1,11 @@
 // Layout checks for a Draw.io page, from geometry alone: labels that do not fit
-// their box, boxes that overlap or stick out of the container they sit in, and
-// connections that run through a box that is neither of their ends. Draw.io's
-// orthogonal router avoids only a line's own two ends, so an agent never sees
-// these until a person opens the picture. Every check leans towards silence:
-// text widths are estimates, and a line is reported only when every route
-// Draw.io could plausibly take runs through the same box.
+// their box, boxes that overlap or stick out of the container they sit in,
+// connections that run through or along the edge of a box that is neither of
+// their ends, and connections drawn on top of each other. Draw.io's orthogonal
+// router avoids only a line's own two ends, so an agent never sees these until
+// a person opens the picture. Every check leans towards silence: text widths
+// are estimates, and a line is reported only when every route Draw.io could
+// plausibly take has the same problem.
 
 export interface LayoutPoint {
   readonly x: number;
@@ -41,6 +42,16 @@ export interface LayoutBox {
   readonly labelInside: boolean;
   /** A swimlane's header height; the label lives there. 0 for anything else. */
   readonly header: number;
+  /**
+   * A table: a container whose children are its rows (`childLayout=stackLayout`
+   * or `shape=table`). Unlike other containers it is solid: a line must not cross it.
+   */
+  readonly table: boolean;
+  /**
+   * The sides connections attach to: "horizontal" for left or right only (a
+   * table row, `portConstraint=eastwest`), "vertical" for top or bottom only.
+   */
+  readonly ports: "any" | "horizontal" | "vertical";
 }
 
 export interface LayoutEdge {
@@ -75,6 +86,14 @@ const TEXT_SLACK = 4;
 const TOUCH = 2;
 /** Boxes are shrunk by this much before a line through them counts. */
 const LINE_SLACK = 3;
+/** Two parallel lines this close or closer are drawn on top of each other. */
+const SHARED_GAP = 3;
+/** How long two connections may share a run before it is reported. */
+const SHARED_MIN = 20;
+/** A line this close to a box's border, outside or just inside, runs along it. */
+const HUG_GAP = 6;
+/** How long a line may run along a border before it is reported. */
+const HUG_MIN = 20;
 const MAX_LAYOUT_WARNINGS = 8;
 
 const charWidth = (box: LayoutBox) =>
@@ -200,16 +219,40 @@ function elbow(a: LayoutPoint, b: LayoutPoint, horizontalFirst: boolean): Array<
   return horizontalFirst ? [{ x: b.x, y: a.y }, b] : [{ x: a.x, y: b.y }, b];
 }
 
+type Ports = LayoutBox["ports"];
+
+/** Where an end attaches when its style names no point: the middle, or the side facing `toward` when only some sides take connections. */
+function anchorOf(box: Rect, ports: Ports, toward: LayoutPoint): LayoutPoint {
+  const middle = centre(box);
+  if (ports === "horizontal") return { x: toward.x < middle.x ? box.x : box.x + box.width, y: middle.y };
+  if (ports === "vertical") return { x: middle.x, y: toward.y < middle.y ? box.y : box.y + box.height };
+  return middle;
+}
+
 /** The routes Draw.io could plausibly draw for an edge, each a polyline from its source to its target. */
 function candidateRoutes(
   edge: LayoutEdge,
-  from: Rect | undefined,
-  to: Rect | undefined,
+  from: LayoutBox | undefined,
+  to: LayoutBox | undefined,
 ): ReadonlyArray<ReadonlyArray<LayoutPoint>> {
-  const anchor = (box: Rect | undefined, at: LayoutPoint | undefined, loose: LayoutPoint | undefined) =>
-    box ? (at ? { x: box.x + at.x * box.width, y: box.y + at.y * box.height } : centre(box)) : loose;
-  const start = anchor(from, edge.exit, edge.sourcePoint);
-  const end = anchor(to, edge.entry, edge.targetPoint);
+  const fromPorts: Ports = from && !edge.exit ? from.ports : "any";
+  const toPorts: Ports = to && !edge.entry ? to.ports : "any";
+  // Each end faces the next point along the line: a bend point, else the other end.
+  const towardStart = edge.points.at(-1) ?? (from ? centre(from) : edge.sourcePoint);
+  const towardEnd = edge.points[0] ?? (to ? centre(to) : edge.targetPoint);
+  const anchor = (
+    box: LayoutBox | undefined,
+    at: LayoutPoint | undefined,
+    loose: LayoutPoint | undefined,
+    ports: Ports,
+    toward: LayoutPoint | undefined,
+  ) => {
+    if (!box) return loose;
+    if (at) return { x: box.x + at.x * box.width, y: box.y + at.y * box.height };
+    return anchorOf(box, ports, toward ?? centre(box));
+  };
+  const start = anchor(from, edge.exit, edge.sourcePoint, fromPorts, towardEnd);
+  const end = anchor(to, edge.entry, edge.targetPoint, toPorts, towardStart);
   if (!start || !end) return [];
   const stops = [...edge.points, end];
   if (!edge.orthogonal) {
@@ -226,16 +269,34 @@ function candidateRoutes(
   if (from && to && !edge.exit && !edge.entry) {
     const top = Math.max(from.y, to.y);
     const bottom = Math.min(from.y + from.height, to.y + to.height);
-    if (bottom - top > 0) {
-      const y = (top + bottom) / 2;
-      return [[{ x: start.x, y }, { x: end.x, y }]];
+    if (bottom - top > 0 && fromPorts !== "vertical" && toPorts !== "vertical") {
+      // An end that takes lines only on its sides keeps its own height.
+      const y = fromPorts === "horizontal" ? start.y : toPorts === "horizontal" ? end.y : (top + bottom) / 2;
+      if (y >= top && y <= bottom) return [[{ x: start.x, y }, { x: end.x, y }]];
     }
     const left = Math.max(from.x, to.x);
     const right = Math.min(from.x + from.width, to.x + to.width);
-    if (right - left > 0) {
-      const x = (left + right) / 2;
-      return [[{ x, y: start.y }, { x, y: end.y }]];
+    if (right - left > 0 && fromPorts !== "horizontal" && toPorts !== "horizontal") {
+      const x = fromPorts === "vertical" ? start.x : toPorts === "vertical" ? end.x : (left + right) / 2;
+      if (x >= left && x <= right) return [[{ x, y: start.y }, { x, y: end.y }]];
     }
+  }
+  // An end that takes lines only on some sides fixes how the route leaves or
+  // arrives. With one such end Draw.io turns once, into the middle of the other
+  // end; with two it draws the Z shape between them.
+  if (fromPorts !== "any" || toPorts !== "any") {
+    const horizontal = (fromPorts !== "any" ? fromPorts : toPorts) === "horizontal";
+    if (fromPorts !== "any" && toPorts !== "any" && fromPorts === toPorts) {
+      const midX = (start.x + end.x) / 2;
+      const midY = (start.y + end.y) / 2;
+      return [
+        horizontal
+          ? [start, { x: midX, y: start.y }, { x: midX, y: end.y }, end]
+          : [start, { x: start.x, y: midY }, { x: end.x, y: midY }, end],
+      ];
+    }
+    const leavesHorizontally = fromPorts !== "any" ? horizontal : !horizontal;
+    return [[start, ...elbow(start, end, leavesHorizontally)]];
   }
   const midX = (start.x + end.x) / 2;
   const midY = (start.y + end.y) / 2;
@@ -245,6 +306,70 @@ function candidateRoutes(
     [start, ...elbow(start, end, true)],
     [start, ...elbow(start, end, false)],
   ];
+}
+
+/** One straight run of a route: horizontal at y = `at` from `lo` to `hi`, or vertical at x = `at`. */
+interface Run {
+  readonly horizontal: boolean;
+  readonly at: number;
+  readonly lo: number;
+  readonly hi: number;
+}
+
+/** A route's horizontal and vertical runs, less the parts inside `zones` (its ends, where lines meet anyway). */
+function runsOf(route: ReadonlyArray<LayoutPoint>, zones: ReadonlyArray<Rect>): ReadonlyArray<Run> {
+  let runs: Array<Run> = [];
+  for (const [at, point] of route.entries()) {
+    if (at === 0) continue;
+    const before = route[at - 1]!;
+    if (before.y === point.y && before.x !== point.x) {
+      runs.push({ horizontal: true, at: point.y, lo: Math.min(before.x, point.x), hi: Math.max(before.x, point.x) });
+    } else if (before.x === point.x && before.y !== point.y) {
+      runs.push({ horizontal: false, at: point.x, lo: Math.min(before.y, point.y), hi: Math.max(before.y, point.y) });
+    }
+  }
+  for (const zone of zones) {
+    runs = runs.flatMap((run) => {
+      const [across, acrossSize, along, alongSize] = run.horizontal
+        ? [zone.y, zone.height, zone.x, zone.width]
+        : [zone.x, zone.width, zone.y, zone.height];
+      if (run.at <= across || run.at >= across + acrossSize) return [run];
+      const parts: Array<Run> = [];
+      if (run.lo < along) parts.push({ ...run, hi: Math.min(run.hi, along) });
+      if (run.hi > along + alongSize) parts.push({ ...run, lo: Math.max(run.lo, along + alongSize) });
+      return parts;
+    });
+  }
+  return runs;
+}
+
+/** How far two routes run on top of each other, in px. */
+function sharedLength(a: ReadonlyArray<Run>, b: ReadonlyArray<Run>): number {
+  let total = 0;
+  for (const one of a) {
+    for (const other of b) {
+      if (one.horizontal !== other.horizontal || Math.abs(one.at - other.at) > SHARED_GAP) continue;
+      total += Math.max(0, Math.min(one.hi, other.hi) - Math.max(one.lo, other.lo));
+    }
+  }
+  return total;
+}
+
+/** How far a route runs along one of the borders of `box`, in px, without entering it. */
+function hugLength(runs: ReadonlyArray<Run>, box: Rect): number {
+  let longest = 0;
+  for (const run of runs) {
+    const [lo, hi, borders] = run.horizontal
+      ? [box.x, box.x + box.width, [box.y, box.y + box.height]]
+      : [box.y, box.y + box.height, [box.x, box.x + box.width]];
+    const [near, far] = borders as [number, number];
+    // Along a border, outside it or just inside: deeper in is a line through the box.
+    const along =
+      (run.at >= near - HUG_GAP && run.at <= near + LINE_SLACK) ||
+      (run.at >= far - LINE_SLACK && run.at <= far + HUG_GAP);
+    if (along) longest = Math.max(longest, Math.min(run.hi, hi) - Math.max(run.lo, lo));
+  }
+  return longest;
 }
 
 /**
@@ -260,17 +385,36 @@ export function layoutProblems(
   const parents = new Set(usable.flatMap((box) => (box.parent ? [box.parent] : [])));
   // Background shapes: containers by style or structure, and any box drawn around other boxes.
   // They frame the boxes that matter, so lines may cross them and boxes may sit on them.
+  // A table is solid, though: its rows are part of it, and a line across it hides them.
   const background = new Set(
     usable
       .filter(
         (box) =>
-          box.kind === "container" ||
-          parents.has(box.id) ||
-          usable.some((other) => other !== box && other.kind !== "text" && inside(other, box, 0) && !inside(box, other, 0)),
+          !box.table &&
+          (box.kind === "container" ||
+            parents.has(box.id) ||
+            usable.some(
+              (other) => other !== box && other.kind !== "text" && inside(other, box, 0) && !inside(box, other, 0),
+            )),
       )
       .map((box) => box.id),
   );
-  const leaves = usable.filter((box) => box.kind === "box" && !background.has(box.id));
+  const leaves = usable.filter((box) => box.table || (box.kind === "box" && !background.has(box.id)));
+  /** The table a box is part of (a row, or a cell of a row), if any. */
+  const tableOf = (box: LayoutBox): LayoutBox | undefined => {
+    let at = box.parent ? byId.get(box.parent) : undefined;
+    for (let depth = 0; at && depth < 50; depth += 1) {
+      if (at.table) return at;
+      at = at.parent ? byId.get(at.parent) : undefined;
+    }
+    return undefined;
+  };
+  // A connection names a row by its own words and its table's.
+  const endName = (box: LayoutBox | undefined) => {
+    if (!box) return "a loose end";
+    const table = tableOf(box);
+    return table ? `${named(box)} (in ${named(table)})` : named(box);
+  };
 
   const problems: Array<string> = [];
   for (const box of usable) {
@@ -283,7 +427,7 @@ export function layoutProblems(
     const holder = leaf.parent ? byId.get(leaf.parent) : undefined;
     const frames = usable.filter(
       (other) =>
-        background.has(other.id) && other !== leaf && (other === holder || overlaps(leaf, other)),
+        other !== leaf && (other === holder || (background.has(other.id) && overlaps(leaf, other))),
     );
     const poking = frames.find((frame) => !inside(leaf, frame));
     if (poking) {
@@ -300,18 +444,22 @@ export function layoutProblems(
     }
   }
 
+  // A table's rows and cells are covered by the table itself.
+  const solid = leaves.filter((box) => !tableOf(box));
+  const drawn: Array<{ edge: LayoutEdge; name: string; routes: ReadonlyArray<ReadonlyArray<Run>> }> = [];
   for (const edge of edges) {
     const from = edge.source ? byId.get(edge.source) : undefined;
     const to = edge.target ? byId.get(edge.target) : undefined;
     const routes = candidateRoutes(edge, from, to);
     if (routes.length === 0) continue;
     const ends = new Set([edge.source, edge.target]);
-    const obstacles = leaves.filter(
+    const obstacles = solid.filter(
       (box) =>
         !ends.has(box.id) &&
         !(from && inside(from, box)) &&
         !(to && inside(to, box)),
     );
+    const name = `${endName(from)} -> ${endName(to)}`;
     let blocked: ReadonlyArray<LayoutBox> = obstacles;
     for (const route of routes) {
       blocked = blocked.filter((box) => {
@@ -320,12 +468,49 @@ export function layoutProblems(
       });
       if (blocked.length === 0) break;
     }
-    if (blocked.length === 0) continue;
-    const name = `${from ? named(from) : "a loose end"} -> ${to ? named(to) : "a loose end"}`;
-    problems.push(
-      `The connection ${name} runs through ${blocked.slice(0, 2).map(named).join(" and ")}. ` +
-        `Give it bend points (<Array as="points">) that go around, through the gaps between boxes, or move the boxes.`,
+    if (blocked.length > 0) {
+      problems.push(
+        `The connection ${name} runs through ${blocked.slice(0, 2).map(named).join(" and ")}. ` +
+          `Give it bend points (<Array as="points">) that go around, through the gaps between boxes, or move the boxes.`,
+      );
+    }
+
+    // Lines meet inside their own ends, and inside the table a row belongs to.
+    const zones = [from, to, from && tableOf(from), to && tableOf(to)].filter((box) => box !== undefined);
+    const runs = routes.map((route) => runsOf(route, zones));
+    drawn.push({ edge, name, routes: runs });
+    const hugged = obstacles.filter(
+      (box) => !blocked.includes(box) && runs.every((route) => hugLength(route, box) > HUG_MIN),
     );
+    if (hugged.length > 0) {
+      problems.push(
+        `The connection ${name} runs along the edge of ${hugged.slice(0, 2).map(named).join(" and ")}, ` +
+          `so it reads as part of the box. Give it bend points that keep it 20 px or more away, or move the box.`,
+      );
+    }
+  }
+
+  // Two connections sharing a run cannot be told apart. Lines that fan out of
+  // one shape or into one shape may share the run next to it: that is one bus.
+  for (const [index, a] of drawn.entries()) {
+    for (const b of drawn.slice(index + 1)) {
+      if (
+        (a.edge.source !== undefined && a.edge.source === b.edge.source) ||
+        (a.edge.target !== undefined && a.edge.target === b.edge.target)
+      ) {
+        continue;
+      }
+      let shared = Infinity;
+      for (const one of a.routes) {
+        for (const other of b.routes) shared = Math.min(shared, sharedLength(one, other));
+      }
+      if (shared > SHARED_MIN) {
+        problems.push(
+          `The connections ${a.name} and ${b.name} run on top of each other for ${Math.round(shared)} px. ` +
+            `Move one with bend points.`,
+        );
+      }
+    }
   }
 
   if (problems.length <= MAX_LAYOUT_WARNINGS) return problems;

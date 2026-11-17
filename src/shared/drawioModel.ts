@@ -630,7 +630,25 @@ const styleNames = (style: string) =>
       .filter((part) => part !== "" && !part.includes("=")),
   );
 
-/** The page's layout problems: labels that overflow, boxes that overlap, lines through boxes. */
+/**
+ * The sides a shape lets connections attach to: `portConstraint`, or a
+ * `points` list that only has points on the left and right (a table row) or
+ * on the top and bottom. "any" when nothing limits them.
+ */
+function portSides(style: string): LayoutBox["ports"] {
+  const constraint = styleValue(style, "portConstraint") ?? "";
+  if (["eastwest", "east", "west"].includes(constraint)) return "horizontal";
+  if (["northsouth", "north", "south"].includes(constraint)) return "vertical";
+  const listed = [...(styleValue(style, "points") ?? "").matchAll(/\[\s*([\d.]+)\s*,\s*([\d.]+)/g)].map(
+    ([, x, y]) => [Number(x), Number(y)] as const,
+  );
+  if (listed.length === 0) return "any";
+  if (listed.every(([x, y]) => (x === 0 || x === 1) && y > 0 && y < 1)) return "horizontal";
+  if (listed.every(([x, y]) => (y === 0 || y === 1) && x > 0 && x < 1)) return "vertical";
+  return "any";
+}
+
+/** The page's layout problems: labels that overflow, boxes that overlap, lines through or along boxes, lines on top of each other. */
 function pageLayoutProblems(model: XmlElement): ReadonlyArray<string> {
   const root = model.children.find((child) => child.name === "root");
   const cells = (root?.children ?? []).flatMap((element) => {
@@ -699,6 +717,10 @@ function pageLayoutProblems(model: XmlElement): ReadonlyArray<string> {
           styleValue(style, "overflow") !== "width" &&
           styleValue(style, "noLabel") !== "1",
         header: swimlane ? styleNumber(style, "startSize", 23) : 0,
+        table:
+          container &&
+          (shape === "table" || ["stackLayout", "tableLayout"].includes(styleValue(style, "childLayout") ?? "")),
+        ports: portSides(style),
       });
     } else if (cell.edge) {
       const point = (element: XmlElement): LayoutPoint => ({
