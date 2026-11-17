@@ -62,6 +62,8 @@ import {
 import { diagramUrl, MAX_DIAGRAM_COMMENT_LENGTH } from "../shared/diagramComments.ts";
 import { readDrawioLayout } from "../shared/drawioModel.ts";
 import * as PublicLinks from "./publicLinks.ts";
+import * as Folders from "./folders.ts";
+import { isFolderItemKind } from "../shared/folders.ts";
 import * as Sheets from "./sheets.ts";
 import {
   DEFAULT_SHEET_TITLE,
@@ -978,6 +980,11 @@ export async function handleApi(
       if (response) return response;
     }
 
+    if (resource === "folders" && segments.length <= 2) {
+      const response = await handleFolders(request, { id, method, url, principal }, deps);
+      if (response) return response;
+    }
+
     if (resource === "diagrams" && id && sub === "members" && segments.length <= 4) {
       const response = await handleMembers(
         request,
@@ -1164,6 +1171,64 @@ const versionConflict = (conflict: { readonly version: number }) =>
  * delete it. Someone on a doc that shows one views it the same way. People
  * are under `/members`, handled like a doc's. Returns null for other paths.
  */
+/**
+ * Folders, under `/api/folders`. `GET ?projectId=` lists a project's folders
+ * for anyone who can see the project; creating, renaming, deleting and filing
+ * items (`POST /api/folders/place`) are the admin's, like projects.
+ */
+async function handleFolders(
+  request: Request,
+  route: {
+    readonly id: string | undefined;
+    readonly method: string;
+    readonly url: URL;
+    readonly principal: Auth.Principal;
+  },
+  deps: ApiDeps,
+): Promise<Response | null> {
+  const { id, method } = route;
+  const userId = route.principal.userId;
+  const admin = Access.isAdmin(userId);
+  if (!id && method === "GET") {
+    const projectId = route.url.searchParams.get("projectId") ?? "";
+    if (!projectId || !(await Access.canSeeProject(deps.db, projectId, userId))) {
+      return error(404, "not_found");
+    }
+    return json(await Folders.listProjectFolders(deps.db, { projectId, userId, all: admin }));
+  }
+  if (!admin) return error(403, "forbidden");
+  if (!id && method === "POST") {
+    const body = await readJson(request);
+    const projectId = str(body.projectId);
+    const parentId = body.parentId === undefined || body.parentId === null ? null : str(body.parentId);
+    const name = Folders.folderNameArg(body.name);
+    if (!projectId) return error(400, "invalid_project");
+    if (parentId === null && body.parentId != null) return error(400, "invalid_parent");
+    if (!name) return error(400, "invalid_name");
+    const result = await Folders.createFolder(deps.db, { projectId, parentId, name, now: deps.now() });
+    return result.ok ? json({ folder: result.folder }, 201) : error(404, result.error);
+  }
+  if (id === "place" && method === "POST") {
+    const body = await readJson(request);
+    const itemId = str(body.id);
+    const folderId = body.folderId === null ? null : str(body.folderId);
+    if (!isFolderItemKind(body.kind) || !itemId) return error(400, "invalid_item");
+    if (folderId === null && body.folderId !== null) return error(400, "invalid_folder");
+    const result = await Folders.placeItem(deps.db, { kind: body.kind, id: itemId, folderId });
+    return result.ok ? json({ ok: true }) : error(404, result.error);
+  }
+  if (id && id !== "place" && method === "PATCH") {
+    const name = Folders.folderNameArg((await readJson(request)).name);
+    if (!name) return error(400, "invalid_name");
+    const folder = await Folders.renameFolder(deps.db, { folderId: id, name });
+    return folder ? json({ folder }) : error(404, "not_found");
+  }
+  if (id && id !== "place" && method === "DELETE") {
+    return (await Folders.deleteFolder(deps.db, id)) ? json({ ok: true }) : error(404, "not_found");
+  }
+  return null;
+}
+
 async function handleDiagrams(
   request: Request,
   route: {

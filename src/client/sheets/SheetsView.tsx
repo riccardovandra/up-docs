@@ -3,7 +3,17 @@ import { useCallback, useEffect, useMemo, useState, type MouseEvent } from "reac
 import type { SheetMeta } from "../../shared/sheets.ts";
 import type { Project } from "../../shared/protocol.ts";
 import { formatDay, type HomeView, type ProjectScope } from "../home/homeLogic.ts";
-import { GridIcon, ListIcon, MoreIcon, PlusIcon } from "../home/icons.tsx";
+import { MoreIcon, PlusIcon } from "../home/icons.tsx";
+import {
+  FolderCards,
+  FolderCell,
+  FolderHead,
+  FolderHeaderCell,
+  FolderRows,
+  MoveToFolderItem,
+  ViewMenu,
+} from "../home/folders/FolderUi.tsx";
+import { useFolderItems, useFolders } from "../home/folders/folderState.tsx";
 import { Menu, MenuItem, MenuLabel, MenuSeparator } from "../home/Menu.tsx";
 import { NoProjectBadge, ProjectBadge } from "../home/ProjectSwitcher.tsx";
 import { TitleDialog } from "../home/TitleDialog.tsx";
@@ -61,17 +71,19 @@ export function SheetsView(props: {
     void reload();
   }, [reload]);
 
-  const shown = useMemo(
+  const inScope = useMemo(
     () => diagramsInScope(sheets ?? [], props.scope, props.projects),
     [sheets, props.scope, props.projects],
   );
+  const folders = useFolders();
+  useFolderItems("sheet", inScope);
+  const shown = useMemo(() => folders.filter("sheet", inScope), [folders, inScope]);
   const projectOf = useMemo(
     () => new Map(props.projects.map((project) => [project.id, project])),
     [props.projects],
   );
 
-  const toggleView = () => {
-    const next = view === "grid" ? "list" : "grid";
+  const chooseView = (next: HomeView) => {
     setView(next);
     try {
       window.localStorage.setItem(VIEW_KEY, next);
@@ -83,6 +95,8 @@ export function SheetsView(props: {
   const create = async (title: string) => {
     const projectId = await props.resolveProjectId();
     const created = await sheetsApi.create({ projectId, title });
+    const target = folders.canManage ? (folders.at?.id ?? null) : null;
+    if (target !== null && projectId !== null) await folders.place("sheet", created.sheet.id, target);
     navigate(sheetPath(created.sheet.id));
   };
 
@@ -103,6 +117,7 @@ export function SheetsView(props: {
           >
             Rename
           </MenuItem>
+          <MoveToFolderItem kind="sheet" id={sheet.id} title={sheet.title} close={close} />
           <MenuSeparator />
           <MenuLabel>Move to</MenuLabel>
           <div className="home-menu-scroll">
@@ -165,18 +180,11 @@ export function SheetsView(props: {
       <div className="home-toolbar">
         <div className="home-tabs" role="tablist" aria-label="Which sheets">
           <button type="button" role="tab" aria-selected="true" className="home-tab">
-            All<span className="diagram-count">{shown.length}</span>
+            All<span className="diagram-count">{inScope.length}</span>
           </button>
         </div>
         <div className="home-controls">
-          <button
-            type="button"
-            className="home-icon-button"
-            aria-label={view === "grid" ? "Show as list" : "Show as grid"}
-            onClick={toggleView}
-          >
-            {view === "grid" ? <ListIcon /> : <GridIcon />}
-          </button>
+          <ViewMenu view={view} onView={chooseView} />
           <button type="button" className="button diagram-new-button" onClick={() => setCreating(true)}>
             <PlusIcon size={16} />
             New sheet
@@ -184,8 +192,10 @@ export function SheetsView(props: {
         </div>
       </div>
 
+      <FolderHead kind="sheet" count={shown.length} />
+
       {view === "grid" ? (
-        <div className="doc-grid">
+        <div className={folders.grid.className} style={folders.grid.style}>
           <button type="button" className="doc-card doc-card-new" onClick={() => setCreating(true)}>
             <span className="doc-card-paper doc-card-new-paper" aria-hidden="true">
               <PlusIcon size={46} />
@@ -200,8 +210,9 @@ export function SheetsView(props: {
               </span>
             </span>
           </button>
+          <FolderCards kind="sheet" />
           {shown.map((sheet) => (
-            <article key={sheet.id} className="doc-card sheet-card">
+            <article key={sheet.id} className="doc-card sheet-card" {...folders.dragProps("sheet", sheet.id)}>
               <a href={sheetPath(sheet.id)} className="doc-card-link" onClick={follow(sheetPath(sheet.id))}>
                 <span className="sheet-card-cover" aria-hidden="true">
                   <span className="sheet-card-grid" />
@@ -226,13 +237,14 @@ export function SheetsView(props: {
             <tr>
               <th>Sheet</th>
               <th>Project</th>
+              <FolderHeaderCell />
               <th>Edited</th>
               <th aria-label="Actions" />
             </tr>
           </thead>
           <tbody>
             <tr className="doc-row doc-row-new">
-              <td className="doc-row-title" colSpan={4}>
+              <td className="doc-row-title" colSpan={folders.active ? 5 : 4}>
                 <button type="button" onClick={() => setCreating(true)}>
                   <PlusIcon size={16} />
                   <span>New sheet</span>
@@ -240,10 +252,16 @@ export function SheetsView(props: {
                 </button>
               </td>
             </tr>
+            <FolderRows kind="sheet" columns={folders.active ? 5 : 4} />
             {shown.map((sheet) => {
               const project = sheet.projectId ? projectOf.get(sheet.projectId) : undefined;
               return (
-                <tr key={sheet.id} className="doc-row" onClick={() => navigate(sheetPath(sheet.id))}>
+                <tr
+                  key={sheet.id}
+                  className="doc-row"
+                  onClick={() => navigate(sheetPath(sheet.id))}
+                  {...folders.dragProps("sheet", sheet.id)}
+                >
                   <td className="doc-row-title">
                     <a href={sheetPath(sheet.id)} onClick={follow(sheetPath(sheet.id))}>
                       <SheetIcon size={16} />
@@ -258,6 +276,7 @@ export function SheetsView(props: {
                       <span>{project?.name ?? "No project"}</span>
                     </span>
                   </td>
+                  <FolderCell kind="sheet" id={sheet.id} />
                   <td className="doc-row-muted">{formatDay(sheet.updatedAt)}</td>
                   <td className="doc-row-actions" onClick={(event) => event.stopPropagation()}>
                     {actions(sheet)}
@@ -269,9 +288,9 @@ export function SheetsView(props: {
         </table>
       )}
 
-      {shown.length === 0 ? (
+      {shown.length === 0 && !(folders.at && folders.subfolders.length > 0) ? (
         <p className="home-empty">
-          {props.scopeLabel ? `No sheets in ${props.scopeLabel} yet.` : "No sheets yet. Start one with New sheet."}
+          {folders.at ? `No sheets in ${folders.at.name} yet.` : props.scopeLabel ? `No sheets in ${props.scopeLabel} yet.` : "No sheets yet. Start one with New sheet."}
         </p>
       ) : null}
 
