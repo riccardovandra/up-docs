@@ -224,11 +224,7 @@
   border-radius: 12px;
 }
 
-button.diagram-canvas {
-  cursor: pointer;
-}
-
-button.diagram-canvas:hover {
+.diagram-canvas[data-clickable]:hover {
   border-color: var(--input);
 }
 
@@ -1027,4 +1023,288 @@ button.diagram-canvas:hover {
 .diagram-picture img + .diagram-part-missing.diagram-picture-note {
   align-self: start;
   margin: 0.5rem 0 0;
+}
+
+/* Zoom and pan (ZoomViewport.tsx, panZoom.ts): the content scales inside a clipping viewport. */
+.zoom-viewport {
+  position: relative;
+  overflow: hidden;
+  --diagram-zoom: 1;
+}
+
+.zoom-viewport[data-clickable] {
+  cursor: pointer;
+}
+
+.zoom-viewport[data-zoomed] {
+  cursor: grab;
+  touch-action: none;
+}
+
+.zoom-viewport[data-dragging] {
+  cursor: grabbing;
+}
+
+.zoom-viewport[data-dragging] .zoom-content {
+  pointer-events: none;
+}
+
+.zoom-content {
+  min-width: 0;
+  min-height: 0;
+}
+
+.zoom-controls {
+  position: absolute;
+  right: 0.6rem;
+  bottom: 0.6rem;
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  cursor: default;
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+
+.zoom-viewport:hover .zoom-controls,
+.zoom-viewport[data-zoomed] .zoom-controls,
+.zoom-controls:focus-within {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .zoom-controls {
+    opacity: 1;
+  }
+}
+
+.zoom-pill,
+.zoom-chip {
+  display: flex;
+  align-items: stretch;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface);
+  box-shadow: 0 2px 8px rgb(0 0 0 / 0.12);
+}
+
+.zoom-pill button,
+.zoom-chip {
+  font: inherit;
+  font-size: 0.8rem;
+  line-height: 1.6rem;
+  color: var(--text);
+  background: none;
+  border: 0;
+  padding: 0 0.6rem;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.zoom-chip {
+  background: var(--surface);
+}
+
+.zoom-pill button + button {
+  border-left: 1px solid var(--border);
+}
+
+.zoom-pill button:hover:not(:disabled),
+.zoom-chip:hover {
+  background: var(--code-bg);
+}
+
+.zoom-pill button:disabled {
+  color: var(--muted);
+  cursor: default;
+}
+
+.zoom-level {
+  min-width: 3.4rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.zoom-minimap {
+  position: absolute;
+  left: 0.6rem;
+  bottom: 0.6rem;
+  z-index: 4;
+  width: 8.5rem;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid #d4d4d8;
+  border-radius: 6px;
+  background: #fff;
+  box-shadow: 0 2px 8px rgb(0 0 0 / 0.12);
+  cursor: pointer;
+}
+
+.zoom-minimap img {
+  display: block;
+  width: 100%;
+  height: auto;
+  pointer-events: none;
+}
+
+.zoom-minimap-window {
+  position: absolute;
+  box-sizing: border-box;
+  border: 2px solid var(--accent);
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  pointer-events: none;
+}
+
+/* Pins and their threads keep their size on screen at any zoom. */
+.zoom-viewport[data-zoomed] .diagram-pin {
+  width: calc(26px / var(--diagram-zoom));
+  height: calc(26px / var(--diagram-zoom));
+  font-size: calc(12px / var(--diagram-zoom));
+}
+
+.zoom-viewport[data-zoomed] .diagram-pop {
+  scale: calc(1 / var(--diagram-zoom));
+}
+
+/* The diagram page: the card is the viewport; full screen hides the page around it. */
+/* The card is the window's height: the whole picture fits, and zoom is how to read details. */
+.diagram-canvas.zoom-viewport {
+  display: grid;
+  height: max(22rem, calc(100dvh - 3.5rem - var(--open-tabs-height) - 3rem));
+}
+
+.diagram-page:has(.diagram-page-tabs) .diagram-canvas.zoom-viewport {
+  height: max(22rem, calc(100dvh - 3.5rem - 38px - var(--open-tabs-height) - 3rem));
+}
+
+.diagram-canvas > .zoom-content {
+  display: grid;
+  grid-template: minmax(0, 1fr) / minmax(0, 1fr);
+}
+
+@media (max-width: 800px) {
+  .diagram-canvas.zoom-viewport,
+  .diagram-page:has(.diagram-page-tabs) .diagram-canvas.zoom-viewport {
+    height: 70dvh;
+  }
+}
+
+.diagram-page[data-fullscreen] > .doc-header,
+.diagram-page[data-fullscreen] .diagram-side,
+.diagram-page[data-fullscreen] > .diagram-page-tabs,
+.diagram-page[data-fullscreen] > .diagram-page-notice {
+  display: none;
+}
+
+.diagram-page[data-fullscreen] .diagram-viewer {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  grid-template-columns: minmax(0, 1fr);
+  min-height: 0;
+}
+
+.diagram-page[data-fullscreen] .diagram-stage {
+  display: grid;
+  padding: 0;
+}
+
+.diagram-page[data-fullscreen] .diagram-canvas.zoom-viewport {
+  height: 100dvh;
+  border: 0;
+  border-radius: 0;
+}
+
+@media print {
+  .zoom-controls,
+  .zoom-minimap {
+    display: none;
+  }
+}
+
+/* A doc's Draw.io block in full view (DrawioFullView.tsx). */
+.drawio-full {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+}
+
+.drawio-full-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.6rem 1rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.drawio-full-title {
+  flex: 1 1 12rem;
+  min-width: 0;
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.drawio-full-parts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+
+.drawio-full .zoom-chip {
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  box-shadow: none;
+}
+
+.drawio-full .zoom-chip[aria-pressed="true"] {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.drawio-full-stage {
+  flex: 1;
+  display: grid;
+  min-height: 0;
+  background: #fff;
+  color-scheme: only light;
+}
+
+.drawio-full-stage > .zoom-content,
+.drawio-full-picture {
+  display: grid;
+  min-height: 0;
+}
+
+.drawio-full-picture {
+  padding: 1.5rem;
+}
+
+.drawio-full-picture .diagram-picture {
+  height: 100%;
+}
+
+.drawio-full-part-select {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.drawio-full-part-select select {
+  max-width: 16rem;
+  font: inherit;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 0.2rem 0.4rem;
 }
