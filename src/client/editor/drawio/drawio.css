@@ -179,13 +179,11 @@
   align-self: start;
 }
 
-.drawio-stage-button {
-  cursor: pointer;
-}
-
-.drawio-stage-button:focus-visible {
-  outline: 2px solid var(--ring);
-  outline-offset: -2px;
+/* The stage zooms in place (ZoomViewport): the picture is its content. */
+.drawio-stage > .zoom-content {
+  display: grid;
+  place-items: center;
+  width: 100%;
 }
 
 .drawio-picture {

@@ -16,6 +16,8 @@ import {
 } from "../../../shared/drawio.ts";
 import { ApiError } from "../../api.ts";
 import { DiagramPicture } from "../../diagrams/DiagramPicture.tsx";
+import { DrawioFullView } from "../../diagrams/DrawioFullView.tsx";
+import { ZoomViewport } from "../../diagrams/ZoomViewport.tsx";
 import { subscribeRefresh, watchDiagram } from "../../diagrams/diagramRefresh.ts";
 import { diagramErrorMessage, diagramsApi, subscribeDiagram } from "../../diagrams/diagramsApi.ts";
 import { useDiagramChanges } from "../../diagrams/drawioEditing.ts";
@@ -108,6 +110,8 @@ function LinkedFigure(props: {
   const docId = context?.docId ?? null;
   const [usage, setUsage] = useState<DiagramUsage | null>(null);
   const [busy, setBusy] = useState(false);
+  /** The diagram is open full screen over the page. */
+  const [expanded, setExpanded] = useState(false);
   /** False on a phone or tablet: no Edit, and tapping the picture does not open Draw.io. */
   const changesHere = useDiagramChanges();
 
@@ -310,18 +314,37 @@ function LinkedFigure(props: {
             </>
           ) : null}
         </div>
-      ) : canEdit ? (
-        <button
-          type="button"
-          className="drawio-stage drawio-stage-button"
-          title="Click to edit"
-          onClick={edit}
+      ) : (
+        <ZoomViewport
+          className="drawio-stage"
+          wheel="sideways"
+          resetKey={`${diagramId}:${block.page ?? ""}:${block.part ?? ""}`}
+          {...(canEdit ? { onClickAtRest: edit, clickTitle: "Click to edit" } : {})}
+          controls={
+            <button
+              type="button"
+              className="zoom-chip"
+              title="View the diagram full screen"
+              onClick={() => setExpanded(true)}
+            >
+              Expand
+            </button>
+          }
         >
           {picture}
-        </button>
-      ) : (
-        <div className="drawio-stage">{picture}</div>
+        </ZoomViewport>
       )}
+      {expanded && diagram ? (
+        <DrawioFullView
+          diagramId={diagramId}
+          diagram={diagram}
+          page={block.page}
+          pageIndex={shown?.kind === "picture" ? shown.index : null}
+          part={shownPartBox?.id ?? null}
+          title={caption ?? diagram.title}
+          onClose={() => setExpanded(false)}
+        />
+      ) : null}
       {caption !== null || usage !== null ? (
         <figcaption className="drawio-caption">
           <DiagramIcon size={14} />

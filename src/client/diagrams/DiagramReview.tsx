@@ -141,12 +141,14 @@ export function DiagramReviewCanvas(props: {
     }
     const outer = host.getBoundingClientRect();
     const inner = image.getBoundingClientRect();
+    // Screen boxes include any zoom on the canvas; the overlay is placed in unzoomed pixels.
+    const scale = host.offsetWidth > 0 ? outer.width / host.offsetWidth : 1;
     setBox((current) => {
       const next = {
-        left: inner.left - outer.left,
-        top: inner.top - outer.top,
-        width: inner.width,
-        height: inner.height,
+        left: (inner.left - outer.left) / scale,
+        top: (inner.top - outer.top) / scale,
+        width: inner.width / scale,
+        height: inner.height / scale,
       };
       return current &&
         Object.entries(next).every(
@@ -210,10 +212,21 @@ export function DiagramReviewCanvas(props: {
     });
   };
 
+  // Anchored at the corner nearest the pin, so a zoomed canvas can scale it back to size there.
   const popStyle = (fx: number, fy: number) =>
     fx > 0.6
-      ? { right: `${(1 - fx) * 100}%`, top: `${fy * 100}%`, marginRight: "18px" }
-      : { left: `${fx * 100}%`, top: `${fy * 100}%`, marginLeft: "18px" };
+      ? {
+          right: `${(1 - fx) * 100}%`,
+          top: `${fy * 100}%`,
+          marginRight: "18px",
+          transformOrigin: "top right",
+        }
+      : {
+          left: `${fx * 100}%`,
+          top: `${fy * 100}%`,
+          marginLeft: "18px",
+          transformOrigin: "top left",
+        };
 
   return (
     <div

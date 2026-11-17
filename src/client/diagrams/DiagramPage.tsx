@@ -25,6 +25,7 @@ import { DiagramEditor } from "./DiagramEditor.tsx";
 import { useDiagramChanges } from "./drawioEditing.ts";
 import { type DiagramComments, diagramCommentsApi } from "./diagramCommentsApi.ts";
 import { DiagramReviewCanvas } from "./DiagramReview.tsx";
+import { ZoomViewport } from "./ZoomViewport.tsx";
 import { PageTabs, usePreloadedPages, useUrlPage } from "./PageTabs.tsx";
 import { openCountsByPage } from "./pageTabsLogic.ts";
 import { subscribeRefresh, watchDiagram } from "./diagramRefresh.ts";
@@ -94,6 +95,8 @@ export function DiagramPage(props: { readonly diagramId: string }) {
   const [renaming, setRenaming] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [review, setReview] = useState(false);
+  /** The picture alone fills the window: header, side panel and page tabs hidden. */
+  const [fullscreen, setFullscreen] = useState(false);
   const { comments, reload: reloadComments } = useDiagramComments(
     diagramId,
     diagram?.version ?? null,
@@ -145,6 +148,26 @@ export function DiagramPage(props: { readonly diagramId: string }) {
     ];
     return () => stops.forEach((stop) => stop());
   }, [diagramId]);
+
+  // F toggles full screen, Escape leaves it; not while typing or while a dialog is open.
+  const keysFree = !editing && !renaming;
+  useEffect(() => {
+    if (!keysFree) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
+      const target = event.target;
+      if (
+        target instanceof HTMLElement &&
+        (target.isContentEditable || target.closest("input, textarea, select") !== null)
+      ) {
+        return;
+      }
+      if (event.key === "f" || event.key === "F") setFullscreen((current) => !current);
+      else if (event.key === "Escape") setFullscreen(false);
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [keysFree]);
 
   const diagramTitle = diagram?.title ?? "";
   useEffect(() => {
@@ -248,7 +271,7 @@ export function DiagramPage(props: { readonly diagramId: string }) {
   };
 
   return (
-    <div className="diagram-page">
+    <div className="diagram-page" data-fullscreen={fullscreen ? "" : undefined}>
       <header className="doc-header">
         <div className="doc-header-title">
           <HomeLink />
@@ -376,18 +399,34 @@ export function DiagramPage(props: { readonly diagramId: string }) {
                 }}
               />
             );
-            // Click to edit, unless pins are showing: then clicks are theirs.
-            return canChange && !review && !openOnPage ? (
-              <button
-                type="button"
-                className="diagram-canvas"
-                title="Click to edit"
-                onClick={() => setEditing(true)}
+            // Click to edit, unless pins are showing: then clicks are theirs. Once zoomed in,
+            // clicks and drags move the picture instead.
+            const clickToEdit = canChange && !review && !openOnPage;
+            return (
+              <ZoomViewport
+                className={review ? "diagram-canvas reviewing" : "diagram-canvas"}
+                wheel="zoomed"
+                fitWidth
+                startWide
+                keys={keysFree}
+                resetKey={`${diagramId}:${shownPage}`}
+                {...(clickToEdit
+                  ? { onClickAtRest: () => setEditing(true), clickTitle: "Click to edit" }
+                  : {})}
+                controls={
+                  <button
+                    type="button"
+                    className="zoom-chip"
+                    aria-pressed={fullscreen}
+                    title={fullscreen ? "Leave full screen (Esc)" : "Full screen (F)"}
+                    onClick={() => setFullscreen(!fullscreen)}
+                  >
+                    {fullscreen ? "Exit full screen" : "Full screen"}
+                  </button>
+                }
               >
                 {picture}
-              </button>
-            ) : (
-              <div className={review ? "diagram-canvas reviewing" : "diagram-canvas"}>{picture}</div>
+              </ZoomViewport>
             );
           })()}
         </div>
