@@ -351,7 +351,11 @@ export async function setDocProject(
 ): Promise<DocSummary> {
   if (input.projectId !== null) await getProject(db, input.projectId);
   const row = await db
-    .prepare("UPDATE docs SET project_id = ? WHERE id = ? RETURNING *")
+    // A folder belongs to one project, so leaving the project leaves the folder.
+    .prepare(
+      `UPDATE docs SET folder_id = CASE WHEN project_id IS ?1 THEN folder_id ELSE NULL END,
+         project_id = ?1 WHERE id = ?2 RETURNING *`,
+    )
     .bind(input.projectId, input.docId)
     .first<DocRow>();
   if (!row) throw new NotFoundError("doc");

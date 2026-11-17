@@ -537,6 +537,7 @@ export async function updateDiagram(
     .prepare(
       `UPDATE diagrams SET
          title = COALESCE(?1, title),
+         folder_id = CASE WHEN ?2 AND project_id IS NOT ?3 THEN NULL ELSE folder_id END,
          project_id = CASE WHEN ?2 THEN ?3 ELSE project_id END,
          version = version + (CASE WHEN ?4 IS NOT NULL AND ?4 <> xml THEN 1 ELSE 0 END),
          xml = COALESCE(?4, xml),
@@ -564,7 +565,7 @@ export async function moveProjectDiagrams(
   input: { readonly from: string; readonly to: string | null },
 ): Promise<void> {
   await db
-    .prepare("UPDATE diagrams SET project_id = ?1 WHERE project_id = ?2")
+    .prepare("UPDATE diagrams SET project_id = ?1, folder_id = NULL WHERE project_id = ?2")
     .bind(input.to, input.from)
     .run();
 }

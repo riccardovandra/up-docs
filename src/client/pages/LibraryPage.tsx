@@ -44,8 +44,6 @@ import {
 import {
   CloseIcon,
   FilterIcon,
-  GridIcon,
-  ListIcon,
   PlusIcon,
   SearchIcon,
   SortIcon,
@@ -67,6 +65,20 @@ import { docPath, navigate } from "../router.ts";
 import { canonicalDocUrl } from "../share/ShareDialog.tsx";
 import { copyText } from "../copyText.ts";
 import { DiagramsView, LibraryKindSwitch, type LibraryKind } from "../diagrams/DiagramsView.tsx";
+import {
+  FolderCards,
+  FolderHead,
+  FolderHeaderCell,
+  FolderLayout,
+  FolderRows,
+  ViewMenu,
+} from "../home/folders/FolderUi.tsx";
+import {
+  FolderProvider,
+  RegisterFolderItems,
+  WithFolders,
+  type FolderItem,
+} from "../home/folders/folderState.tsx";
 import { SheetsView } from "../sheets/SheetsView.tsx";
 import "../home/home.css";
 
@@ -208,8 +220,7 @@ export function LibraryPage(props: { readonly kind?: LibraryKind }) {
     setSort(next);
     writeStorage(SORT_KEY, next);
   };
-  const toggleView = () => {
-    const next = view === "grid" ? "list" : "grid";
+  const chooseView = (next: HomeView) => {
     setView(next);
     writeStorage(VIEW_KEY, next);
   };
@@ -248,6 +259,10 @@ export function LibraryPage(props: { readonly kind?: LibraryKind }) {
         pinned,
       ),
     [inScope, locked, groupPick, sort, pinned],
+  );
+  const folderItems = useMemo(
+    (): ReadonlyArray<FolderItem> => visible.map(({ id, title }) => ({ id, title })),
+    [visible],
   );
   const hits = serverHits?.query === trimmedQuery ? serverHits.hits : [];
   const results = useMemo(
@@ -325,10 +340,15 @@ export function LibraryPage(props: { readonly kind?: LibraryKind }) {
     return scopeProject?.id ?? null;
   };
 
-  const createDoc = async (title: string) => {
+  /** Creates a doc in the project in scope and, when one is shown, files it in a folder. */
+  const createDoc = async (
+    title: string,
+    file: ((docId: string) => Promise<void>) | null,
+  ) => {
     const projectId = await createInProject();
     const group = locked && groupPick !== ALL_GROUPS ? groupPick : null;
     const created = await api.createDoc(projectId, title, group);
+    if (file && projectId !== null) await file(created.doc.id);
     navigate(docPath(created.doc.id));
   };
 
@@ -368,306 +388,319 @@ export function LibraryPage(props: { readonly kind?: LibraryKind }) {
     </div>
   );
 
-  if (kind === "sheets") {
-    return (
-      <main className="home">
-        {titleRow}
-        <SheetsView
-          scope={scope}
-          scopeLabel={scope.kind === "all" ? null : scopeLabel}
-          projects={library.projects}
-          createIn={scopeProject || createsProject ? scopeLabel : "No project"}
-          resolveProjectId={createInProject}
-        />
-      </main>
-    );
-  }
+  const folderKind = kind === "docs" ? "doc" : kind === "diagrams" ? "diagram" : "sheet";
+  const body =
+    kind === "sheets" ? (
+      <SheetsView
+        scope={scope}
+        scopeLabel={scope.kind === "all" ? null : scopeLabel}
+        projects={library.projects}
+        createIn={scopeProject || createsProject ? scopeLabel : "No project"}
+        resolveProjectId={createInProject}
+      />
+    ) : kind === "diagrams" ? (
+      <DiagramsView
+        scope={scope}
+        scopeLabel={scope.kind === "all" ? null : scopeLabel}
+        projects={library.projects}
+        createIn={scopeProject || createsProject ? scopeLabel : "No project"}
+        resolveProjectId={createInProject}
+      />
+    ) : (
+      <WithFolders>
+        {(folders) => {
+          const shown = results.filter(({ entry }) => folders.shows("doc", entry.id));
+          const createHere =
+            folders.at && folders.canManage ? `${createIn} / ${folders.at.name}` : createIn;
+          return (
+            <>
+              <RegisterFolderItems kind="doc" items={folderItems} />
+            {notice ? (
+              <div className="notice" role="status">
+                {notice}
+                <button type="button" className="link-button" onClick={() => setNotice(null)}>
+                  Dismiss
+                </button>
+              </div>
+            ) : null}
 
-  if (kind === "diagrams") {
-    return (
-      <main className="home">
-        {titleRow}
-        <DiagramsView
-          scope={scope}
-          scopeLabel={scope.kind === "all" ? null : scopeLabel}
-          projects={library.projects}
-          createIn={scopeProject || createsProject ? scopeLabel : "No project"}
-          resolveProjectId={createInProject}
-        />
-      </main>
+            <div className="home-toolbar">
+              <div className="home-tabs" role="tablist" aria-label="Whose docs">
+                {HOME_TABS.map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    role="tab"
+                    aria-selected={tab === item.id}
+                    className="home-tab"
+                    onClick={() => setTab(item.id)}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+              <div className="home-controls">
+                {searchOpen ? (
+                  <div className="home-search">
+                    <SearchIcon size={16} />
+                    <input
+                      autoFocus
+                      type="search"
+                      aria-label="Search docs"
+                      placeholder="Search docs"
+                      maxLength={SEARCH_MAX_QUERY}
+                      value={query}
+                      onChange={(event) => setQuery(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Escape") closeSearch();
+                      }}
+                      onBlur={() => {
+                        if (!query) setSearchOpen(false);
+                      }}
+                    />
+                    <button
+                      type="button"
+                      className="home-search-clear"
+                      aria-label="Close search"
+                      onClick={closeSearch}
+                    >
+                      <CloseIcon size={14} />
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    className="home-icon-button"
+                    aria-label="Search"
+                    onClick={() => setSearchOpen(true)}
+                  >
+                    <SearchIcon />
+                  </button>
+                )}
+                <Menu label="Sort" trigger={<SortIcon />}>
+                  {(close) => (
+                    <>
+                      <MenuLabel>Sort by</MenuLabel>
+                      {HOME_SORTS.map((item) => (
+                        <MenuItem
+                          key={item.id}
+                          kind="radio"
+                          checked={sort === item.id}
+                          onSelect={() => {
+                            chooseSort(item.id);
+                            close();
+                          }}
+                        >
+                          {item.label}
+                        </MenuItem>
+                      ))}
+                    </>
+                  )}
+                </Menu>
+                <ViewMenu view={view} onView={chooseView} />
+                <Menu
+                  label="Filter"
+                  triggerClassName={`home-icon-button${filtering ? " active" : ""}`}
+                  trigger={<FilterIcon />}
+                >
+                  {() => (
+                    <>
+                      <MenuLabel>Status</MenuLabel>
+                      {DOC_STATUSES.map((status) => (
+                        <MenuItem
+                          key={status}
+                          kind="checkbox"
+                          checked={statuses.has(status)}
+                          onSelect={() => toggleStatus(status)}
+                        >
+                          {DOC_STATUS_LABEL[status]}
+                        </MenuItem>
+                      ))}
+                      {locked ? null : (
+                        <>
+                          <MenuSeparator />
+                          <MenuLabel>Project</MenuLabel>
+                      <MenuItem
+                        kind="radio"
+                        checked={sameScope(scope, ALL_PROJECTS)}
+                        onSelect={() => chooseScope(ALL_PROJECTS)}
+                      >
+                        All projects
+                      </MenuItem>
+                      <div className="home-menu-scroll">
+                        {projects.map((project) => {
+                          const option: ProjectScope = { kind: "project", key: project.key };
+                          return (
+                            <MenuItem
+                              key={project.key}
+                              kind="radio"
+                              checked={sameScope(scope, option)}
+                              icon={<ProjectBadge name={project.name} />}
+                              onSelect={() => chooseScope(option)}
+                            >
+                              {project.name}
+                            </MenuItem>
+                          );
+                        })}
+                      </div>
+                      <MenuItem
+                        kind="radio"
+                        checked={sameScope(scope, NO_PROJECT)}
+                        icon={<NoProjectBadge />}
+                        onSelect={() => chooseScope(NO_PROJECT)}
+                      >
+                        No project
+                      </MenuItem>
+                        </>
+                      )}
+                      {filtering || (!locked && scope.kind !== "all") ? (
+                        <>
+                          <MenuSeparator />
+                          <MenuItem
+                            onSelect={() => {
+                              setStatuses(new Set());
+                              chooseScope(ALL_PROJECTS);
+                            }}
+                          >
+                            Clear filters
+                          </MenuItem>
+                        </>
+                      ) : null}
+                    </>
+                  )}
+                </Menu>
+                <button
+                  type="button"
+                  className="home-icon-button"
+                  aria-label="New doc"
+                  onClick={startDoc}
+                >
+                  <PlusIcon />
+                </button>
+              </div>
+            </div>
+
+            {locked && (groups.length > 0 || ungrouped) ? (
+              <div className="home-tabs home-groups" role="tablist" aria-label="Groups">
+                {[ALL_GROUPS, ...groups, ...(ungrouped ? [null] : [])].map((group) => (
+                  <button
+                    key={group ?? ""}
+                    type="button"
+                    role="tab"
+                    aria-selected={groupPick === group}
+                    className="home-tab"
+                    onClick={() => setGroupPick(group)}
+                  >
+                    {group === ALL_GROUPS ? "All" : (group ?? "No group")}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+
+            <FolderHead kind="doc" count={shown.length} />
+
+            {view === "grid" ? (
+              <div className={folders.grid.className} style={folders.grid.style}>
+                <NewDocCard detail={`In ${createHere}`} onCreate={startDoc} />
+                <FolderCards kind="doc" />
+                {shown.map(({ entry, snippet }) => (
+                  <DocCard
+                    key={entry.id}
+                    entry={entry}
+                    snippet={snippet}
+                    pinned={pinned.has(entry.id)}
+                    actions={actions}
+                  />
+                ))}
+              </div>
+            ) : (
+              <table className="doc-table">
+                <thead>
+                  <tr>
+                    <th>Title</th>
+                    <th>Project</th>
+                    <FolderHeaderCell />
+                    <th>Status</th>
+                    <th>Owner</th>
+                    <th>Opened</th>
+                    <th>Edited</th>
+                    <th aria-label="Actions" />
+                  </tr>
+                </thead>
+                <tbody>
+                  <NewDocRow detail={`In ${createHere}`} onCreate={startDoc} />
+                  <FolderRows kind="doc" columns={folders.active ? 8 : 7} />
+                  {shown.map(({ entry, snippet }) => (
+                    <DocRow
+                      key={entry.id}
+                      entry={entry}
+                      snippet={snippet}
+                      pinned={pinned.has(entry.id)}
+                      actions={actions}
+                    />
+                  ))}
+                </tbody>
+              </table>
+            )}
+
+            {shown.length === 0 && !(folders.at && folders.subfolders.length > 0) ? (
+              <EmptyState
+                query={trimmedQuery}
+                tab={tab}
+                scopeLabel={folders.at?.name ?? (scope.kind === "all" ? null : scopeLabel)}
+                filtering={filtering}
+                libraryEmpty={entries.length === 0}
+                admin={admin}
+              />
+            ) : null}
+
+            {localFiles ? <LocalFilesSection query={trimmedQuery} /> : null}
+
+            {creating ? (
+              <TitleDialog
+                heading="New doc"
+                detail={`In ${createHere}`}
+                initial=""
+                submitLabel="Create"
+                onSubmit={(title) => {
+                  const target = folders.canManage ? (folders.at?.id ?? null) : null;
+                  return createDoc(
+                    title,
+                    target === null ? null : (docId) => folders.place("doc", docId, target),
+                  );
+                }}
+                onClose={() => setCreating(false)}
+              />
+            ) : null}
+            {renaming ? (
+              <TitleDialog
+                heading="Rename doc"
+                detail={null}
+                initial={renaming.title}
+                submitLabel="Rename"
+                onSubmit={async (title) => {
+                  if (title !== renaming.title) await api.renameDoc(renaming.id, title);
+                  await reload();
+                }}
+                onClose={() => setRenaming(null)}
+              />
+            ) : null}
+            </>
+          );
+        }}
+      </WithFolders>
     );
-  }
 
   return (
     <main className="home">
       {titleRow}
-
-      {notice ? (
-        <div className="notice" role="status">
-          {notice}
-          <button type="button" className="link-button" onClick={() => setNotice(null)}>
-            Dismiss
-          </button>
-        </div>
-      ) : null}
-
-      <div className="home-toolbar">
-        <div className="home-tabs" role="tablist" aria-label="Whose docs">
-          {HOME_TABS.map((item) => (
-            <button
-              key={item.id}
-              type="button"
-              role="tab"
-              aria-selected={tab === item.id}
-              className="home-tab"
-              onClick={() => setTab(item.id)}
-            >
-              {item.label}
-            </button>
-          ))}
-        </div>
-        <div className="home-controls">
-          {searchOpen ? (
-            <div className="home-search">
-              <SearchIcon size={16} />
-              <input
-                autoFocus
-                type="search"
-                aria-label="Search docs"
-                placeholder="Search docs"
-                maxLength={SEARCH_MAX_QUERY}
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === "Escape") closeSearch();
-                }}
-                onBlur={() => {
-                  if (!query) setSearchOpen(false);
-                }}
-              />
-              <button
-                type="button"
-                className="home-search-clear"
-                aria-label="Close search"
-                onClick={closeSearch}
-              >
-                <CloseIcon size={14} />
-              </button>
-            </div>
-          ) : (
-            <button
-              type="button"
-              className="home-icon-button"
-              aria-label="Search"
-              onClick={() => setSearchOpen(true)}
-            >
-              <SearchIcon />
-            </button>
-          )}
-          <Menu label="Sort" trigger={<SortIcon />}>
-            {(close) => (
-              <>
-                <MenuLabel>Sort by</MenuLabel>
-                {HOME_SORTS.map((item) => (
-                  <MenuItem
-                    key={item.id}
-                    kind="radio"
-                    checked={sort === item.id}
-                    onSelect={() => {
-                      chooseSort(item.id);
-                      close();
-                    }}
-                  >
-                    {item.label}
-                  </MenuItem>
-                ))}
-              </>
-            )}
-          </Menu>
-          <button
-            type="button"
-            className="home-icon-button"
-            aria-label={view === "grid" ? "Show as list" : "Show as grid"}
-            onClick={toggleView}
-          >
-            {view === "grid" ? <ListIcon /> : <GridIcon />}
-          </button>
-          <Menu
-            label="Filter"
-            triggerClassName={`home-icon-button${filtering ? " active" : ""}`}
-            trigger={<FilterIcon />}
-          >
-            {() => (
-              <>
-                <MenuLabel>Status</MenuLabel>
-                {DOC_STATUSES.map((status) => (
-                  <MenuItem
-                    key={status}
-                    kind="checkbox"
-                    checked={statuses.has(status)}
-                    onSelect={() => toggleStatus(status)}
-                  >
-                    {DOC_STATUS_LABEL[status]}
-                  </MenuItem>
-                ))}
-                {locked ? null : (
-                  <>
-                    <MenuSeparator />
-                    <MenuLabel>Project</MenuLabel>
-                <MenuItem
-                  kind="radio"
-                  checked={sameScope(scope, ALL_PROJECTS)}
-                  onSelect={() => chooseScope(ALL_PROJECTS)}
-                >
-                  All projects
-                </MenuItem>
-                <div className="home-menu-scroll">
-                  {projects.map((project) => {
-                    const option: ProjectScope = { kind: "project", key: project.key };
-                    return (
-                      <MenuItem
-                        key={project.key}
-                        kind="radio"
-                        checked={sameScope(scope, option)}
-                        icon={<ProjectBadge name={project.name} />}
-                        onSelect={() => chooseScope(option)}
-                      >
-                        {project.name}
-                      </MenuItem>
-                    );
-                  })}
-                </div>
-                <MenuItem
-                  kind="radio"
-                  checked={sameScope(scope, NO_PROJECT)}
-                  icon={<NoProjectBadge />}
-                  onSelect={() => chooseScope(NO_PROJECT)}
-                >
-                  No project
-                </MenuItem>
-                  </>
-                )}
-                {filtering || (!locked && scope.kind !== "all") ? (
-                  <>
-                    <MenuSeparator />
-                    <MenuItem
-                      onSelect={() => {
-                        setStatuses(new Set());
-                        chooseScope(ALL_PROJECTS);
-                      }}
-                    >
-                      Clear filters
-                    </MenuItem>
-                  </>
-                ) : null}
-              </>
-            )}
-          </Menu>
-          <button
-            type="button"
-            className="home-icon-button"
-            aria-label="New doc"
-            onClick={startDoc}
-          >
-            <PlusIcon />
-          </button>
-        </div>
-      </div>
-
-      {locked && (groups.length > 0 || ungrouped) ? (
-        <div className="home-tabs home-groups" role="tablist" aria-label="Groups">
-          {[ALL_GROUPS, ...groups, ...(ungrouped ? [null] : [])].map((group) => (
-            <button
-              key={group ?? ""}
-              type="button"
-              role="tab"
-              aria-selected={groupPick === group}
-              className="home-tab"
-              onClick={() => setGroupPick(group)}
-            >
-              {group === ALL_GROUPS ? "All" : (group ?? "No group")}
-            </button>
-          ))}
-        </div>
-      ) : null}
-
-      {view === "grid" ? (
-        <div className="doc-grid">
-          <NewDocCard detail={`In ${createIn}`} onCreate={startDoc} />
-          {results.map(({ entry, snippet }) => (
-            <DocCard
-              key={entry.id}
-              entry={entry}
-              snippet={snippet}
-              pinned={pinned.has(entry.id)}
-              actions={actions}
-            />
-          ))}
-        </div>
-      ) : (
-        <table className="doc-table">
-          <thead>
-            <tr>
-              <th>Title</th>
-              <th>Project</th>
-              <th>Status</th>
-              <th>Owner</th>
-              <th>Opened</th>
-              <th>Edited</th>
-              <th aria-label="Actions" />
-            </tr>
-          </thead>
-          <tbody>
-            <NewDocRow detail={`In ${createIn}`} onCreate={startDoc} />
-            {results.map(({ entry, snippet }) => (
-              <DocRow
-                key={entry.id}
-                entry={entry}
-                snippet={snippet}
-                pinned={pinned.has(entry.id)}
-                actions={actions}
-              />
-            ))}
-          </tbody>
-        </table>
-      )}
-
-      {results.length === 0 ? (
-        <EmptyState
-          query={trimmedQuery}
-          tab={tab}
-          scopeLabel={scope.kind === "all" ? null : scopeLabel}
-          filtering={filtering}
-          libraryEmpty={entries.length === 0}
-          admin={admin}
-        />
-      ) : null}
-
-      {localFiles ? <LocalFilesSection query={trimmedQuery} /> : null}
-
-      {creating ? (
-        <TitleDialog
-          heading="New doc"
-          detail={`In ${createIn}`}
-          initial=""
-          submitLabel="Create"
-          onSubmit={createDoc}
-          onClose={() => setCreating(false)}
-        />
-      ) : null}
-      {renaming ? (
-        <TitleDialog
-          heading="Rename doc"
-          detail={null}
-          initial={renaming.title}
-          submitLabel="Rename"
-          onSubmit={async (title) => {
-            if (title !== renaming.title) await api.renameDoc(renaming.id, title);
-            await reload();
-          }}
-          onClose={() => setRenaming(null)}
-        />
-      ) : null}
+      <FolderProvider
+        projectId={scopeProject?.id ?? null}
+        projectName={scopeLabel}
+        admin={admin}
+      >
+        <FolderLayout kind={folderKind}>{body}</FolderLayout>
+      </FolderProvider>
     </main>
   );
 }

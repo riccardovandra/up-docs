@@ -1,0 +1,650 @@
+/* Folders on the home page: sidebar, heading, chips, folder cards, picker. */
+
+.folder-layout {
+  margin-top: 1.75rem;
+}
+
+.folder-layout.with-sidebar {
+  display: grid;
+  grid-template-columns: 15rem minmax(0, 1fr);
+  gap: 2.25rem;
+}
+
+.folder-main {
+  min-width: 0;
+}
+
+/* The views put their toolbar first; inside the layout it needs no top gap. */
+.folder-main > .home-toolbar:first-child {
+  margin-top: 0;
+}
+
+.folder-sidebar {
+  position: sticky;
+  top: 1rem;
+  align-self: start;
+  max-height: calc(100vh - 2rem);
+  overflow-y: auto;
+  font-size: 0.93rem;
+}
+
+.folder-sidebar-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 0 0.35rem 0.5rem;
+  color: var(--muted);
+  font-size: 0.78rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.folder-sidebar-head .home-icon-button {
+  width: 1.9rem;
+  height: 1.9rem;
+  color: var(--muted);
+}
+
+.folder-sidebar-rule {
+  margin: 0.45rem 0.5rem;
+  border: none;
+  border-top: 1px solid var(--border);
+}
+
+.folder-tree-row {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  width: 100%;
+  padding: 0.32rem 0.5rem;
+  font: inherit;
+  color: var(--text);
+  text-align: left;
+  background: none;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.folder-tree-row:hover {
+  background: var(--hover);
+}
+
+.folder-tree-row[aria-current="true"] {
+  font-weight: 500;
+  background: color-mix(in srgb, var(--tint) 14%, transparent);
+}
+
+.folder-tree-row > svg {
+  flex: none;
+  color: color-mix(in srgb, var(--tint) 70%, var(--text));
+}
+
+.folder-tree-twisty {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 0.9rem;
+  color: var(--muted);
+}
+
+.folder-tree-twisty > svg {
+  color: var(--muted);
+}
+
+.folder-tree-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.folder-tree-count {
+  flex: none;
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: 400;
+}
+
+.folder-tree-count.zero {
+  opacity: 0.5;
+}
+
+.folder-tree-current {
+  flex: none;
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-weight: 400;
+}
+
+.folder-tree-new {
+  color: var(--muted);
+}
+
+.folder-tree-new > svg {
+  color: var(--muted);
+}
+
+/* A folder target while an item is dragged over it. */
+[data-drop-over="true"] {
+  outline: 2px solid var(--tint);
+  outline-offset: 1px;
+  background: color-mix(in srgb, var(--tint) 10%, transparent);
+}
+
+/* Heading */
+
+.folder-head {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  min-height: 2.6rem;
+  margin-top: 1.5rem;
+}
+
+.folder-head-where {
+  min-width: 0;
+}
+
+.folder-head-path {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.1rem;
+  color: var(--muted);
+  font-size: 0.85rem;
+  line-height: 1.2;
+}
+
+.folder-head-path button {
+  padding: 0 0.2rem;
+  font: inherit;
+  color: var(--muted);
+  background: none;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+.folder-head-path button:hover {
+  color: var(--text);
+  background: var(--hover);
+}
+
+.folder-head-title {
+  margin: 0;
+  overflow: hidden;
+  font-family: var(--font-serif);
+  font-size: 1.5rem;
+  font-weight: 500;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.folder-head-count {
+  align-self: flex-end;
+  padding-bottom: 0.15rem;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.folder-head + .doc-grid,
+.folder-head + .doc-table,
+.folder-chips + .doc-grid,
+.folder-chips + .doc-table {
+  margin-top: 1.25rem;
+}
+
+/* Chips */
+
+.folder-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin-top: 0.85rem;
+}
+
+.folder-chip {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.25rem 0.75rem;
+  font: inherit;
+  font-size: 0.9rem;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.folder-chip:hover {
+  border-color: var(--input);
+}
+
+.folder-chip > svg {
+  color: var(--tint);
+}
+
+.folder-chip-count {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+/* Phone folder bar */
+
+.folder-phone-bar {
+  margin-top: 1rem;
+}
+
+.folder-phone-path {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  width: 100%;
+  padding: 0.6rem 0.8rem;
+  font: inherit;
+  font-size: 1rem;
+  color: var(--text);
+  text-align: left;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  cursor: pointer;
+}
+
+.folder-phone-path > svg:first-child {
+  flex: none;
+  color: var(--tint);
+}
+
+.folder-phone-path > svg:last-child {
+  flex: none;
+  color: var(--muted);
+}
+
+.folder-phone-path-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.folder-phone-path-dim,
+.folder-phone-path-count {
+  color: var(--muted);
+}
+
+.folder-phone-path-count {
+  font-size: 0.85rem;
+}
+
+.folder-chips-scroll {
+  flex-wrap: nowrap;
+  margin: 0.6rem -1rem 0;
+  padding: 0 1rem 0.2rem;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.folder-phone-bar + .doc-grid,
+.folder-phone-bar + .doc-table {
+  margin-top: 1rem;
+}
+
+/* Folder cards */
+
+.folder-card {
+  display: block;
+  width: 100%;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.folder-card:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+.folder-card-cover {
+  position: relative;
+  display: block;
+  height: 12.5rem;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--tint) 28%, var(--bg));
+}
+
+.folder-card-back,
+.folder-card-back::before {
+  position: absolute;
+  background: color-mix(in srgb, var(--tint) 80%, black);
+}
+
+.folder-card-back {
+  top: 1.8rem;
+  right: 12%;
+  bottom: -1rem;
+  left: 12%;
+  border-radius: 4px 10px 0 0;
+}
+
+.folder-card-back::before {
+  content: "";
+  top: -0.75rem;
+  left: 0;
+  width: 38%;
+  height: 1rem;
+  border-radius: 8px 8px 0 0;
+}
+
+.folder-card-peek {
+  position: absolute;
+  height: 8rem;
+  overflow: hidden;
+  padding: 0.55rem 0.7rem;
+  color: var(--text);
+  background: var(--surface);
+  border-radius: 5px;
+  box-shadow: 0 1px 6px rgb(0 0 0 / 0.15);
+  font-family: var(--font-serif);
+  font-size: 0.6rem;
+  line-height: 1.25;
+}
+
+.folder-card-peek.peek-1 {
+  top: 1.6rem;
+  right: 24%;
+  left: 18%;
+  transform: rotate(-4deg);
+}
+
+.folder-card-peek.peek-2 {
+  top: 2.2rem;
+  right: 17%;
+  left: 25%;
+  transform: rotate(3deg);
+}
+
+.folder-card-peek.peek-3 {
+  top: 2.8rem;
+  right: 20%;
+  left: 20%;
+}
+
+.folder-card-front {
+  position: absolute;
+  top: 7.4rem;
+  right: 10%;
+  bottom: -1rem;
+  left: 10%;
+  display: flex;
+  justify-content: flex-end;
+  padding: 0.5rem 0.8rem;
+  color: rgb(255 255 255 / 0.85);
+  font-size: 0.8rem;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--tint) 90%, white), var(--tint));
+  border-radius: 8px 8px 0 0;
+  box-shadow: 0 -2px 8px rgb(0 0 0 / 0.12);
+}
+
+.folder-card .folder-card-icon {
+  color: white;
+  background: var(--tint);
+}
+
+.folder-row-button {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0;
+  font: inherit;
+  font-weight: 500;
+  color: var(--text);
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+.folder-row-button > svg {
+  flex: none;
+  color: var(--tint);
+}
+
+.folder-cell-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  max-width: 12rem;
+  padding: 0.05rem 0.45rem;
+  overflow: hidden;
+  font: inherit;
+  font-size: 0.82rem;
+  color: var(--chip-text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  background: var(--chip-bg);
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.folder-cell-chip > svg {
+  flex: none;
+  color: var(--tint);
+}
+
+/* Cards per row: dense grids shrink the covers and drop the footer icon. */
+
+.doc-grid.doc-grid-dense {
+  gap: 1.1rem;
+}
+
+.doc-grid-dense .doc-card-paper,
+.doc-grid-dense .folder-card-cover,
+.doc-grid-dense .diagram-card-cover,
+.doc-grid-dense .sheet-card-cover {
+  height: 8.5rem;
+}
+
+.doc-grid-dense .doc-card-sheet {
+  top: 1.4rem;
+  right: 10%;
+  left: 13%;
+}
+
+.doc-grid-dense .doc-card-paper::after {
+  top: 1.2rem;
+}
+
+.doc-grid-dense .folder-card-front {
+  top: 5rem;
+}
+
+.doc-grid-dense .doc-card-icon {
+  display: none;
+}
+
+.doc-grid-dense .doc-card-footer {
+  gap: 0.5rem;
+  padding: 0.7rem 0.85rem;
+}
+
+.doc-grid-dense .doc-card-title {
+  font-size: 0.95rem;
+}
+
+.doc-grid-dense .doc-card-meta {
+  font-size: 0.8rem;
+}
+
+.doc-grid.doc-grid-phone-pair {
+  gap: 0.6rem;
+}
+
+.doc-grid-phone-pair .doc-card-paper,
+.doc-grid-phone-pair .folder-card-cover,
+.doc-grid-phone-pair .diagram-card-cover,
+.doc-grid-phone-pair .sheet-card-cover {
+  height: 6.5rem;
+}
+
+.doc-grid-phone-pair .doc-card-sheet {
+  top: 1rem;
+  right: 8%;
+  left: 10%;
+  padding: 0.5rem;
+}
+
+.doc-grid-phone-pair .folder-card-front {
+  top: 4rem;
+}
+
+.doc-grid-phone-pair .doc-card-icon,
+.doc-grid-phone-pair .doc-card-mark {
+  display: none;
+}
+
+.doc-grid-phone-pair .doc-card-footer {
+  gap: 0.3rem;
+  padding: 0.55rem 0.65rem;
+}
+
+.doc-grid-phone-pair .doc-card-title {
+  font-size: 0.88rem;
+}
+
+.doc-grid-phone-pair .doc-card-meta {
+  font-size: 0.76rem;
+}
+
+/* Picker: a centred dialog, a bottom sheet on phones. */
+
+.folder-picker-scrim {
+  position: fixed;
+  z-index: 50;
+  inset: 0;
+  background: rgb(0 0 0 / 0.35);
+}
+
+.folder-picker {
+  position: absolute;
+  top: 12%;
+  left: 50%;
+  width: 24rem;
+  max-width: calc(100% - 2rem);
+  max-height: 75%;
+  overflow-y: auto;
+  padding: 0.9rem 0.75rem 1rem;
+  color: var(--text);
+  background: var(--popover);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: 0 20px 60px rgb(0 0 0 / 0.3);
+  transform: translateX(-50%);
+}
+
+.folder-picker-grab {
+  display: none;
+  width: 2.5rem;
+  height: 0.3rem;
+  margin: 0 auto 0.75rem;
+  background: var(--input);
+  border-radius: 999px;
+}
+
+.folder-picker-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin: 0 0 0.4rem 0.5rem;
+}
+
+.folder-picker-head h3 {
+  margin: 0;
+  overflow: hidden;
+  font-size: 1.05rem;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.folder-picker .folder-tree-row {
+  padding-top: 0.5rem;
+  padding-bottom: 0.5rem;
+}
+
+/* View menu */
+
+.view-menu-cols {
+  display: flex;
+  gap: 2px;
+  margin: 0.15rem 0.5rem 0.35rem;
+  padding: 2px;
+  background: var(--chip-bg);
+  border-radius: 9px;
+}
+
+.view-menu-col {
+  flex: 1;
+  min-width: 2rem;
+  padding: 0.22rem 0.35rem;
+  font: inherit;
+  font-size: 0.88rem;
+  color: var(--text);
+  background: none;
+  border: none;
+  border-radius: 7px;
+  cursor: pointer;
+}
+
+.view-menu-col[aria-checked="true"] {
+  font-weight: 500;
+  background: var(--surface);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.14);
+}
+
+.view-menu-key {
+  margin-left: 0.35rem;
+  padding: 0 0.3rem;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+
+@media (max-width: 640px) {
+  .folder-layout {
+    margin-top: 1rem;
+  }
+
+  .folder-picker {
+    top: auto;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    width: auto;
+    max-width: none;
+    max-height: 80%;
+    padding-bottom: 2rem;
+    border-bottom: none;
+    border-radius: 18px 18px 0 0;
+    transform: none;
+  }
+
+  .folder-picker-grab {
+    display: block;
+  }
+
+  .doc-row-folder {
+    display: none;
+  }
+}

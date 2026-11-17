@@ -7,6 +7,8 @@ import { DocIcon, MoreIcon, PeopleIcon, PinIcon, PlusIcon } from "./icons.tsx";
 import { activityLabel, formatDay, previewBlocks, type HomeEntry } from "./homeLogic.ts";
 import { Menu, MenuItem, MenuLabel, MenuSeparator } from "./Menu.tsx";
 import { NoProjectBadge, ProjectBadge, type SwitcherProject } from "./ProjectSwitcher.tsx";
+import { FolderCell, MoveToFolderItem } from "./folders/FolderUi.tsx";
+import { useOptionalFolders } from "./folders/folderState.tsx";
 
 /** Where a doc may move: the projects the person can see, keyed by id. */
 export interface MoveTarget extends SwitcherProject {
@@ -192,6 +194,7 @@ function DocMenuBody(props: {
             </MenuItem>
           ) : null}
           {editable ? <MenuItem onSelect={() => setMoving(true)}>Move…</MenuItem> : null}
+          <MoveToFolderItem kind="doc" id={entry.id} title={entry.title} close={close} />
           {canShare(entry.role) ? (
             <>
               <MenuSeparator />
@@ -231,8 +234,9 @@ export const DocCard = memo(function DocCard(props: {
   readonly actions: DocActions;
 }) {
   const { entry } = props;
+  const folders = useOptionalFolders();
   return (
-    <article className="doc-card">
+    <article className="doc-card" {...folders?.dragProps("doc", entry.id)}>
       <a href={docPath(entry.id)} className="doc-card-link" onClick={open(entry.id)}>
         <Preview entry={entry} />
         <div className="doc-card-footer">
@@ -261,8 +265,9 @@ export const DocRow = memo(function DocRow(props: {
   readonly actions: DocActions;
 }) {
   const { entry } = props;
+  const folders = useOptionalFolders();
   return (
-    <tr className="doc-row" onClick={open(entry.id)}>
+    <tr className="doc-row" onClick={open(entry.id)} {...folders?.dragProps("doc", entry.id)}>
       <td className="doc-row-title">
         <a href={docPath(entry.id)} onClick={open(entry.id)}>
           <DocIcon size={16} />
@@ -280,6 +285,7 @@ export const DocRow = memo(function DocRow(props: {
           <span>{entry.project?.name ?? "No project"}</span>
         </span>
       </td>
+      {folders ? <FolderCell kind="doc" id={entry.id} /> : null}
       <td>
         <span className="doc-card-chip">{DOC_STATUS_LABEL[entry.status]}</span>
       </td>
@@ -316,7 +322,7 @@ export function NewDocCard(props: { readonly detail: string; readonly onCreate: 
 export function NewDocRow(props: { readonly detail: string; readonly onCreate: () => void }) {
   return (
     <tr className="doc-row doc-row-new">
-      <td className="doc-row-title" colSpan={7}>
+      <td className="doc-row-title" colSpan={8}>
         <button type="button" onClick={props.onCreate}>
           <PlusIcon size={16} />
           <span>New doc</span>

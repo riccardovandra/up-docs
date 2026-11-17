@@ -168,6 +168,7 @@ export async function updateSheetMeta(
     .prepare(
       `UPDATE sheets SET
          title = COALESCE(?1, title),
+         folder_id = CASE WHEN ?2 AND project_id IS NOT ?3 THEN NULL ELSE folder_id END,
          project_id = CASE WHEN ?2 THEN ?3 ELSE project_id END,
          updated_at = ?4
        WHERE id = ?5
@@ -197,7 +198,7 @@ export async function moveProjectSheets(
   input: { readonly from: string; readonly to: string | null },
 ): Promise<void> {
   await db
-    .prepare("UPDATE sheets SET project_id = ?1 WHERE project_id = ?2")
+    .prepare("UPDATE sheets SET project_id = ?1, folder_id = NULL WHERE project_id = ?2")
     .bind(input.to, input.from)
     .run();
 }

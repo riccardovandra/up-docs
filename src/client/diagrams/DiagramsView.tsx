@@ -11,15 +11,18 @@ import { canEdit as roleCanEdit } from "../../shared/access.ts";
 import { diagramPath, type DiagramListItem } from "../../shared/drawio.ts";
 import type { Project } from "../../shared/protocol.ts";
 import { formatDay, type HomeView, type ProjectScope } from "../home/homeLogic.ts";
+import { DiagramIcon, DocIcon, LinkIcon, MoreIcon, PenIcon, PlusIcon } from "../home/icons.tsx";
+import { Menu } from "../home/Menu.tsx";
 import {
-  DiagramIcon,
-  DocIcon,
-  GridIcon,
-  LinkIcon,
-  ListIcon,
-  PenIcon,
-  PlusIcon,
-} from "../home/icons.tsx";
+  FolderCards,
+  FolderCell,
+  FolderHead,
+  FolderHeaderCell,
+  FolderRows,
+  MoveToFolderItem,
+  ViewMenu,
+} from "../home/folders/FolderUi.tsx";
+import { useFolderItems, useFolders } from "../home/folders/folderState.tsx";
 import { NoProjectBadge, ProjectBadge } from "../home/ProjectSwitcher.tsx";
 import { navigate } from "../router.ts";
 import { SheetIcon } from "../sheets/SheetIcon.tsx";
@@ -104,6 +107,15 @@ export function diagramsInScope<A extends { readonly projectId: string | null }>
   return project ? diagrams.filter((diagram) => diagram.projectId === project.id) : [];
 }
 
+/** A diagram's card menu: only filing for now (the editor holds the rest). */
+function DiagramFolderMenu(props: { readonly id: string; readonly title: string }) {
+  return (
+    <Menu label={`Actions for ${props.title}`} trigger={<MoreIcon size={16} />} align="end">
+      {(close) => <MoveToFolderItem kind="diagram" id={props.id} title={props.title} close={close} />}
+    </Menu>
+  );
+}
+
 const follow = (path: string) => (event: MouseEvent) => {
   if (event.metaKey || event.ctrlKey) return;
   event.preventDefault();
@@ -150,17 +162,19 @@ export function DiagramsView(props: {
     return subscribeRefresh(() => void reload());
   }, [reload]);
 
-  const shown = useMemo(
+  const inScope = useMemo(
     () => diagramsInScope(diagrams ?? [], props.scope, props.projects),
     [diagrams, props.scope, props.projects],
   );
+  const folders = useFolders();
+  useFolderItems("diagram", inScope);
+  const shown = useMemo(() => folders.filter("diagram", inScope), [folders, inScope]);
   const projectOf = useMemo(
     () => new Map(props.projects.map((project) => [project.id, project])),
     [props.projects],
   );
 
-  const toggleView = () => {
-    const next = view === "grid" ? "list" : "grid";
+  const chooseView = (next: HomeView) => {
     setView(next);
     try {
       window.localStorage.setItem(VIEW_KEY, next);
@@ -196,18 +210,11 @@ export function DiagramsView(props: {
       <div className="home-toolbar">
         <div className="home-tabs" role="tablist" aria-label="Which diagrams">
           <button type="button" role="tab" aria-selected="true" className="home-tab">
-            All<span className="diagram-count">{shown.length}</span>
+            All<span className="diagram-count">{inScope.length}</span>
           </button>
         </div>
         <div className="home-controls">
-          <button
-            type="button"
-            className="home-icon-button"
-            aria-label={view === "grid" ? "Show as list" : "Show as grid"}
-            onClick={toggleView}
-          >
-            {view === "grid" ? <ListIcon /> : <GridIcon />}
-          </button>
+          <ViewMenu view={view} onView={chooseView} />
           {changesHere ? (
             <button type="button" className="button diagram-new-button" onClick={startNew}>
               <PlusIcon size={16} />
@@ -217,8 +224,10 @@ export function DiagramsView(props: {
         </div>
       </div>
 
+      <FolderHead kind="diagram" count={shown.length} />
+
       {view === "grid" ? (
-        <div className="doc-grid">
+        <div className={folders.grid.className} style={folders.grid.style}>
           {changesHere ? (
             <button type="button" className="doc-card doc-card-new" onClick={startNew}>
               <span className="doc-card-paper doc-card-new-paper" aria-hidden="true">
@@ -235,8 +244,9 @@ export function DiagramsView(props: {
               </span>
             </button>
           ) : null}
+          <FolderCards kind="diagram" />
           {shown.map((diagram) => (
-            <article key={diagram.id} className="doc-card">
+            <article key={diagram.id} className="doc-card" {...folders.dragProps("diagram", diagram.id)}>
               <a
                 href={diagramPath(diagram.id)}
                 className="doc-card-link"
@@ -261,6 +271,11 @@ export function DiagramsView(props: {
                   </span>
                 </span>
               </a>
+              {folders.canManage ? (
+                <div className="doc-card-menu">
+                  <DiagramFolderMenu id={diagram.id} title={diagram.title} />
+                </div>
+              ) : null}
             </article>
           ))}
         </div>
@@ -270,6 +285,7 @@ export function DiagramsView(props: {
             <tr>
               <th>Diagram</th>
               <th>Project</th>
+              <FolderHeaderCell />
               <th>Used in</th>
               <th>Updated</th>
               <th aria-label="Actions" />
@@ -278,7 +294,7 @@ export function DiagramsView(props: {
           <tbody>
             {changesHere ? (
               <tr className="doc-row doc-row-new">
-                <td className="doc-row-title" colSpan={5}>
+                <td className="doc-row-title" colSpan={folders.active ? 6 : 5}>
                   <button type="button" onClick={startNew}>
                     <PlusIcon size={16} />
                     <span>New diagram</span>
@@ -287,6 +303,7 @@ export function DiagramsView(props: {
                 </td>
               </tr>
             ) : null}
+            <FolderRows kind="diagram" columns={folders.active ? 6 : 5} />
             {shown.map((diagram) => {
               const project = diagram.projectId ? projectOf.get(diagram.projectId) : undefined;
               const docs = linkedDocs(diagram);
@@ -295,6 +312,7 @@ export function DiagramsView(props: {
                   key={diagram.id}
                   className="doc-row"
                   onClick={() => navigate(diagramPath(diagram.id))}
+                  {...folders.dragProps("diagram", diagram.id)}
                 >
                   <td className="doc-row-title">
                     <a href={diagramPath(diagram.id)} onClick={follow(diagramPath(diagram.id))}>
@@ -315,6 +333,7 @@ export function DiagramsView(props: {
                       <span>{project?.name ?? "No project"}</span>
                     </span>
                   </td>
+                  <FolderCell kind="diagram" id={diagram.id} />
                   <td className={docs.length > 0 ? "diagram-row-docs" : "doc-row-muted"}>
                     {docs.join(", ")}
                   </td>
@@ -333,6 +352,11 @@ export function DiagramsView(props: {
                         Edit
                       </button>
                     ) : null}
+                    {folders.canManage ? (
+                      <span onClick={(event) => event.stopPropagation()}>
+                        <DiagramFolderMenu id={diagram.id} title={diagram.title} />
+                      </span>
+                    ) : null}
                   </td>
                 </tr>
               );
@@ -341,9 +365,11 @@ export function DiagramsView(props: {
         </table>
       )}
 
-      {shown.length === 0 ? (
+      {shown.length === 0 && !(folders.at && folders.subfolders.length > 0) ? (
         <p className="home-empty">
-          {props.scopeLabel
+          {folders.at
+            ? `No diagrams in ${folders.at.name} yet.`
+            : props.scopeLabel
             ? `No diagrams in ${props.scopeLabel} yet.`
             : changesHere
               ? "No diagrams yet. Start one with New diagram."
