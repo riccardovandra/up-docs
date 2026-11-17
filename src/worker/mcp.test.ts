@@ -685,6 +685,26 @@ describe("MCP diagrams", () => {
     for (const topic of FORMAT_TOPICS) expect(MCP_INSTRUCTIONS).toContain(`"${topic}"`);
   });
 
+  it("routes a diagram on its own to Draw.io and a doc's diagrams to widgets", async () => {
+    const { MCP_INSTRUCTIONS } = await import("./mcp.ts");
+    const routing = MCP_INSTRUCTIONS.slice(MCP_INSTRUCTIONS.indexOf("What to make"), MCP_INSTRUCTIONS.indexOf("Doc workflow"));
+    expect(routing).toContain('"A diagram"');
+    expect(routing).toContain("one Draw.io diagram, create_drawio");
+    expect(routing).toContain("No doc.");
+    expect(routing).toContain("t3-widget blocks inside it");
+    expect(routing).toContain('(topic "diagram_doc")');
+    // The routing comes before the doc workflow, so it is read first.
+    expect(MCP_INSTRUCTIONS.indexOf("What to make")).toBeLessThan(MCP_INSTRUCTIONS.indexOf("create_doc"));
+  });
+
+  it("hands the writing rules over with every new doc", async () => {
+    const mcp = await makeMcpHarness();
+    const { FORMAT_GUIDES } = await import("./mcpGuide.ts");
+    const created = await mcp.tool("create_doc", { title: "Plan" });
+    expect(created.body.writingRules).toBe(FORMAT_GUIDES.writing);
+    expect(FORMAT_GUIDES.writing).toContain("Draw to explain");
+  });
+
   it("serves every format guide and refuses an unknown topic", async () => {
     const mcp = await makeMcpHarness();
     const { FORMAT_TOPICS } = await import("./mcpGuide.ts");

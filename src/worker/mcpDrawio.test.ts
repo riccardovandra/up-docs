@@ -831,6 +831,35 @@ describe("Draw.io pages over MCP", () => {
     expect(right.isError).toBe(false);
   });
 
+  it("builds a diagram with a supporting doc the way the diagram_doc guide says", async () => {
+    const mcp = await makeMcpHarness();
+    const guide = (await mcp.tool("format_guide", { topic: "diagram_doc" })).body.guide as string;
+    expect(guide).toContain("```t3-drawio\n<diagram id>\npart: <section title>");
+    const lane = (id: string, label: string, y: number) =>
+      `<mxCell id="${id}" value="${label}" style="swimlane;html=1;" vertex="1" parent="1">` +
+      `<mxGeometry x="0" y="${y}" width="400" height="150" as="geometry"/></mxCell>` +
+      `<mxCell id="${id}s" value="Step" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="${id}">` +
+      `<mxGeometry x="20" y="40" width="120" height="60" as="geometry"/></mxCell>`;
+    const created = await mcp.tool("create_drawio", {
+      title: "Packaging process",
+      xml: model(lane("inputs", "Inputs", 0) + lane("checks", "Promise checks", 200)),
+    });
+    expect(created.isError).toBe(false);
+    expect(created.body.next).toContain("diagram_doc");
+    const diagramId = created.body.diagramId as string;
+    const markdown = [
+      "# Packaging process",
+      `${created.body.block as string}`,
+      "## Inputs",
+      drawioBlock(diagramId, "What the agent reads first", null, "Inputs"),
+      "## Promise checks",
+      drawioBlock(diagramId, "Pass A and Pass B", null, "Promise"),
+    ].join("\n\n");
+    const doc = await mcp.tool("create_doc", { title: "Packaging process", markdown });
+    expect(doc.isError).toBe(false);
+    expect(await Docs.getTabMarkdown(mcp.api.db, doc.body.tab.tabId as string)).toContain("part: Promise");
+  });
+
   it("hands the agent the picture of the page it asks for", async () => {
     const { mcp, diagramId } = await twoPages();
     const PNG2 = new Uint8Array([...PNG, 2]);

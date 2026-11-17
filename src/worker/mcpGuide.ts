@@ -85,8 +85,28 @@ export default () => { const W = 156, H = 48, rowA = 110, rowB = 230, c1 = 102, 
 {"id":"requests","columns":[{"id":"req","name":"Request","type":"text"},{"id":"status","name":"Status","type":"select","options":[{"value":"Not started","color":"gray"},{"value":"Done","color":"green"}]},{"id":"ticket","name":"Ticket","type":"link"}],"rows":[{"id":"r1","cells":{"req":"Fix Zebra MCP","status":"Not started","ticket":{"text":"TASK-5575","url":"https://example.atlassian.net/browse/TASK-5575"}}}]}
 \`\`\`
 Change one cell with update_table_cell and add rows with add_table_row rather than rewriting the block. Plain markdown tables still work for static data. A \`<!-- col-widths: 120 240 0 -->\` line directly above a plain table holds the column widths the user dragged; keep it with the table when you edit it.`,
+  writing: `How to write a doc (what the user keeps asking for):
+- Before drafting, know the reader, the purpose and the decision the doc should drive. If one is unclear, ask one or two short questions.
+- Foundation first: say what the doc is for and the end state, then the parts. A plan reads: purpose and reader; end state, with a diagram; components, each with its goal, when it is done and how it fits; order of work, easiest or first-needed first; open decisions.
+- Plain words, full depth. Define every term, acronym and ID where it first appears; no bare F1, R5, D3 or PR numbers.
+- Draft small: no filler, restating, closing summaries or invented sections. Grow a section when the user asks. Do not guess facts about the user's business: ask, or mark it as an assumption.
+- Draw to explain: every process, loop, system, data model or comparison of options gets a diagram beside its text (topic "diagram"). One idea per diagram, its title says what to take from it. Actions: input, system, output. Roadmaps: a cascade. Data models: before and after. Options: side by side. Keep each label line under about 24 characters.`,
+  diagram_doc: `A diagram with a doc that explains it: the user gets one Draw.io diagram they can edit by hand, and a doc that walks through it section by section. Every view in the doc shows the same drawing, so one save updates them all.
+1. Plan the sections: the stages, lanes or areas the doc will explain, in reading order. Each becomes a part of the diagram.
+2. Draw the diagram (topic "drawio"): each section is a swimlane container whose label is a short title unique on its page (the part name), with its shapes inside it (parent = the container). Lines between sections join the shapes, so the whole still reads as one flow. Save it with create_drawio, or prepare_drawio_upload for a large file, and fix any warnings before you go on.
+3. Create the doc with create_doc and give the user both links: the diagram's and the doc's.
+4. Near the top of the doc, show the whole diagram: paste the \`block\` create_drawio returned, with a caption, as the map.
+5. Give each section a heading, a block that shows only its part, then the text that explains it:
+\`\`\`t3-drawio
+<diagram id>
+part: <section title>
+Caption
+\`\`\`
+For a page other than the first, put "page: <page name>" on the line before the part line.
+6. To change the drawing later, use update_drawio and keep the part names: the doc's blocks find parts by name. If a part is renamed, update its block too.
+Extra figures that are not part of the drawing can still be \`\`\`t3-widget blocks (topic "diagram"). The pictures, whole and per part, appear once a person who can edit the diagram opens it: say so when you hand over the links.`,
   drawio: `Draw.io diagrams are library items of their own: each is stored once, in a project or in none, opens in the real Draw.io editor, and shows in every doc that links it, so one save updates them all.
-When to use which: draw a Draw.io diagram when the user asks for Draw.io, wants to rework the drawing by hand, or wants one diagram in several docs. Use a code-drawn \`\`\`t3-widget diagram (topic "diagram") for a figure that belongs to one doc and that you keep in step with its text. Never turn one kind into the other unasked.
+When to use which: draw a Draw.io diagram when the user asks for a diagram on its own (no doc), asks for Draw.io, wants to rework the drawing by hand, or wants one diagram in several docs. A diagram with a doc that explains it: topic "diagram_doc". Use a code-drawn \`\`\`t3-widget diagram (topic "diagram") for a figure that belongs to one doc and that you keep in step with its text. Never turn one kind into the other unasked.
 Tools:
 - list_drawio: the diagrams the user is on, with their role (owner, editor, commenter, viewer). read_drawio {diagramId}: title, project, the docs that use it, shapes, connections and the picture. diagramId is the id or the diagram's link.
 - Connections read "A -> B", or "A -[label]-> B" with a label. "<->" has an arrowhead at both ends, "<-" only at the start, "--" none. "(loose end)" is an end attached to no shape.
