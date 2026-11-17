@@ -32,25 +32,25 @@ const SUPPORTED_PROTOCOL_VERSIONS = [
  */
 export const MAX_INSTRUCTIONS_LENGTH = 3_900;
 
-export const MCP_INSTRUCTIONS = `UP Docs holds living markdown docs that the user watches update live in their editor.
+export const MCP_INSTRUCTIONS = `UP Docs holds living markdown docs, Draw.io diagrams and sheets that the user watches update live.
 Projects are T3 Code projects, identified by key: the git repository (github.com/owner/repo), or title:<name> for a project without a remote. Inside T3 Code, docs_cloud_project gives the current project's key.
-Workflow:
-1. When asked for a doc, plan or write-up, create it first: create_doc with projectKey (and projectName), the title and a skeleton (the section headings, each with a one-line placeholder). Do this before research. Omit projectKey only when the doc belongs to no project. Pass type (plan, spec, explainer, report, client) for a ready skeleton in the shape below.
-2. Give the user the doc URL from the response right away, then work.
-3. Fill sections one at a time with edit_tab (replace a placeholder with the finished section), so the user watches the doc build. Use write_tab only for a new or fully rewritten tab.
-4. Use tabs (create_tab) for distinct parts such as research, plan and decisions; nest with parentTabId.
+What to make: decide from the user's words before anything else.
+- "A diagram" (a flowchart, map, process or system drawing) on its own: one Draw.io diagram, create_drawio (topic "drawio"). No doc. Hand over its link.
+- A doc, plan or write-up, with or without diagrams: a doc; its diagrams are \`\`\`t3-widget blocks inside it (topic "diagram").
+- A doc with an editable or Draw.io diagram: create_drawio, then paste its block into the doc.
+- A diagram plus a doc that explains it: one Draw.io diagram drawn in sections, and a doc that shows it whole, then one part per section beside its text (topic "diagram_doc").
+Doc workflow:
+1. Create it first: create_doc with projectKey (and projectName), the title and a skeleton (section headings, each with a one-line placeholder), before research. Omit projectKey only when the doc belongs to no project. Pass type (plan, spec, explainer, report, client) for a ready skeleton.
+2. Give the user the URL right away, then work.
+3. Fill sections one at a time with edit_tab (replace a placeholder with the finished section), so the user watches it build. write_tab only for a new or fully rewritten tab.
+4. Tabs (create_tab) for distinct parts such as research, plan and decisions; nest with parentTabId.
 5. Keep findings in the doc, not the chat. End with one line and the URL.
+How to write: create_doc returns the user's writing rules; read them (topic "writing") before you write in a doc you did not create. In short: know the reader and the decision; foundation first; plain words, every term defined; draft small; a diagram beside every process, system or comparison.
 Doc links read <origin>/d/<docId>/<tabId>: a pasted link's tabId is the tab the user is on, so read_doc with it first. Re-read a tab (read_doc with tabId) before editing it if the user may have changed it. Move a doc with move_doc (projectId: null for no project).
 Project facts: create_doc and read_doc return the project's standing facts (tools, names, rules). Follow them over your own assumptions. When the user corrects a lasting fact, save it with add_project_fact, or with resolve_comment's lesson when it came from a comment.
-How to write (what the user keeps asking for):
-- Before drafting, know the reader, the purpose and the decision the doc should drive. If one is unclear, ask one or two short questions.
-- Foundation first: say what the doc is for and the end state, then the parts. A plan reads: purpose and reader; end state, with a diagram; components, each with its goal, when it is done and how it fits; order of work, easiest or first-needed first; open decisions.
-- Plain words, full depth. Define every term, acronym and ID where it first appears; no bare F1, R5, D3 or PR numbers.
-- Draft small: no filler, restating, closing summaries or invented sections. Grow a section when the user asks. Do not guess facts about the user's business: ask, or mark it as an assumption.
-- Draw to explain: every process, loop, system, data model or comparison of options gets a diagram beside its text. One idea per diagram, its title says what to take from it. Actions: input, system, output. Roadmaps: a cascade. Data models: before and after. Options: side by side. Keep each label line under about 24 characters.
 Formats: call format_guide {topic} before you first write one. Malformed blocks are refused with the reason.
-- Diagrams: \`\`\`t3-widget id=<slug> blocks (topic "diagram"). Existing \`\`\`mermaid blocks keep working; edit them in place, never convert them.
-- Draw.io diagrams people edit by hand: list_drawio, read_drawio, create_drawio, update_drawio; big files by link (topic "drawio").
+- Diagrams in a doc: \`\`\`t3-widget id=<slug> (topic "diagram"). Existing \`\`\`mermaid blocks keep working; edit them in place, never convert them.
+- Draw.io diagrams (a library of their own, shown in docs whole or one part at a time): list_drawio, read_drawio, create_drawio, update_drawio; big files by link (topic "drawio").
 - Rich tables (status chips, links, per-cell comments): \`\`\`t3-table (topic "table"). Plain markdown tables are fine for static data.
 - Images: ![alt](https://...) links are copied into the doc on write; a local file goes up with prepare_image_upload (topic "image").
 - Videos: \`\`\`t3-video (topic "video"). LinkedIn and X posts: \`\`\`t3-embed (topic "embed").

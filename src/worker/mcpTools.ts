@@ -1192,7 +1192,7 @@ function drawioWritten(
       diagram.hasSource && isPictureCurrent(diagram)
         ? "Unchanged: the stored picture shows this version."
         : PICTURE_PENDING,
-    next: "Paste `block` into a tab with edit_tab or write_tab to show the diagram in a doc. It shows the first page; to show another, add a `page: <page name>` line after the id, and to show only one part of the page (a container, from read_drawio's parts), a `part: <part name>` line after that. The last line inside the block is its caption.",
+    next: "Paste `block` into a tab with edit_tab or write_tab to show the diagram in a doc. It shows the first page; to show another, add a `page: <page name>` line after the id, and to show only one part of the page (a container, from read_drawio's parts), a `part: <part name>` line after that. The last line inside the block is its caption. When the user asked for a diagram on its own, hand over its link and make no doc; when it comes with a doc that explains it, show it whole once and then one part per section (format_guide {topic: \"diagram_doc\"}).",
   };
 }
 
@@ -1402,7 +1402,7 @@ export const TOOLS = [
   {
     name: "format_guide",
     description:
-      "The full spec of one doc format, with an example: diagram (t3-widget), drawio (Draw.io diagrams from the library and their pages, t3-drawio), table (t3-table), video (t3-video), embed (t3-embed), image (images in a doc and uploads), sheet (sheets and their formulas), comments (anchors on passages, table cells and diagram labels), sharing, or claude_push. Call it before you first write that format in a session.",
+      "The full spec of one doc format, with an example: writing (how to write a doc), diagram (t3-widget), diagram_doc (a Draw.io diagram with a doc that shows its parts), drawio (Draw.io diagrams from the library and their pages, t3-drawio), table (t3-table), video (t3-video), embed (t3-embed), image (images in a doc and uploads), sheet (sheets and their formulas), comments (anchors on passages, table cells and diagram labels), sharing, or claude_push. Call it before you first write that format in a session.",
     inputSchema: {
       type: "object",
       properties: { topic: { type: "string", enum: FORMAT_TOPICS } },
@@ -1876,7 +1876,7 @@ export const TOOLS = [
   {
     name: "create_drawio",
     description:
-      'Draw a new Draw.io diagram into the library from Draw.io XML (format_guide {topic: "drawio"} first). For XML over about 20 KB, or any file already on disk, use prepare_drawio_upload instead: typing a large file into this call takes many minutes. File it like create_doc: projectKey (with projectName if the project is new) or projectId; omit both for no project. Returns the id, the link and `block`, the exact ```t3-drawio block to paste into a doc tab. It opens in the same editor as a hand-drawn diagram. You become its owner; share it with share_doc {diagramId}. Its picture appears the first time a person who can edit the diagram opens it. `theme` gives the project\'s diagram theme and its style lines; when the project has a theme and no cell sets its own fillColor, strokeColor or fontColor, the XML is restyled to it before it is stored (applyTheme: true always restyles, false never).',
+      'Use when the user asks for a diagram on its own (no doc), for Draw.io, or for a diagram with a doc that shows its parts. Draws a new Draw.io diagram into the library from Draw.io XML (format_guide {topic: "drawio"} first). For XML over about 20 KB, or any file already on disk, use prepare_drawio_upload instead: typing a large file into this call takes many minutes. File it like create_doc: projectKey (with projectName if the project is new) or projectId; omit both for no project. Returns the id, the link and `block`, the exact ```t3-drawio block to paste into a doc tab. It opens in the same editor as a hand-drawn diagram. You become its owner; share it with share_doc {diagramId}. Its picture appears the first time a person who can edit the diagram opens it. `theme` gives the project\'s diagram theme and its style lines; when the project has a theme and no cell sets its own fillColor, strokeColor or fontColor, the XML is restyled to it before it is stored (applyTheme: true always restyles, false never).',
     inputSchema: {
       type: "object",
       properties: {
@@ -2331,6 +2331,7 @@ const handlers: Record<
       tab: tabSummary(ctx, tab),
       ...imagesField(images),
       projectFacts: await projectFactsFor(ctx, projectId),
+      writingRules: FORMAT_GUIDES.writing,
       ...(type === undefined ? {} : { checklist: docTypeChecklist(type) }),
     };
   },
