@@ -224,18 +224,93 @@
   border-radius: 12px;
 }
 
-.diagram-canvas[data-clickable]:hover {
-  border-color: var(--input);
-}
-
 .diagram-canvas .diagram-picture {
   min-height: 22rem;
 }
 
 .diagram-side {
+  display: flex;
+  flex-direction: column;
   padding: 1.1rem 1rem 5rem;
   border-left: 1px solid var(--border);
   font-size: 0.92rem;
+}
+
+/* The theme sits at the foot of the side panel; its menu opens upward. */
+.diagram-side-theme {
+  margin-top: auto;
+  padding-top: 1rem;
+}
+
+.diagram-side-theme .home-menu {
+  top: auto;
+  bottom: calc(100% + 0.35rem);
+}
+
+.diagram-fold {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  text-transform: inherit;
+  letter-spacing: inherit;
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
+.diagram-fold > svg {
+  transform: rotate(-90deg);
+  transition: transform 0.12s;
+}
+
+.diagram-fold[aria-expanded="true"] > svg {
+  transform: none;
+}
+
+.diagram-fold-count {
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.diagram-fold-count:not(:empty)::before {
+  content: "· ";
+}
+
+.diagram-used-filter {
+  width: 100%;
+  margin: 0.2rem 0 0.35rem;
+  padding: 0.3rem 0.5rem;
+  font: inherit;
+  font-size: 0.85rem;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.diagram-use-group {
+  width: 100%;
+  font: inherit;
+  text-align: left;
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
+.diagram-use-count {
+  margin-left: auto;
+  flex: none;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+.diagram-use-tabs {
+  margin: 0 0 0.25rem 1.15rem;
+  padding-left: 0.4rem;
+  border-left: 1px solid var(--border);
 }
 
 .diagram-side h2 {
@@ -398,19 +473,13 @@
   margin-top: 1rem;
 }
 
-.diagram-theme-slot {
-  display: flex;
-  align-items: center;
-  min-width: 0;
-}
-
 @media (max-width: 800px) {
   .diagram-viewer {
     grid-template-columns: 1fr;
     min-height: 0;
   }
 
-  /* The title keeps the first row; the theme goes below it, then the actions. */
+  /* The title keeps the first row, then the actions. */
   .diagram-page .doc-header {
     flex-wrap: wrap;
     row-gap: 0.4rem;
@@ -422,11 +491,6 @@
   .diagram-page .doc-header-title {
     flex: 1 1 100%;
     flex-wrap: wrap;
-  }
-
-  .diagram-theme-slot {
-    flex: 1 1 100%;
-    padding-left: 0.4rem;
   }
 
   .diagram-side {
@@ -1032,8 +1096,19 @@
   --diagram-zoom: 1;
 }
 
-.zoom-viewport[data-clickable] {
-  cursor: pointer;
+/* The picture is for viewing: a drag never selects its text or drags the image out. */
+.zoom-content {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.zoom-content img {
+  -webkit-user-drag: none;
+}
+
+.zoom-content :is(input, textarea, [contenteditable]) {
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 .zoom-viewport[data-zoomed] {

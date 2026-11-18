@@ -147,8 +147,8 @@ const DRAG_SLOP = 4;
 /**
  * Wires the pointer, wheel and pinch handling. Ctrl or Cmd with the wheel
  * (and a trackpad pinch, which arrives as one) zooms at the pointer; two
- * fingers pinch; a drag pans once zoomed. A click that ends a drag does not
- * reach anything under it.
+ * fingers pinch; a drag pans once zoomed. A click that ends a drag, zoomed or
+ * not, does not reach anything under it.
  */
 export function createPanZoom(
   viewport: HTMLElement,
@@ -288,11 +288,13 @@ export function createPanZoom(
       pinch = distance;
       return;
     }
-    if (last === null || state.scale <= 1.001) return;
+    if (last === null) return;
     const dx = event.clientX - last.x;
     const dy = event.clientY - last.y;
+    // Counted at rest too, so the click that ends any drag is swallowed.
     travelled += Math.abs(dx) + Math.abs(dy);
     last = { x: event.clientX, y: event.clientY };
+    if (state.scale <= 1.001) return;
     if (travelled > DRAG_SLOP) {
       viewport.dataset.dragging = "";
       set({ x: state.x + dx, y: state.y + dy, scale: state.scale });

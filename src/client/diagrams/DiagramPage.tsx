@@ -8,13 +8,13 @@ import {
 } from "../../shared/diagramComments.ts";
 import { diagramCommentForChat } from "../../shared/embed.ts";
 
-import type { DiagramUsage, DiagramView } from "../../shared/drawio.ts";
+import type { DiagramUsage, DiagramUse, DiagramView } from "../../shared/drawio.ts";
 import type { Project } from "../../shared/protocol.ts";
 import { canComment as roleCanComment } from "../../shared/access.ts";
 import { ApiError, api } from "../api.ts";
 import { formatDay } from "../home/homeLogic.ts";
 import { HomeLink } from "../home/HomeLink.tsx";
-import { DiagramIcon, DocIcon, LinkIcon, PenIcon } from "../home/icons.tsx";
+import { ChevronDownIcon, DiagramIcon, DocIcon, LinkIcon, PenIcon } from "../home/icons.tsx";
 import { TitleDialog } from "../home/TitleDialog.tsx";
 import { useLockedProject } from "../lockedProject.ts";
 import { copyText } from "../copyText.ts";
@@ -31,6 +31,7 @@ import { openCountsByPage } from "./pageTabsLogic.ts";
 import { subscribeRefresh, watchDiagram } from "./diagramRefresh.ts";
 import { diagramErrorMessage, diagramsApi, subscribeDiagram } from "./diagramsApi.ts";
 import { ThemeMenu } from "./ThemeMenu.tsx";
+import { groupUses, USED_IN_FILTER_FROM } from "./usedInLogic.ts";
 import { ShareButton } from "../share/ShareButton.tsx";
 import "../home/home.css";
 import "./diagrams.css";
@@ -44,6 +45,112 @@ const follow = (path: string) => (event: MouseEvent) => {
 };
 
 const plural = (count: number, word: string) => `${count} ${word}${count === 1 ? "" : "s"}`;
+
+const tabLink = (use: DiagramUse, label: string, detail: string | null) => (
+  <a
+    key={use.tabId}
+    href={docPath(use.docId, use.tabId)}
+    className="diagram-use"
+    onClick={follow(docPath(use.docId, use.tabId))}
+  >
+    <DocIcon size={16} />
+    <span className="diagram-use-text">
+      <span>{label}</span>
+      {detail ? <span className="muted">{detail}</span> : null}
+    </span>
+  </a>
+);
+
+/**
+ * The docs that embed the diagram: folded by default, one row per doc, and a
+ * doc that embeds it in several tabs unfolds to list them. A filter shows
+ * once the list is long.
+ */
+function UsedIn(props: { readonly usage: DiagramUsage | null }) {
+  const [open, setOpen] = useState(false);
+  const [openDocs, setOpenDocs] = useState<ReadonlySet<string>>(new Set());
+  const [filter, setFilter] = useState("");
+  const { usage } = props;
+  const all = groupUses(usage?.uses ?? [], "");
+  const groups = groupUses(usage?.uses ?? [], filter);
+  const docs = all.length + (usage?.otherDocs ?? 0);
+  const toggleDoc = (docId: string) => {
+    const next = new Set(openDocs);
+    if (!next.delete(docId)) next.add(docId);
+    setOpenDocs(next);
+  };
+  return (
+    <section className="diagram-used-in">
+      <h2>
+        <button
+          type="button"
+          className="diagram-fold"
+          aria-expanded={open}
+          onClick={() => setOpen(!open)}
+        >
+          <ChevronDownIcon size={14} />
+          Used in
+          <span className="diagram-fold-count">{usage ? plural(docs, "doc") : ""}</span>
+        </button>
+      </h2>
+      {open ? (
+        <>
+          {all.length >= USED_IN_FILTER_FROM ? (
+            <input
+              type="search"
+              className="diagram-used-filter"
+              placeholder="Filter docs"
+              aria-label="Filter docs"
+              value={filter}
+              onChange={(event) => setFilter(event.target.value)}
+            />
+          ) : null}
+          {groups.map((group) => {
+            const only = group.uses.length === 1 ? group.uses[0] : undefined;
+            if (only) {
+              return tabLink(
+                only,
+                group.docTitle,
+                only.tabTitle !== only.docTitle ? only.tabTitle : null,
+              );
+            }
+            const unfolded = openDocs.has(group.docId) || filter.trim() !== "";
+            return (
+              <div key={group.docId}>
+                <button
+                  type="button"
+                  className="diagram-use diagram-use-group"
+                  aria-expanded={unfolded}
+                  onClick={() => toggleDoc(group.docId)}
+                >
+                  <DocIcon size={16} />
+                  <span className="diagram-use-text">
+                    <span>{group.docTitle}</span>
+                  </span>
+                  <span className="diagram-use-count">{plural(group.uses.length, "tab")}</span>
+                </button>
+                {unfolded ? (
+                  <div className="diagram-use-tabs">
+                    {group.uses.map((use) => tabLink(use, use.tabTitle, null))}
+                  </div>
+                ) : null}
+              </div>
+            );
+          })}
+          {usage && usage.uses.length === 0 ? (
+            <p className="muted">No doc embeds this diagram yet.</p>
+          ) : null}
+          {usage && groups.length === 0 && usage.uses.length > 0 ? (
+            <p className="muted">No doc matches.</p>
+          ) : null}
+          {usage && usage.otherDocs > 0 ? (
+            <p className="muted">And {plural(usage.otherDocs, "doc")} you are not on.</p>
+          ) : null}
+        </>
+      ) : null}
+    </section>
+  );
+}
 
 /** While review mode is on and the page is seen, threads are re-read this often. */
 const REVIEW_POLL_MS = 5_000;
@@ -216,9 +323,6 @@ export function DiagramPage(props: { readonly diagramId: string }) {
   const pageName = pageNames[shownPage] ?? null;
   const threads = comments?.threads ?? [];
   const openCount = threads.filter((thread) => thread.resolvedAt === null).length;
-  const openOnPage = threads.some(
-    (thread) => thread.resolvedAt === null && thread.anchor.page === pageName,
-  );
 
   /**
    * Every comment and reply written here goes to the T3 Code chat. A T3 Code
@@ -292,10 +396,6 @@ export function DiagramPage(props: { readonly diagramId: string }) {
               In {plural(linkedDocs, "doc")}
             </span>
           ) : null}
-          {/* Its own line below the title at narrow widths (diagrams.css). */}
-          <span className="diagram-theme-slot">
-            <ThemeMenu diagramId={diagramId} canEdit={canChange} />
-          </span>
         </div>
         <div className="doc-header-actions">
           {canComment || threads.length > 0 ? (
@@ -399,9 +499,7 @@ export function DiagramPage(props: { readonly diagramId: string }) {
                 }}
               />
             );
-            // Click to edit, unless pins are showing: then clicks are theirs. Once zoomed in,
-            // clicks and drags move the picture instead.
-            const clickToEdit = canChange && !review && !openOnPage;
+            // The picture is for viewing: only "Edit in Draw.io" opens the editor.
             return (
               <ZoomViewport
                 className={review ? "diagram-canvas reviewing" : "diagram-canvas"}
@@ -410,9 +508,6 @@ export function DiagramPage(props: { readonly diagramId: string }) {
                 startWide
                 keys={keysFree}
                 resetKey={`${diagramId}:${shownPage}`}
-                {...(clickToEdit
-                  ? { onClickAtRest: () => setEditing(true), clickTitle: "Click to edit" }
-                  : {})}
                 controls={
                   <button
                     type="button"
@@ -431,36 +526,7 @@ export function DiagramPage(props: { readonly diagramId: string }) {
           })()}
         </div>
         <aside className="diagram-side">
-          {canEdit ? (
-            <>
-              <h2>Used in</h2>
-              {usage && usage.uses.length > 0 ? (
-                usage.uses.map((use) => (
-                  <a
-                    key={use.tabId}
-                    href={docPath(use.docId, use.tabId)}
-                    className="diagram-use"
-                    onClick={follow(docPath(use.docId, use.tabId))}
-                  >
-                    <DocIcon size={16} />
-                    <span className="diagram-use-text">
-                      <span>{use.docTitle}</span>
-                      {use.tabTitle !== use.docTitle ? (
-                        <span className="muted">{use.tabTitle}</span>
-                      ) : null}
-                    </span>
-                  </a>
-                ))
-              ) : (
-                <p className="muted">No doc embeds this diagram yet.</p>
-              )}
-              {usage && usage.otherDocs > 0 ? (
-                <p className="muted">
-                  And {plural(usage.otherDocs, "doc")} you are not on.
-                </p>
-              ) : null}
-            </>
-          ) : null}
+          {canEdit ? <UsedIn usage={usage} /> : null}
           <h2>Details</h2>
           <dl>
             {canEdit ? (
@@ -474,11 +540,10 @@ export function DiagramPage(props: { readonly diagramId: string }) {
             <dt>Created</dt>
             <dd>{formatDay(diagram.createdAt)}</dd>
           </dl>
-          <h2>How it is stored</h2>
-          <p className="muted">
-            Once, here in Diagrams. Docs keep a link to it, not a copy, so one save updates every
-            doc that shows it.
-          </p>
+          <div className="diagram-side-theme">
+            <h2>Theme</h2>
+            <ThemeMenu diagramId={diagramId} canEdit={canChange} />
+          </div>
         </aside>
       </div>
 

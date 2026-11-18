@@ -319,7 +319,6 @@ function LinkedFigure(props: {
           className="drawio-stage"
           wheel="sideways"
           resetKey={`${diagramId}:${block.page ?? ""}:${block.part ?? ""}`}
-          {...(canEdit ? { onClickAtRest: edit, clickTitle: "Click to edit" } : {})}
           controls={
             <button
               type="button"
