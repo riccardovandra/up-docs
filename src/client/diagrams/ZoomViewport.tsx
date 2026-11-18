@@ -47,9 +47,6 @@ export function ZoomViewport(props: {
   /** +, - and 0 from anywhere on the page (one viewport per page only). */
   readonly keys?: boolean;
   readonly doubleClickZoom?: boolean;
-  /** A plain click while not zoomed in, such as opening the editor. */
-  readonly onClickAtRest?: () => void;
-  readonly clickTitle?: string;
   /**
    * Opens a picture that is much taller than the viewport at the viewport's
    * width, from its top, so it reads top down as before; 0 still fits it whole.
@@ -148,12 +145,6 @@ export function ZoomViewport(props: {
     current.set(centreOn(current.state(), current.frame(), picture, fx, fy), true);
   };
 
-  const onClick = (event: ReactMouseEvent<HTMLDivElement>) => {
-    if (!props.onClickAtRest || zoomed) return;
-    if ((event.target as Element).closest("[data-zoom-control]")) return;
-    props.onClickAtRest();
-  };
-
   const onDoubleClick = (event: ReactMouseEvent<HTMLDivElement>) => {
     const current = zoom.current;
     if (!props.doubleClickZoom || !current) return;
@@ -170,10 +161,7 @@ export function ZoomViewport(props: {
     <div
       ref={viewport}
       className={`zoom-viewport ${props.className}`}
-      title={props.onClickAtRest && !zoomed ? props.clickTitle : undefined}
-      onClick={onClick}
       onDoubleClick={onDoubleClick}
-      data-clickable={props.onClickAtRest && !zoomed ? "" : undefined}
     >
       <div
         ref={content}
