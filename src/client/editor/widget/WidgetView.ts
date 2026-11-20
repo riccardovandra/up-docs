@@ -4,7 +4,9 @@ import type { NodeView } from "@tiptap/pm/view";
 
 import { widgetInfo } from "../../../shared/widget/fence.ts";
 import type { PreparedWidget } from "./engine.ts";
+import { copyPng, downloadPng, svgToPng } from "./copyImage.ts";
 import { readFrameMessage, WIDGET_SRCDOC, type FrameMessage, type WidgetPick } from "./frame.ts";
+import { standaloneSvg } from "./standaloneSvg.ts";
 import "./widget.css";
 
 type Engine = typeof import("./engine.ts");
@@ -107,6 +109,9 @@ if (typeof window !== "undefined") {
   window.addEventListener("beforeprint", () => void readyWidgetsForPrint());
 }
 
+const SNAPSHOT_TIMEOUT_MS = 3000;
+const COPY_LABEL = "Copy image";
+
 /** The viewBox's aspect ratio, read without the parser so the frame never jumps. */
 function aspectRatio(source: string): string {
   const match = /viewBox\s*=\s*\{?\s*['"`]\s*0\s+0\s+(\d+(?:\.\d+)?)\s+(\d+(?:\.\d+)?)/.exec(
@@ -120,6 +125,7 @@ function aspectRatio(source: string): string {
  * viewport. Clicking a label opens an edit box over it; Enter or blur writes
  * the new words into the module (only that label's text changes), Escape
  * cancels. "Edit code" (or the caret entering the block) shows the source.
+ * "Copy image" puts the drawing on the clipboard as a PNG.
  */
 export class WidgetView implements NodeView {
   readonly dom = document.createElement("div");
@@ -140,6 +146,12 @@ export class WidgetView implements NodeView {
   private lastTheme = "";
   private editing: { readonly textId: string; readonly original: string } | null = null;
   private destroyed = false;
+  private snapshot: {
+    readonly promise: Promise<string>;
+    resolve(svg: string | null): void;
+  } | null = null;
+  private readonly copyButton = document.createElement("button");
+  private copyReset: ReturnType<typeof setTimeout> | undefined;
   private resolveDrawn: (() => void) | null = null;
   drawn: Promise<void>;
 
@@ -176,7 +188,16 @@ export class WidgetView implements NodeView {
       if (this.editor.isEditable && typeof pos === "number")
         this.openSource(this.editor, pos, this.node);
     });
-    chrome.append(this.stage, this.diagnostics, editButton);
+    this.copyButton.type = "button";
+    this.copyButton.className = "widget-copy";
+    this.copyButton.textContent = COPY_LABEL;
+    this.copyButton.title = "Copy the diagram as a PNG image";
+    this.copyButton.addEventListener("mousedown", (event) => event.preventDefault());
+    this.copyButton.addEventListener("click", () => void this.copyImage());
+    const actions = document.createElement("div");
+    actions.className = "widget-actions";
+    actions.append(this.copyButton, editButton);
+    chrome.append(this.stage, this.diagnostics, actions);
     this.dom.append(pre, chrome);
 
     this.input.addEventListener("keydown", this.onInputKey);
@@ -221,6 +242,8 @@ export class WidgetView implements NodeView {
     this.editor.off("focus", this.syncEditing);
     this.editor.off("blur", this.syncEditing);
     this.resolveDrawn?.();
+    this.snapshot?.resolve(null);
+    clearTimeout(this.copyReset);
   }
 
   private get diagramId(): string {
@@ -268,19 +291,73 @@ export class WidgetView implements NodeView {
       case "pick":
         this.onPick(message);
         break;
+      case "snapshot":
+        this.snapshot?.resolve(message.svg);
+        break;
     }
   }
 
   postTheme() {
     if (!this.frameReady || !this.frame?.contentWindow) return;
-    const style = getComputedStyle(this.dom);
-    const vars: Record<string, string> = {};
-    for (const token of COLOUR_TOKENS) vars[token] = style.getPropertyValue(token).trim();
-    vars["--widget-font"] = style.getPropertyValue("--font-sans").trim();
+    const vars = this.themeVars();
     const serialized = JSON.stringify(vars);
     if (serialized === this.lastTheme) return;
     this.lastTheme = serialized;
     this.frame.contentWindow.postMessage({ type: "theme", vars }, "*");
+  }
+
+  /** The drawn SVG, standalone, in the colours on screen. */
+  private requestSnapshot(): Promise<string> {
+    if (this.snapshot) return this.snapshot.promise;
+    const target = this.frame?.contentWindow;
+    if (!target || this.renderedNonce < 0 || this.dom.dataset.state === "error") {
+      return Promise.reject(new Error("The diagram has not drawn yet."));
+    }
+    let settle!: (svg: string | null) => void;
+    const promise = new Promise<string>((resolve, reject) => {
+      const timer = setTimeout(() => settle(null), SNAPSHOT_TIMEOUT_MS);
+      settle = (markup) => {
+        clearTimeout(timer);
+        this.snapshot = null;
+        const svg = markup ? standaloneSvg(markup, this.themeVars()) : null;
+        if (svg) resolve(svg);
+        else reject(new Error("The diagram could not be read."));
+      };
+    });
+    this.snapshot = { promise, resolve: (svg) => settle(svg) };
+    target.postMessage({ type: "snapshot" }, "*");
+    return promise;
+  }
+
+  private async copyImage() {
+    clearTimeout(this.copyReset);
+    const background = getComputedStyle(this.dom).getPropertyValue("--bg").trim() || "#ffffff";
+    const png = this.requestSnapshot().then((svg) => svgToPng(svg, background));
+    // Keep the rejection handled even when the clipboard path never awaits it.
+    png.catch(() => undefined);
+    let status: string;
+    try {
+      await copyPng(png);
+      status = "Copied";
+    } catch {
+      try {
+        downloadPng(await png, this.diagramId);
+        status = "Downloaded";
+      } catch {
+        status = "Copy failed";
+      }
+    }
+    if (this.destroyed) return;
+    this.copyButton.textContent = status;
+    this.copyReset = setTimeout(() => (this.copyButton.textContent = COPY_LABEL), 1600);
+  }
+
+  private themeVars(): Record<string, string> {
+    const style = getComputedStyle(this.dom);
+    const vars: Record<string, string> = {};
+    for (const token of COLOUR_TOKENS) vars[token] = style.getPropertyValue(token).trim();
+    vars["--widget-font"] = style.getPropertyValue("--font-sans").trim();
+    return vars;
   }
 
   private postRender() {

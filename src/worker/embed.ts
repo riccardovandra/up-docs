@@ -15,7 +15,8 @@ export async function withEmbedPolicy(
   const headers = new Headers(response.headers);
   // Images load only from this origin: doc uploads under /api/images. A remote
   // URL in a doc's markdown is never fetched, so it cannot track readers.
-  headers.set("Content-Security-Policy", `${frameAncestorsPolicy(sources)}; img-src 'self'`);
+  // blob: URLs are made by the app's own scripts (a diagram drawn to PNG).
+  headers.set("Content-Security-Policy", `${frameAncestorsPolicy(sources)}; img-src 'self' blob:`);
   const isHtml = (headers.get("Content-Type") ?? "").startsWith("text/html");
   if (!isHtml || !response.body) {
     return new Response(response.body, { status: response.status, headers });
