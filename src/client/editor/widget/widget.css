@@ -89,10 +89,16 @@
   display: none;
 }
 
-.widget-edit {
+.widget-actions {
   position: absolute;
   top: 0.5rem;
   right: 0.5rem;
+  display: flex;
+  gap: 0.35rem;
+}
+
+.widget-edit,
+.widget-copy {
   padding: 0.2rem 0.55rem;
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -104,18 +110,25 @@
   opacity: 0;
 }
 
-.widget-block:hover .widget-edit,
-.widget-edit:focus-visible {
+.widget-edit:hover,
+.widget-copy:hover {
+  color: var(--text);
+}
+
+.widget-block:hover :is(.widget-edit, .widget-copy),
+:is(.widget-edit, .widget-copy):focus-visible {
   opacity: 1;
 }
 
-.widget-block[data-editing] .widget-edit,
-.tab-editor:not(:has(.ProseMirror[contenteditable="true"])) .widget-edit {
+/* Copying works in read-only docs too; only editing hides. */
+.widget-block[data-editing] .widget-actions,
+.tab-editor:not(:has(.ProseMirror[contenteditable="true"])) .widget-edit,
+.widget-block[data-state="error"] .widget-copy {
   display: none;
 }
 
 @media print {
-  .widget-edit,
+  .widget-actions,
   .widget-diagnostics,
   .widget-label-input {
     display: none !important;
