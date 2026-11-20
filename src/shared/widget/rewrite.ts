@@ -56,3 +56,38 @@ export function rewriteLabel(source: string, textId: string, value: string): Lab
     replacement: { start: label.start, end: label.end, text: next },
   };
 }
+
+/**
+ * Deletes one label's whole <text> or <tspan>, found by its text id. When the
+ * element sits alone on its line, the line goes with it. Refused when the
+ * module would no longer parse (a label that is the drawing's root, or the
+ * only value of an expression).
+ */
+export function removeLabel(source: string, textId: string): LabelRewrite {
+  const analysis = analyzeWidget(source);
+  const label = analysis.labels.find((entry) => entry.id === textId);
+  if (!label) {
+    return analysis.diagnostics.some((entry) => entry.rule === "parse")
+      ? { ok: false, error: "invalid_widget", message: "The diagram does not parse." }
+      : { ok: false, error: "unknown_text_id", message: `No label with the text id '${textId}'.` };
+  }
+  let start = label.elementStart;
+  let end = label.elementEnd;
+  const lineStart = source.lastIndexOf("\n", start - 1) + 1;
+  const newline = source.indexOf("\n", end);
+  const lineEnd = newline === -1 ? source.length : newline;
+  if (!source.slice(lineStart, start).trim() && !source.slice(end, lineEnd).trim()) {
+    start = lineStart;
+    end = newline === -1 ? lineEnd : newline + 1;
+  }
+  const next = source.slice(0, start) + source.slice(end);
+  if (analyzeWidget(next).diagnostics.some((entry) => entry.rule === "parse")) {
+    return { ok: false, error: "invalid_value", message: "This label cannot be removed." };
+  }
+  return {
+    ok: true,
+    source: next,
+    previous: label.text,
+    replacement: { start, end, text: "" },
+  };
+}

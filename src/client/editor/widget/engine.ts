@@ -4,7 +4,7 @@
 import { compileWidget } from "../../../shared/widget/compile.ts";
 import { analyzeWidget, type WidgetAnalysis } from "../../../shared/widget/validate.ts";
 
-export { rewriteLabel } from "../../../shared/widget/rewrite.ts";
+export { removeLabel, rewriteLabel } from "../../../shared/widget/rewrite.ts";
 export { formatDiagnostic } from "../../../shared/widget/validate.ts";
 
 export interface PreparedWidget {

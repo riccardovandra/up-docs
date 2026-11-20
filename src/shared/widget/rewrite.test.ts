@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { rewriteLabel } from "./rewrite.ts";
+import { removeLabel, rewriteLabel } from "./rewrite.ts";
 import { FLOW_EXAMPLE } from "./testing/examples.ts";
 import { analyzeWidget } from "./validate.ts";
 
@@ -30,7 +30,9 @@ describe("rewriteLabel", () => {
   });
 
   it("reports no change for the same words, and refuses unknown ids and empty words", () => {
-    expect(rewriteLabel(FLOW_EXAMPLE, "ship", " Ship to  production ")).toMatchObject({
+    expect(
+      rewriteLabel(FLOW_EXAMPLE, "ship", " Ship to  production "),
+    ).toMatchObject({
       ok: true,
       replacement: null,
     });
@@ -41,6 +43,43 @@ describe("rewriteLabel", () => {
     expect(rewriteLabel(FLOW_EXAMPLE, "ship", "  ")).toMatchObject({
       ok: false,
       error: "invalid_value",
+    });
+  });
+});
+
+describe("removeLabel", () => {
+  it("removes the label's line and leaves a valid diagram", () => {
+    const source =
+      "export default () => <svg viewBox='0 0 1 1'>\n  <text data-claude-text-id='title'>Title</text>\n  <text data-claude-text-id='b'>Body</text>\n</svg>;\n";
+    const result = removeLabel(source, "title");
+    if (!result.ok) throw new Error(result.message);
+    expect(result.previous).toBe("Title");
+    expect(result.source).toBe(
+      "export default () => <svg viewBox='0 0 1 1'>\n  <text data-claude-text-id='b'>Body</text>\n</svg>;\n",
+    );
+    const analysis = analyzeWidget(result.source);
+    expect(analysis.diagnostics).toEqual([]);
+    expect(analysis.labels.map((label) => label.id)).toEqual(["b"]);
+  });
+
+  it("removes only the element when it shares its line", () => {
+    const source =
+      "export default () => <svg viewBox='0 0 1 1'><text data-claude-text-id='a'>A</text><text data-claude-text-id='b'>B</text></svg>;\n";
+    const result = removeLabel(source, "a");
+    if (!result.ok) throw new Error(result.message);
+    expect(result.source).toBe(
+      "export default () => <svg viewBox='0 0 1 1'><text data-claude-text-id='b'>B</text></svg>;\n",
+    );
+  });
+
+  it("removes a label in the flow example and refuses unknown ids", () => {
+    const result = removeLabel(FLOW_EXAMPLE, "ship");
+    if (!result.ok) throw new Error(result.message);
+    expect(analyzeWidget(result.source).diagnostics).toEqual([]);
+    expect(result.source).not.toContain("Ship to production");
+    expect(removeLabel(FLOW_EXAMPLE, "missing")).toMatchObject({
+      ok: false,
+      error: "unknown_text_id",
     });
   });
 });
