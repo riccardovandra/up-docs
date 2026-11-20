@@ -123,9 +123,10 @@ function aspectRatio(source: string): string {
 /**
  * A ```t3-widget diagram. It renders in a sandboxed frame once it nears the
  * viewport. Clicking a label opens an edit box over it; Enter or blur writes
- * the new words into the module (only that label's text changes), Escape
- * cancels. "Edit code" (or the caret entering the block) shows the source.
- * "Copy image" puts the drawing on the clipboard as a PNG.
+ * the new words into the module (only that label's text changes), an empty
+ * box removes the label, Escape cancels. "Edit code" (or the caret entering
+ * the block) shows the source. "Copy image" puts the drawing on the clipboard
+ * as a PNG.
  */
 export class WidgetView implements NodeView {
   readonly dom = document.createElement("div");
@@ -475,7 +476,10 @@ export class WidgetView implements NodeView {
     this.input.hidden = true;
     this.frame?.contentWindow?.postMessage({ type: "hide", textId: null }, "*");
     if (!commit || !engine) return;
-    const result = engine.rewriteLabel(this.source, editing.textId, this.input.value);
+    // Clearing every word removes the label (a title or caption) entirely.
+    const result = this.input.value.trim()
+      ? engine.rewriteLabel(this.source, editing.textId, this.input.value)
+      : engine.removeLabel(this.source, editing.textId);
     if (!result.ok || !result.replacement) return;
     const pos = this.getPos();
     if (typeof pos !== "number") return;

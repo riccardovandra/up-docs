@@ -52,6 +52,9 @@ export interface WidgetLabel {
   /** Source range of the JSXText holding the words. */
   readonly start: number;
   readonly end: number;
+  /** Source range of the whole <text> or <tspan> element. */
+  readonly elementStart: number;
+  readonly elementEnd: number;
   /** The nearest literal `data-claude-anchor` around the label. */
   readonly anchor: string | null;
 }
@@ -574,6 +577,8 @@ export function analyzeWidget(source: string): WidgetAnalysis {
           element: name as "text" | "tspan",
           start: words.start,
           end: words.end,
+          elementStart: element.start,
+          elementEnd: element.end,
           anchor,
         });
       }
