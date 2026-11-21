@@ -209,7 +209,6 @@ export function PageViewer(props: { readonly pageId: string }) {
         src={`${pagesApi.contentUrl(pageId, version)}${hash}`}
         sandbox={PAGE_SANDBOX}
         referrerPolicy="no-referrer"
-        allow="clipboard-write; fullscreen"
       />
 
       {renaming ? (

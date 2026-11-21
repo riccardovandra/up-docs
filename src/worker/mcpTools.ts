@@ -1137,7 +1137,7 @@ export async function pageUpload(
     next:
       tool === "create_page"
         ? "The page is private: only you see it. Hand over `url`, or paste `block` into a doc tab with edit_tab to show it there (that doc's readers see it too). share_doc {pageId, email, role} gives a person access."
-        : "Every doc that shows the page shows this version now, and older versions stay readable.",
+        : "Docs that show the page show this version when they are next opened or reloaded, and older versions stay readable.",
   };
 }
 

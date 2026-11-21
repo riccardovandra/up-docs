@@ -511,10 +511,11 @@ export async function moveProjectPages(
 
 /** Deletes the page and every version. Docs that embed it keep their block, which shows as missing. */
 export async function deletePage(db: D1Database, store: ImageStore, pageId: string): Promise<void> {
-  // Objects first: the D1 store's rows would cascade, but R2 objects would not.
-  await store.deletePrefix(pagesPrefix(pageId));
+  // The row first, so an upload still under way fails its version insert and
+  // removes its own object; then the objects, which R2 does not cascade.
   const row = await db.prepare("DELETE FROM pages WHERE id = ? RETURNING id").bind(pageId).first();
   if (!row) throw new NotFoundError("page");
+  await store.deletePrefix(pagesPrefix(pageId));
 }
 
 /** One version's HTML as text, or null when it is missing. */
