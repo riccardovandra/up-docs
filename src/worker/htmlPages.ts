@@ -419,6 +419,8 @@ export async function addPageVersion(
     readonly pageId: string;
     readonly html: ArrayBuffer;
     readonly note?: string | null | undefined;
+    /** A new title, set in the same write as the version. */
+    readonly title?: string | undefined;
     readonly createdBy: string;
     readonly now: number;
   },
@@ -439,10 +441,11 @@ export async function addPageVersion(
           .bind(input.pageId, version, bytes.byteLength, sha256, input.note ?? null, input.createdBy, input.now),
         db
           .prepare(
-            `UPDATE pages SET version = MAX(version, ?1), updated_at = ?2 WHERE id = ?3
+            `UPDATE pages SET version = MAX(version, ?1), updated_at = ?2, title = COALESCE(?4, title)
+             WHERE id = ?3
              RETURNING ${SUMMARY_COLUMNS}`,
           )
-          .bind(version, input.now, input.pageId),
+          .bind(version, input.now, input.pageId, input.title ?? null),
       ]);
       const row = updated?.results[0];
       if (!row) throw new NotFoundError("page");
@@ -451,7 +454,11 @@ export async function addPageVersion(
       if (cause instanceof NotFoundError) throw cause;
       // Someone else took this number: try the next one. Only our own object goes.
       const taken = await getVersion(db, input.pageId, version);
-      if (!taken) throw cause;
+      if (!taken) {
+        // Not a lost race (the page went, or the write failed): our object goes.
+        await store.delete(key);
+        throw cause;
+      }
       if (taken.sha256 !== sha256) await store.delete(key);
     }
   }

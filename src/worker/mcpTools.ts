@@ -1117,18 +1117,18 @@ export async function pageUpload(
     );
   } else {
     const pageId = pageIdArg(args);
+    const title = optionalString(args, "title", MAX_PAGE_TITLE_LENGTH);
     await pageWith(ctx, pageId, "edit");
     page = await loadPage(
       HtmlPages.addPageVersion(db, images, {
         pageId,
         html,
         note,
+        title,
         createdBy: ctx.principal.userId,
         now,
       }),
     );
-    const title = optionalString(args, "title", MAX_PAGE_TITLE_LENGTH);
-    if (title !== undefined) page = await HtmlPages.updatePage(db, { pageId, title, now });
   }
   return {
     ...pageSummary(ctx, page),
