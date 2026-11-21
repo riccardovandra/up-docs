@@ -1,11 +1,15 @@
 import type { ApiDeps } from "./api.ts";
 import * as Auth from "./auth.ts";
 import * as DrawioLinks from "./drawioLinks.ts";
+import * as PageLinks from "./pageLinks.ts";
 import { MAX_DIAGRAM_XML_BYTES } from "../shared/drawio.ts";
+import { MAX_PAGE_BYTES } from "../shared/htmlPages.ts";
 import {
   callTool,
   drawioDownload,
   McpToolError,
+  pageDownload,
+  pageUpload,
   ToolResultWithImages,
   TOOLS,
 } from "./mcpTools.ts";
@@ -56,6 +60,7 @@ Formats: call format_guide {topic} before you first write one. Malformed blocks 
 - Videos: \`\`\`t3-video (topic "video"). LinkedIn and X posts: \`\`\`t3-embed (topic "embed").
 - Comments: when asked to address comments, list_comments, make the edits, reply_comment in each thread with what changed, then resolve_comment (topic "comments": anchors on table cells and diagram labels).
 - Sheets (live shared spreadsheets): create_sheet, read_sheet, read_cells, edit_sheet (topic "sheet").
+- Pages (uploaded HTML prototypes, private until shared): prepare_page_upload, list_pages, read_page; \`\`\`t3-page shows one in a doc (topic "page").
 - Sharing: share_doc, list_members and unshare_doc (topic "sharing"). Pushing a tab to a Claude Doc: topic "claude_push".`;
 
 interface JsonRpcRequest {
@@ -254,6 +259,28 @@ function linkErrorStatus(error: unknown): number {
   return 400;
 }
 
+/** The tool context a one-time link acts in: the API token that asked for it. */
+async function linkContext(
+  deps: ApiDeps,
+  claim: { readonly userId: string; readonly apiTokenId: string; readonly agentName: string },
+) {
+  const tokenName = await deps.db
+    .prepare("SELECT name FROM api_tokens WHERE id = ?1")
+    .bind(claim.apiTokenId)
+    .first<{ name: string }>();
+  return {
+    deps,
+    origin: deps.publicOrigin,
+    agentName: claim.agentName,
+    principal: {
+      kind: "token" as const,
+      userId: claim.userId,
+      tokenId: claim.apiTokenId,
+      tokenName: tokenName?.name ?? claim.agentName,
+    },
+  };
+}
+
 /**
  * `PUT /api/diagram-uploads/:token` runs create_drawio or update_drawio with
  * the request body as `xml`; `GET /api/diagram-downloads/:token` returns a
@@ -290,21 +317,7 @@ export async function handleDrawioLink(
     now: deps.now(),
   });
   if (!claim) return linkJson(404, LINK_INVALID);
-  const tokenName = await deps.db
-    .prepare("SELECT name FROM api_tokens WHERE id = ?1")
-    .bind(claim.apiTokenId)
-    .first<{ name: string }>();
-  const ctx = {
-    deps,
-    origin: deps.publicOrigin,
-    agentName: claim.agentName,
-    principal: {
-      kind: "token" as const,
-      userId: claim.userId,
-      tokenId: claim.apiTokenId,
-      tokenName: tokenName?.name ?? claim.agentName,
-    },
-  };
+  const ctx = await linkContext(deps, claim);
   try {
     if (claim.tool === "download") {
       const file = await drawioDownload(ctx, String(claim.args.diagramId));
@@ -324,6 +337,73 @@ export async function handleDrawioLink(
     if (cause instanceof McpToolError) {
       // A version conflict can never succeed with the same link: keep it used.
       if (cause.detail.error !== "version_conflict") await claim.release();
+      return linkJson(linkErrorStatus(cause.detail.error), cause.detail);
+    }
+    await claim.release();
+    throw cause;
+  }
+}
+
+/**
+ * `PUT /api/page-uploads/:token` publishes the request body as a new page or
+ * the next version of one; `GET /api/page-downloads/:token` returns one
+ * version's HTML. Links come from prepare_page_upload and read_page
+ * {downloadLink: true}, and act as the API token that asked for them.
+ */
+export async function handlePageLink(
+  request: Request,
+  deps: ApiDeps,
+): Promise<Response | null> {
+  const { pathname } = new URL(request.url);
+  const match = /^\/api\/page-(uploads|downloads)\/([^/]+)$/.exec(pathname);
+  if (!match) return null;
+  const kind = match[1] === "uploads" ? "upload" : "download";
+  const method = request.method;
+  if (kind === "upload" ? method !== "PUT" && method !== "POST" : method !== "GET")
+    return linkJson(405, { error: "method_not_allowed" });
+
+  let html: ArrayBuffer | undefined;
+  if (kind === "upload") {
+    const tooLarge = () =>
+      linkJson(413, {
+        error: "too_large",
+        message: `The file is over the ${MAX_PAGE_BYTES / (1024 * 1024)} MB limit for a page.`,
+        maxBytes: MAX_PAGE_BYTES,
+      });
+    // Read before claiming, so a slow or broken upload does not burn the link.
+    if (Number(request.headers.get("Content-Length") ?? "0") > MAX_PAGE_BYTES) return tooLarge();
+    html = await request.arrayBuffer();
+    if (html.byteLength > MAX_PAGE_BYTES) return tooLarge();
+  }
+
+  const claim = await PageLinks.claimPageLink(deps.db, { token: match[2]!, kind, now: deps.now() });
+  if (!claim) return linkJson(404, LINK_INVALID);
+  const ctx = await linkContext(deps, claim);
+  try {
+    if (claim.tool === "download") {
+      const version = claim.args.version;
+      const file = await pageDownload(
+        ctx,
+        String(claim.args.pageId),
+        typeof version === "number" ? version : undefined,
+      );
+      return new Response(file.html, {
+        status: 200,
+        headers: {
+          // Plain text: a download is a file to save, never a page to run here.
+          "Content-Type": "text/plain; charset=utf-8",
+          "Content-Disposition": "attachment",
+          "X-Content-Type-Options": "nosniff",
+          "Cache-Control": "no-store",
+          "X-Page-Version": String(file.version),
+        },
+      });
+    }
+    const result = await pageUpload(ctx, claim.tool, claim.args, html!);
+    return linkJson(claim.tool === "create_page" ? 201 : 200, result);
+  } catch (cause) {
+    if (cause instanceof McpToolError) {
+      await claim.release();
       return linkJson(linkErrorStatus(cause.detail.error), cause.detail);
     }
     await claim.release();

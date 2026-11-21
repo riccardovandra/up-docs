@@ -133,12 +133,14 @@ const keyParts = (key: string) => key.split("/") as [string, string, string];
 /**
  * The table a key's bytes live in, and the column naming their owner. Doc
  * images go with their doc; a diagram's pictures (`diagrams/<diagramId>/<file>`)
- * go with their diagram.
+ * go with their diagram, and a page's HTML (`pages/<pageId>/<file>`) with its page.
  */
 const chunkTable = (key: string) =>
   key.startsWith("diagrams/")
     ? { table: "diagram_chunks", owner: "diagram_id" }
-    : { table: "image_chunks", owner: "doc_id" };
+    : key.startsWith("pages/")
+      ? { table: "page_chunks", owner: "page_id" }
+      : { table: "image_chunks", owner: "doc_id" };
 
 /**
  * Keeps images in `image_chunks` (and diagram pictures in `diagram_chunks`), for

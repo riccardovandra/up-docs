@@ -31,6 +31,7 @@ const KIND_WORDS: Readonly<Record<FolderItemKind, { readonly one: string; readon
   doc: { one: "doc", many: "docs" },
   diagram: { one: "diagram", many: "diagrams" },
   sheet: { one: "sheet", many: "sheets" },
+  page: { one: "page", many: "pages" },
 };
 
 const counted = (kind: FolderItemKind, count: number) =>

@@ -7,7 +7,7 @@ import { LibraryPage } from "./pages/LibraryPage.tsx";
 import { LoginPage } from "./pages/LoginPage.tsx";
 import { OpenTabsStrip } from "./OpenTabsStrip.tsx";
 import { useOpenTabs } from "./openTabs.ts";
-import { parseRoute, usePathname } from "./router.ts";
+import { isLibraryRoute, parseRoute, usePathname } from "./router.ts";
 
 // The editor and its renderers are most of the code; the home page loads without them.
 const loadDocPage = () => import("./pages/DocPage.tsx");
@@ -22,6 +22,8 @@ const DiagramPage = lazy(() =>
 );
 const loadSheetPage = () => import("./sheets/SheetPage.tsx");
 const SheetPage = lazy(() => loadSheetPage().then((module) => ({ default: module.SheetPage })));
+const loadPageViewer = () => import("./htmlPages/PageViewer.tsx");
+const PageViewer = lazy(() => loadPageViewer().then((module) => ({ default: module.PageViewer })));
 const loadSettingsPage = () => import("./pages/SettingsPage.tsx");
 const SettingsPage = lazy(() =>
   loadSettingsPage().then((module) => ({ default: module.SettingsPage })),
@@ -37,9 +39,11 @@ export function App() {
 
   useEffect(() => {
     // The first page's data and code load beside the sign-in check, not after it.
-    const first = parseRoute(window.location.pathname).name;
-    // The Diagrams and Sheets views are the library page too.
-    if (first === "library" || first === "diagrams" || first === "sheets") api.prefetchLibrary();
+    const firstRoute = parseRoute(window.location.pathname);
+    const first = firstRoute.name;
+    // The Diagrams, Sheets and Pages views are the library page too.
+    if (isLibraryRoute(firstRoute)) api.prefetchLibrary();
+    if (first === "page") void loadPageViewer();
     if (first === "doc") void loadDocPage();
     if (first === "diagram") void loadDiagramPage();
     if (first === "sheet") void loadSheetPage();
@@ -50,8 +54,7 @@ export function App() {
       .then(setMe, () => setMe(null))
       .finally(() => {
         // Only a home page mounting now may use it; a later one would show stale docs.
-        const now = parseRoute(window.location.pathname).name;
-        if (now !== "library" && now !== "diagrams" && now !== "sheets") api.dropLibraryPrefetch();
+        if (!isLibraryRoute(parseRoute(window.location.pathname))) api.dropLibraryPrefetch();
         setLoaded(true);
       });
   }, []);
@@ -68,9 +71,13 @@ export function App() {
         </div>
       ) : null}
       {openTabs.length > 0 ? <OpenTabsStrip tabs={openTabs} route={route} /> : null}
-      {route.name === "library" || route.name === "diagrams" || route.name === "sheets" ? (
+      {isLibraryRoute(route) ? (
         <LibraryPage
-          kind={route.name === "diagrams" ? "diagrams" : route.name === "sheets" ? "sheets" : "docs"}
+          kind={
+            route.name === "diagrams" || route.name === "sheets" || route.name === "pages"
+              ? route.name
+              : "docs"
+          }
         />
       ) : null}
       <Suspense fallback={null}>
@@ -82,6 +89,7 @@ export function App() {
         {route.name === "diagram" ? (
           <DiagramPage key={route.diagramId} diagramId={route.diagramId} />
         ) : null}
+        {route.name === "page" ? <PageViewer key={route.pageId} pageId={route.pageId} /> : null}
         {route.name === "sheet" ? (
           <SheetPage key={route.sheetId} sheetId={route.sheetId} tabId={route.tabId} />
         ) : null}

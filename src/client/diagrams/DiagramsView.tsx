@@ -25,6 +25,7 @@ import {
 import { useFolderItems, useFolders } from "../home/folders/folderState.tsx";
 import { NoProjectBadge, ProjectBadge } from "../home/ProjectSwitcher.tsx";
 import { navigate } from "../router.ts";
+import { PageIcon } from "../htmlPages/PageIcon.tsx";
 import { SheetIcon } from "../sheets/SheetIcon.tsx";
 import { DiagramEditor, type DiagramEditorTarget } from "./DiagramEditor.tsx";
 import { useDiagramChanges } from "./drawioEditing.ts";
@@ -34,9 +35,9 @@ import { diagramsApi } from "./diagramsApi.ts";
 import { NewDiagramDialog } from "./NewDiagramDialog.tsx";
 import "./diagrams.css";
 
-export type LibraryKind = "docs" | "diagrams" | "sheets";
+export type LibraryKind = "docs" | "diagrams" | "sheets" | "pages";
 
-/** The switch in the library's title row: the docs, the diagrams or the sheets. */
+/** The switch in the library's title row: the docs, the diagrams, the sheets or the pages. */
 export function LibraryKindSwitch(props: { readonly kind: LibraryKind }) {
   const option = (kind: LibraryKind, path: string, label: string, icon: ReactNode) => (
     <button
@@ -54,6 +55,7 @@ export function LibraryKindSwitch(props: { readonly kind: LibraryKind }) {
       {option("docs", "/", "Docs", <DocIcon size={16} />)}
       {option("diagrams", "/diagrams", "Diagrams", <DiagramIcon size={16} />)}
       {option("sheets", "/sheets", "Sheets", <SheetIcon size={16} />)}
+      {option("pages", "/pages", "Pages", <PageIcon size={16} />)}
     </div>
   );
 }

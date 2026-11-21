@@ -9,6 +9,7 @@ import "./diagrams.css";
 import { createExpandControl, type ExpandControl } from "./expandDiagram.ts";
 import { isDrawioLanguage } from "../../shared/drawio.ts";
 import { isEmbedLanguage } from "../../shared/embeds.ts";
+import { isPageLanguage } from "../../shared/htmlPages.ts";
 import { isVideoLanguage } from "../../shared/video.ts";
 import { widgetInfo } from "../../shared/widget/fence.ts";
 import { WidgetView } from "./widget/WidgetView.ts";
@@ -16,6 +17,7 @@ import { tableSelectionPlugin } from "./table/tableBlock.ts";
 import { isTableNode, TableView } from "./table/TableView.ts";
 import { DrawioView } from "./drawio/DrawioView.tsx";
 import { EmbedView } from "./embed/EmbedView.ts";
+import { PageBlockView } from "./page/PageBlockView.ts";
 import { VideoView } from "./video/VideoView.ts";
 
 let loadedCache: DiagramCache | null = null;
@@ -33,9 +35,11 @@ const isVideo = (node: ProseMirrorNode) => isVideoLanguage(node.attrs.language a
 const isEmbed = (node: ProseMirrorNode) => isEmbedLanguage(node.attrs.language as string | null);
 /** ```t3-drawio blocks: a Draw.io diagram from the library, linked by its id. */
 const isDrawio = (node: ProseMirrorNode) => isDrawioLanguage(node.attrs.language as string | null);
+/** ```t3-page blocks: an uploaded HTML page from the library, linked by its id. */
+const isPage = (node: ProseMirrorNode) => isPageLanguage(node.attrs.language as string | null);
 /** Blocks shown as something other than their source until the caret enters them. */
 const hidesSource = (node: ProseMirrorNode) =>
-  isDiagram(node) || isVideo(node) || isEmbed(node) || isDrawio(node);
+  isDiagram(node) || isVideo(node) || isEmbed(node) || isDrawio(node) || isPage(node);
 
 /**
  * A fence that opens and closes `text` safely. CommonMark ends a block at the
@@ -122,6 +126,7 @@ export const DocsCodeBlock = CodeBlock.extend({
       if (isVideo(props.node)) return new VideoView(props, editSource);
       if (isEmbed(props.node)) return new EmbedView(props, editSource);
       if (isDrawio(props.node)) return new DrawioView(props);
+      if (isPage(props.node)) return new PageBlockView(props, editSource);
       return isMermaid(props.node) ? new DiagramView(props) : new PlainCodeView(props);
     };
   },

@@ -7,6 +7,7 @@ import type { DocWithTabs, Tab } from "../shared/protocol.ts";
 import { richTablesToGfm } from "../shared/table.ts";
 import { drawioToMarkdown, type ExportDiagrams } from "../shared/drawioExport.ts";
 import { embedsToLinks } from "../shared/embeds.ts";
+import { pagesToLinks } from "../shared/htmlPages.ts";
 import { videosToLinks } from "../shared/video.ts";
 
 const MAX_HEADING_LEVEL = 6;
@@ -33,7 +34,7 @@ function section(
   const readable =
     origin === null
       ? tab.markdown
-      : embedsToLinks(videosToLinks(richTablesToGfm(tab.markdown), origin));
+      : pagesToLinks(embedsToLinks(videosToLinks(richTablesToGfm(tab.markdown), origin)), origin);
   const body = (
     origin === null || diagrams === null ? readable : drawioToMarkdown(readable, origin, diagrams)
   ).trim();

@@ -2,10 +2,10 @@
 // diagrams and sheets. Wire types for `/api/folders`, and the tree helpers the
 // home page uses.
 
-/** The three kinds of item a folder holds. */
-export type FolderItemKind = "doc" | "diagram" | "sheet";
+/** The kinds of item a folder holds. */
+export type FolderItemKind = "doc" | "diagram" | "sheet" | "page";
 
-export const FOLDER_ITEM_KINDS: ReadonlyArray<FolderItemKind> = ["doc", "diagram", "sheet"];
+export const FOLDER_ITEM_KINDS: ReadonlyArray<FolderItemKind> = ["doc", "diagram", "sheet", "page"];
 
 export const isFolderItemKind = (value: unknown): value is FolderItemKind =>
   typeof value === "string" && (FOLDER_ITEM_KINDS as ReadonlyArray<string>).includes(value);

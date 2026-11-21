@@ -1,6 +1,19 @@
 // The agent tools behind `/mcp`. Reads go through `docs.ts`; every write to an
 // existing doc goes through `deps.rooms` so open editors receive it live.
 
+import * as HtmlPages from "./htmlPages.ts";
+import * as PageLinks from "./pageLinks.ts";
+import {
+  checkPagesIn,
+  isPageId,
+  MAX_PAGE_BYTES,
+  MAX_PAGE_NOTE_LENGTH,
+  MAX_PAGE_TITLE_LENGTH,
+  pageBlock,
+  pageIdsIn,
+  pageUrl,
+  type PageSummary,
+} from "../shared/htmlPages.ts";
 import {
   DOC_ROLES,
   emailDeliveryNotice,
@@ -372,12 +385,44 @@ function checkMediaBlocks(markdown: string, previous?: string): void {
         "```t3-embed\n<https link to a LinkedIn post, X post or X article>\nOptional caption\n```",
     });
   }
+  const pageProblem = checkPagesIn(markdown, previous);
+  if (pageProblem) {
+    fail("page_invalid", `${pageProblem} Nothing was written.`, {
+      format: "```t3-page\n<page id from list_pages or prepare_page_upload>\nheight: <px, optional>\nOptional caption\n```",
+    });
+  }
   const drawioProblem = checkDrawioIn(markdown, previous);
   if (drawioProblem) {
     fail("drawio_invalid", `${drawioProblem} Nothing was written.`, {
       format:
         "```t3-drawio\n<diagram id from list_drawio or create_drawio>\npage: <page name, optional>\npart: <part name, optional>\nOptional caption\n```",
     });
+  }
+}
+
+/**
+ * Rejects markdown that embeds a page the tab did not embed before, unless the
+ * token user can see that page.
+ */
+async function checkPageLinks(ctx: ToolContext, markdown: string, previous: string): Promise<void> {
+  const embedded = new Set(pageIdsIn(previous));
+  const added = pageIdsIn(markdown).filter((id) => !embedded.has(id));
+  if (added.length > MAX_NEW_DRAWIO_LINKS) {
+    fail(
+      "too_many_pages",
+      `One write can embed at most ${MAX_NEW_DRAWIO_LINKS} new pages. Nothing was written; add them over several writes.`,
+    );
+  }
+  for (const pageId of added) {
+    try {
+      await HtmlPages.requirePage(ctx.deps.db, { pageId, userId: ctx.principal.userId, need: "view" });
+    } catch (cause) {
+      if (!(cause instanceof Docs.NotFoundError)) throw cause;
+      fail(
+        "page_not_found",
+        `The t3-page block embeds page "${pageId}", which does not exist or is not one you can see. Nothing was written. The block's first line must be a page id from list_pages or prepare_page_upload.`,
+      );
+    }
   }
 }
 
@@ -390,6 +435,7 @@ async function checkDrawioLinks(
   markdown: string,
   previous = "",
 ): Promise<void> {
+  await checkPageLinks(ctx, markdown, previous);
   const linked = new Set(drawioDiagramIds(previous));
   const added = drawioDiagramIds(markdown).filter((id) => !linked.has(id));
   if (added.length > MAX_NEW_DRAWIO_LINKS) {
@@ -656,13 +702,26 @@ const scopedLibrary = (ctx: ToolContext) =>
 async function shareTarget(
   ctx: ToolContext,
   args: Args,
-): Promise<{ readonly scope: Access.MemberScope; readonly role: DocRole; readonly noun: "doc" | "diagram" }> {
-  if ((args.docId === undefined) === (args.diagramId === undefined)) {
-    fail("invalid_argument", 'Pass "docId" for a doc, or "diagramId" for a Draw.io diagram (one of them).');
+): Promise<{
+  readonly scope: Access.MemberScope;
+  readonly role: DocRole;
+  readonly noun: "doc" | "diagram" | "page";
+}> {
+  const given = [args.docId, args.diagramId, args.pageId].filter((value) => value !== undefined);
+  if (given.length !== 1) {
+    fail(
+      "invalid_argument",
+      'Pass "docId" for a doc, "diagramId" for a Draw.io diagram, or "pageId" for a page (one of them).',
+    );
   }
   if (args.docId !== undefined) {
     const docId = requireString(args, "docId");
     return { scope: { kind: "doc", id: docId }, role: await need(ctx, docId, "viewer"), noun: "doc" };
+  }
+  if (args.pageId !== undefined) {
+    const { page, access } = await pageWith(ctx, pageIdArg(args), "view");
+    if (!access.member) fail("not_found", PAGE_NOT_FOUND);
+    return { scope: Access.pageScope(page.id), role: access.role, noun: "page" };
   }
   const { diagram, access } = await drawioWith(ctx, drawioIdArg(args), "view");
   if (!access.member) {
@@ -949,6 +1008,148 @@ async function drawioWith(
     }
     throw cause;
   }
+}
+
+const PAGE_NOT_FOUND =
+  "No page with that id that you can see. list_pages lists the ones you are on.";
+/** read_page returns HTML inline up to this size; larger pages come by link. */
+const MAX_INLINE_PAGE_BYTES = 100 * 1024;
+
+/** The `pageId` argument: a page's id, or a link to it (<origin>/pages/<id>). */
+function pageIdArg(args: Args): string {
+  const value = requireString(args, "pageId", 2000);
+  if (isPageId(value)) return value;
+  const linked = /\/pages\/([A-Za-z0-9_-]{1,64})(?:[/?#]|$)/.exec(value)?.[1];
+  return (
+    linked ??
+    fail("invalid_argument", '"pageId" must be a page\'s id, or its link (<origin>/pages/<id>).')
+  );
+}
+
+/** A page the token user's role on it allows `need` for. */
+async function pageWith(ctx: ToolContext, pageId: string, need: HtmlPages.PageNeed) {
+  try {
+    return await HtmlPages.requirePage(ctx.deps.db, {
+      pageId,
+      userId: ctx.principal.userId,
+      need,
+    });
+  } catch (cause) {
+    if (cause instanceof Docs.NotFoundError) return fail("not_found", PAGE_NOT_FOUND);
+    if (cause instanceof HtmlPages.PageForbiddenError) {
+      return fail(
+        "forbidden",
+        `This needs the ${cause.required} role on the page, and you have less. A page owner can give you more with share_doc {pageId}.`,
+        { required: cause.required },
+      );
+    }
+    throw cause;
+  }
+}
+
+const pageSummary = (ctx: ToolContext, page: PageSummary & { readonly role?: DocRole }) => ({
+  pageId: page.id,
+  title: page.title,
+  projectId: page.projectId,
+  version: page.version,
+  updatedAt: new Date(page.updatedAt).toISOString(),
+  url: pageUrl(ctx.origin, page.id),
+  ...(page.role ? { role: page.role } : {}),
+});
+
+/** A one-time page link for the agent's API token; the link acts as that token. */
+async function pageLinkFor(ctx: ToolContext, tool: PageLinks.PageLinkTool, args: Args) {
+  const { principal } = ctx;
+  if (principal.kind !== "token") {
+    return fail("forbidden", "Page links are for agents signed in with an API token.");
+  }
+  const { token, expiresAt } = await PageLinks.createPageLink(ctx.deps.db, {
+    tool,
+    userId: principal.userId,
+    apiTokenId: principal.tokenId,
+    agentName: ctx.agentName,
+    args,
+    now: ctx.deps.now(),
+  });
+  return { token, expiresAt: new Date(expiresAt).toISOString() };
+}
+
+/** Page errors as tool errors, with nothing saved. */
+async function loadPage<T>(work: Promise<T>): Promise<T> {
+  try {
+    return await work;
+  } catch (cause) {
+    if (cause instanceof HtmlPages.InvalidPageError) {
+      return fail(cause.code, `${cause.message} Nothing was saved.`, { maxBytes: MAX_PAGE_BYTES });
+    }
+    if (cause instanceof Docs.NotFoundError) return fail("not_found", PAGE_NOT_FOUND);
+    throw cause;
+  }
+}
+
+/**
+ * What a page upload link runs with the file it receives: a new page
+ * (create_page) or the next version of one (update_page). The checks are
+ * those of the link's own prepare_page_upload call, made again now.
+ */
+export async function pageUpload(
+  ctx: ToolContext,
+  tool: "create_page" | "update_page",
+  args: Args,
+  html: ArrayBuffer,
+): Promise<object> {
+  const { db, images } = ctx.deps;
+  const now = ctx.deps.now();
+  const note = optionalString(args, "note", MAX_PAGE_NOTE_LENGTH) ?? null;
+  let page: PageSummary;
+  if (tool === "create_page") {
+    const title = requireString(args, "title", MAX_PAGE_TITLE_LENGTH);
+    const projectId = await targetProject(ctx, args);
+    page = await loadPage(
+      HtmlPages.createPage(db, images, {
+        projectId,
+        title,
+        html,
+        note,
+        createdBy: ctx.principal.userId,
+        now,
+      }),
+    );
+  } else {
+    const pageId = pageIdArg(args);
+    await pageWith(ctx, pageId, "edit");
+    page = await loadPage(
+      HtmlPages.addPageVersion(db, images, {
+        pageId,
+        html,
+        note,
+        createdBy: ctx.principal.userId,
+        now,
+      }),
+    );
+    const title = optionalString(args, "title", MAX_PAGE_TITLE_LENGTH);
+    if (title !== undefined) page = await HtmlPages.updatePage(db, { pageId, title, now });
+  }
+  return {
+    ...pageSummary(ctx, page),
+    created: tool === "create_page",
+    block: pageBlock(page.id),
+    next:
+      tool === "create_page"
+        ? "The page is private: only you see it. Hand over `url`, or paste `block` into a doc tab with edit_tab to show it there (that doc's readers see it too). share_doc {pageId, email, role} gives a person access."
+        : "Every doc that shows the page shows this version now, and older versions stay readable.",
+  };
+}
+
+/** One version's HTML, for a page download link: the current version when none is named. */
+export async function pageDownload(ctx: ToolContext, pageId: string, version?: number) {
+  const { page } = await pageWith(ctx, pageId, "view");
+  const read = await HtmlPages.readPageHtml(ctx.deps.db, ctx.deps.images, {
+    pageId,
+    version: version ?? page.version,
+  });
+  if (!read) return fail("not_found", "That version of the page has no file.");
+  return { html: read.html, version: read.version.version };
 }
 
 const diagramReplySummary = (comment: DiagramComment) => ({
@@ -1767,24 +1968,26 @@ export const TOOLS = [
   {
     name: "list_members",
     description:
-      "List the people who can open a doc, or a Draw.io diagram (diagramId instead of docId), and their roles (owner, editor, commenter, viewer). Pending people were invited but have not signed in yet.",
+      "List the people who can open a doc, a Draw.io diagram (diagramId) or a page (pageId), and their roles (owner, editor, commenter, viewer). Pending people were invited but have not signed in yet.",
     inputSchema: {
       type: "object",
       properties: {
         docId: { type: "string" },
         diagramId: { type: "string", description: "A Draw.io diagram's id or link, instead of docId." },
+        pageId: { type: "string", description: "A page's id or link, instead of docId." },
       },
     },
   },
   {
     name: "share_doc",
     description:
-      "Give a person access to a doc, or to a Draw.io diagram (diagramId instead of docId), by email, or change their role. Docs and diagrams are private until shared. On a diagram, editors change the drawing, commenters comment and viewers see it. New people get an email with the link when email is set up; the result says if none was sent. Owner only.",
+      "Give a person access to a doc, a Draw.io diagram (diagramId) or a page (pageId), by email, or change their role. Docs, diagrams and pages are private until shared. On a diagram, editors change the drawing, commenters comment and viewers see it; on a page, editors upload new versions and everyone else views it. New people get an email with the link when email is set up; the result says if none was sent. Owner only.",
     inputSchema: {
       type: "object",
       properties: {
         docId: { type: "string" },
         diagramId: { type: "string", description: "A Draw.io diagram's id or link, instead of docId." },
+        pageId: { type: "string", description: "A page's id or link, instead of docId." },
         email: { type: "string" },
         role: { type: "string", enum: DOC_ROLES },
       },
@@ -1794,12 +1997,13 @@ export const TOOLS = [
   {
     name: "unshare_doc",
     description:
-      "Remove a person's access to a doc, or to a Draw.io diagram (diagramId instead of docId). Owner only, except that anyone may remove themselves; each keeps at least one owner.",
+      "Remove a person's access to a doc, a Draw.io diagram (diagramId) or a page (pageId). Owner only, except that anyone may remove themselves; each keeps at least one owner.",
     inputSchema: {
       type: "object",
       properties: {
         docId: { type: "string" },
         diagramId: { type: "string", description: "A Draw.io diagram's id or link, instead of docId." },
+        pageId: { type: "string", description: "A page's id or link, instead of docId." },
         email: { type: "string" },
       },
       required: ["email"],
@@ -1950,6 +2154,61 @@ export const TOOLS = [
           type: "boolean",
           description: "New diagrams only, as in create_drawio.",
         },
+      },
+    },
+  },
+  {
+    name: "list_pages",
+    description:
+      'List the pages you are on: uploaded HTML files (interactive prototypes) in the library, most recently changed first, each with your role, its current version and the docs that show it. Narrow to one project with projectId or projectKey, or pass noProject: true. format_guide {topic: "page"} covers publishing one.',
+    inputSchema: {
+      type: "object",
+      properties: {
+        projectId: { type: "string" },
+        projectKey: { type: "string" },
+        noProject: { type: "boolean" },
+      },
+    },
+  },
+  {
+    name: "read_page",
+    description:
+      "Read one page by its id (the first line of a ```t3-page block) or its link (<origin>/pages/<id>): title, project, link, `block` to paste into a doc, every version (newest first, with its size and note) and the docs that show it. includeHtml: true adds the HTML of the current version, or of `version`, when it is at most 100 KB; for a larger file, or to edit it with a shell, pass downloadLink: true for a one-time link that saves it with curl. Then send the changed file back with prepare_page_upload {pageId}.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        pageId: { type: "string", description: "The page's id or link." },
+        version: { type: "integer", description: "An older version; the current one when left out." },
+        includeHtml: { type: "boolean" },
+        downloadLink: { type: "boolean" },
+      },
+      required: ["pageId"],
+    },
+  },
+  {
+    name: "prepare_page_upload",
+    description:
+      'Get a one-time link to publish an HTML file from your machine as a page, so you never type the file into a tool call. Without pageId it creates a new page (title, and projectKey/projectName or projectId; omit both for no project); with pageId the file becomes that page\'s next version, and earlier versions stay readable. Send the file with the returned curl command; the reply is the page as JSON, or its error with nothing saved, and a refused file leaves the link usable. The link works for 10 minutes. One self-contained UTF-8 HTML file up to 5 MB; it runs sandboxed, so no localStorage or cookies (format_guide {topic: "page"}). A new page is private: share it with share_doc {pageId}.',
+    inputSchema: {
+      type: "object",
+      properties: {
+        pageId: {
+          type: "string",
+          description: "The page to add a version to, by id or link. Leave out to create a new page.",
+        },
+        title: {
+          type: "string",
+          maxLength: MAX_PAGE_TITLE_LENGTH,
+          description: "Required for a new page; optional rename for an existing one.",
+        },
+        note: {
+          type: "string",
+          maxLength: MAX_PAGE_NOTE_LENGTH,
+          description: "What changed in this version, shown in the version list.",
+        },
+        projectKey: { type: "string" },
+        projectName: { type: "string" },
+        projectId: { type: "string" },
       },
     },
   },
@@ -3006,7 +3265,9 @@ const handlers: Record<
             notice,
             ...(target.scope.kind === "doc"
               ? { docUrl: `${ctx.origin}/d/${target.scope.id}` }
-              : { diagramUrl: drawioUrl(ctx, target.scope.id) }),
+              : target.scope.kind === "page"
+                ? { pageUrl: pageUrl(ctx.origin, target.scope.id) }
+                : { diagramUrl: drawioUrl(ctx, target.scope.id) }),
           }
         : {}),
     };
@@ -3379,6 +3640,120 @@ const handlers: Record<
       maxBytes: MAX_DIAGRAM_XML_BYTES,
       curl: `curl -sS -X PUT -H 'Content-Type: application/xml' --data-binary @<file.drawio> '${uploadUrl}'`,
       next: `Send the file with the curl command. The reply is what ${tool} returns (HTTP 200 or 201), or its error as JSON with nothing saved; a refused file leaves the link usable until it expires.`,
+    };
+  },
+
+  list_pages: async (args, ctx) => {
+    const { db } = ctx.deps;
+    const { userId } = ctx.principal;
+    const projectId =
+      args.noProject === true
+        ? null
+        : args.projectId != null || args.projectKey != null
+          ? (await existingProject(ctx, args)).id
+          : undefined;
+    const [pages, uses] = await Promise.all([
+      HtmlPages.listPages(db, { userId, projectId }),
+      HtmlPages.pageUsesById(db, userId),
+    ]);
+    return {
+      pages: pages.map((page) => ({
+        ...pageSummary(ctx, page),
+        bytes: page.bytes,
+        usedIn: (uses.get(page.id) ?? []).map((use) => drawioUse(ctx, use)),
+      })),
+    };
+  },
+
+  read_page: async (args, ctx) => {
+    const pageId = pageIdArg(args);
+    const { page, access } = await pageWith(ctx, pageId, "view");
+    const { version: asked } = args;
+    if (asked != null && (typeof asked !== "number" || !Number.isInteger(asked))) {
+      fail("invalid_argument", '"version" must be an integer from the page\'s versions.');
+    }
+    const version = (asked as number | undefined) ?? page.version;
+    const view = await HtmlPages.pageView(ctx.deps.db, page, access);
+    const chosen = view.versions.find((entry) => entry.version === version);
+    if (!chosen) {
+      fail("not_found", `The page has no version ${version}; its versions run from 1 to ${page.version}.`);
+    }
+    const [project, usage] = await Promise.all([
+      drawioProject(ctx, page.projectId),
+      HtmlPages.pageUsage(ctx.deps.db, { pageId, userId: ctx.principal.userId }),
+    ]);
+    let html: object = {};
+    if (args.includeHtml === true) {
+      if (chosen.bytes > MAX_INLINE_PAGE_BYTES) {
+        html = {
+          htmlNote: `Version ${version} is ${chosen.bytes} bytes, over the ${MAX_INLINE_PAGE_BYTES / 1024} KB read_page returns inline. Pass downloadLink: true to save it with curl.`,
+        };
+      } else {
+        const read = await pageDownload(ctx, pageId, version);
+        html = { html: read.html };
+      }
+    }
+    const download =
+      args.downloadLink === true ? await pageLinkFor(ctx, "download", { pageId, version }) : null;
+    return {
+      ...pageSummary(ctx, page),
+      role: access.role,
+      canEdit: view.canEdit,
+      project,
+      block: pageBlock(page.id),
+      versions: view.versions.map((entry) => ({
+        version: entry.version,
+        bytes: entry.bytes,
+        note: entry.note,
+        createdAt: new Date(entry.createdAt).toISOString(),
+      })),
+      usedIn: usage.uses.map((use) => drawioUse(ctx, use)),
+      ...(view.canEdit && usage.otherDocs > 0 ? { usedInOtherDocs: usage.otherDocs } : {}),
+      ...html,
+      ...(download
+        ? {
+            download: {
+              url: `${ctx.origin}/api/page-downloads/${download.token}`,
+              expiresAt: download.expiresAt,
+              curl: `curl -sS -f -o <file.html> '${ctx.origin}/api/page-downloads/${download.token}'`,
+              next: `Run the curl command to save version ${version}. The link works once.${view.canEdit ? " To publish a changed file, use prepare_page_upload {pageId}." : ""}`,
+            },
+          }
+        : {}),
+    };
+  },
+
+  prepare_page_upload: async (args, ctx) => {
+    let tool: "create_page" | "update_page";
+    const stored: Args = {};
+    const note = optionalString(args, "note", MAX_PAGE_NOTE_LENGTH);
+    if (note !== undefined) stored.note = note;
+    if (args.pageId != null) {
+      const pageId = pageIdArg(args);
+      await pageWith(ctx, pageId, "edit");
+      const title = optionalString(args, "title", MAX_PAGE_TITLE_LENGTH);
+      tool = "update_page";
+      stored.pageId = pageId;
+      if (title !== undefined) stored.title = title;
+    } else {
+      stored.title = requireString(args, "title", MAX_PAGE_TITLE_LENGTH);
+      // Checked now so a wrong project fails here, not after the upload.
+      await targetProject(ctx, args);
+      tool = "create_page";
+      for (const key of ["projectKey", "projectName", "projectId"]) {
+        if (args[key] != null) stored[key] = args[key];
+      }
+    }
+    const link = await pageLinkFor(ctx, tool, stored);
+    const uploadUrl = `${ctx.origin}/api/page-uploads/${link.token}`;
+    return {
+      uploadUrl,
+      method: "PUT",
+      runs: tool === "create_page" ? "a new page" : "the next version of the page",
+      expiresAt: link.expiresAt,
+      maxBytes: MAX_PAGE_BYTES,
+      curl: `curl -sS -X PUT -H 'Content-Type: text/html; charset=utf-8' --data-binary @<file.html> '${uploadUrl}'`,
+      next: "Send the file with the curl command. The reply is the page as JSON (HTTP 201 or 200), with its url and block, or its error with nothing saved; a refused file leaves the link usable until it expires.",
     };
   },
 

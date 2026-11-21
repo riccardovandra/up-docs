@@ -11,6 +11,10 @@ export type Route =
   | { readonly name: "sheets" }
   /** One sheet's own page, optionally on one tab. */
   | { readonly name: "sheet"; readonly sheetId: string; readonly tabId: string | null }
+  /** The library's Pages view: uploaded HTML prototypes. */
+  | { readonly name: "pages" }
+  /** One page's own view. */
+  | { readonly name: "page"; readonly pageId: string }
   | { readonly name: "doc"; readonly docId: string; readonly tabId: string | null }
   | { readonly name: "settings" }
   /** A T3 Code project file, by its workspace-relative path (`/local/docs/plan.md`). */
@@ -23,6 +27,7 @@ export function parseRoute(pathname: string): Route {
   if (first === "diagrams") {
     return docId ? { name: "diagram", diagramId: docId } : { name: "diagrams" };
   }
+  if (first === "pages") return docId ? { name: "page", pageId: docId } : { name: "pages" };
   if (first === "sheets") {
     return docId
       ? { name: "sheet", sheetId: docId, tabId: tabId ? decodeURIComponent(tabId) : null }
@@ -49,6 +54,13 @@ export function navigate(path: string, options: { replace?: boolean } = {}): voi
   else window.history.pushState(null, "", path);
   for (const listener of listeners) listener();
 }
+
+/** The home page's views: one library page shows docs, diagrams, sheets or pages. */
+export const isLibraryRoute = (route: Route) =>
+  route.name === "library" ||
+  route.name === "diagrams" ||
+  route.name === "sheets" ||
+  route.name === "pages";
 
 export function usePathname(): string {
   return useSyncExternalStore(subscribePathname, () => window.location.pathname);

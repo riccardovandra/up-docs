@@ -87,14 +87,14 @@ let libraryPrefetch: Promise<HomeLibrary> | null = null;
 /** Identifies this page's writes, so the DocRoom echo of our own save is recognisable. */
 export const clientId = crypto.randomUUID();
 
-/** What a share panel lists people for: a doc or a Draw.io diagram. */
+/** What a share panel lists people for: a doc, a Draw.io diagram or a page. */
 export interface ShareTarget {
-  readonly kind: "doc" | "diagram";
+  readonly kind: "doc" | "diagram" | "page";
   readonly id: string;
 }
 
 const membersPath = (target: ShareTarget) =>
-  `/api/${target.kind === "doc" ? "docs" : "diagrams"}/${target.id}/members`;
+  `/api/${target.kind === "doc" ? "docs" : target.kind === "page" ? "pages" : "diagrams"}/${target.id}/members`;
 
 export const api = {
   /** The doc's public link, or null. Owners only, from a browser session. */

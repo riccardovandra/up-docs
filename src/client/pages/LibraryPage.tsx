@@ -80,6 +80,7 @@ import {
   type FolderItem,
 } from "../home/folders/folderState.tsx";
 import { SheetsView } from "../sheets/SheetsView.tsx";
+import { PagesView } from "../htmlPages/PagesView.tsx";
 import "../home/home.css";
 
 const SEARCH_DEBOUNCE_MS = 250;
@@ -388,9 +389,18 @@ export function LibraryPage(props: { readonly kind?: LibraryKind }) {
     </div>
   );
 
-  const folderKind = kind === "docs" ? "doc" : kind === "diagrams" ? "diagram" : "sheet";
+  const folderKind =
+    kind === "docs" ? "doc" : kind === "diagrams" ? "diagram" : kind === "pages" ? "page" : "sheet";
   const body =
-    kind === "sheets" ? (
+    kind === "pages" ? (
+      <PagesView
+        scope={scope}
+        scopeLabel={scope.kind === "all" ? null : scopeLabel}
+        projects={library.projects}
+        createIn={scopeProject || createsProject ? scopeLabel : "No project"}
+        resolveProjectId={createInProject}
+      />
+    ) : kind === "sheets" ? (
       <SheetsView
         scope={scope}
         scopeLabel={scope.kind === "all" ? null : scopeLabel}
