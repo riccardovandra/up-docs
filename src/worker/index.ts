@@ -10,7 +10,7 @@ import { reviveError, type TabWriteResult } from "./docs.ts";
 import { resolvePublicOrigin, type Env } from "./env.ts";
 import { withEmbedPolicy } from "./embed.ts";
 import { d1ImageStore, r2ImageStore } from "./images.ts";
-import { handleDrawioLink, handleMcp } from "./mcp.ts";
+import { handleDrawioLink, handleMcp, handlePageLink } from "./mcp.ts";
 import { PUBLIC_HEADERS } from "./publicLinks.ts";
 import { r2VideoStore } from "./videos.ts";
 import { emailEnabled, isLocalRequest, sendDocInvite, sendLoginCode } from "./email.ts";
@@ -74,6 +74,7 @@ function apiDeps(request: Request, env: Env, ctx: ExecutionContext): ApiDeps {
     sendDocInvite: (invite) => sendDocInvite(env, local, invite),
     waitUntil: (promise) => ctx.waitUntil(promise),
     now: () => Date.now(),
+    frameAncestors: parseEmbedOrigins(env.FRAME_ANCESTORS),
   };
 }
 
@@ -89,7 +90,11 @@ export default {
     if (pathname === "/api" || pathname.startsWith("/api/")) {
       const deps = apiDeps(request, env, ctx);
       // Before the API's own auth: the one-time link is the credential.
-      return (await handleDrawioLink(request, deps)) ?? handleApi(request, deps);
+      return (
+        (await handleDrawioLink(request, deps)) ??
+        (await handlePageLink(request, deps)) ??
+        handleApi(request, deps)
+      );
     }
     if (pathname === "/mcp" || pathname.startsWith("/mcp/")) {
       return handleMcp(request, apiDeps(request, env, ctx));

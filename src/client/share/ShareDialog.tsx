@@ -7,6 +7,7 @@ import {
   type UserSummary,
 } from "../../shared/access.ts";
 import { diagramPath } from "../../shared/drawio.ts";
+import { pagePath } from "../../shared/htmlPages.ts";
 import { PUBLIC_ORIGIN_META } from "../../shared/embed.ts";
 import { api, ApiError, type ShareTarget } from "../api.ts";
 import { useMe } from "../me.ts";
@@ -37,7 +38,9 @@ export function canonicalDocUrl(docId: string, tabId?: string | null): string {
 
 /** The public URL of what the panel shares. */
 const targetUrl = (target: ShareTarget) =>
-  target.kind === "doc" ? canonicalDocUrl(target.id) : `${publicOrigin()}${diagramPath(target.id)}`;
+  target.kind === "doc"
+    ? canonicalDocUrl(target.id)
+    : `${publicOrigin()}${target.kind === "page" ? pagePath(target.id) : diagramPath(target.id)}`;
 
 const errorCode = (cause: unknown) => (cause instanceof ApiError ? cause.body.error : undefined);
 
@@ -195,6 +198,7 @@ export function ShareDialog(props: {
       if (leaving) {
         // Without access the page cannot load anymore.
         if (isDoc) leaveDoc(target.id);
+        else if (kind === "page") navigate("/pages", { replace: true });
         else {
           forgetTab(`diagram:${target.id}`);
           navigate("/diagrams", { replace: true });
@@ -411,7 +415,7 @@ export function ShareDialog(props: {
                     className="button secondary small"
                     onClick={() => void copyLink()}
                   >
-                    {copied ? "Copied" : isDoc ? "Copy doc link" : "Copy diagram link"}
+                    {copied ? "Copied" : isDoc ? "Copy doc link" : kind === "page" ? "Copy page link" : "Copy diagram link"}
                   </button>
                 </div>
               ) : null}

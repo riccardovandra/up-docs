@@ -9,7 +9,7 @@ import {
   type OpenTab,
 } from "./openTabs.ts";
 import { SheetIcon } from "./sheets/SheetIcon.tsx";
-import { navigate, parseRoute, subscribePathname, type Route } from "./router.ts";
+import { isLibraryRoute, navigate, parseRoute, subscribePathname, type Route } from "./router.ts";
 
 const follow = (path: string) => (event: MouseEvent) => {
   if (event.metaKey || event.ctrlKey) return;
@@ -37,10 +37,7 @@ export function OpenTabsStrip(props: {
         className="open-tab open-tab-home"
         aria-label="UP Docs home"
         aria-current={
-          props.route.name === "library" ||
-          props.route.name === "diagrams" ||
-          props.route.name === "sheets"
-            ? "page"
+          isLibraryRoute(props.route) ? "page"
             : undefined
         }
         onClick={follow("/")}

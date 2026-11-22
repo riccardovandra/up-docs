@@ -63,6 +63,15 @@ import { diagramUrl, MAX_DIAGRAM_COMMENT_LENGTH } from "../shared/diagramComment
 import { readDrawioLayout } from "../shared/drawioModel.ts";
 import * as PublicLinks from "./publicLinks.ts";
 import * as Folders from "./folders.ts";
+import * as HtmlPages from "./htmlPages.ts";
+import {
+  DEFAULT_PAGE_TITLE,
+  isPageId,
+  MAX_PAGE_BYTES,
+  MAX_PAGE_NOTE_LENGTH,
+  MAX_PAGE_TITLE_LENGTH,
+  pageUrl,
+} from "../shared/htmlPages.ts";
 import { isFolderItemKind } from "../shared/folders.ts";
 import * as Sheets from "./sheets.ts";
 import {
@@ -176,6 +185,11 @@ export interface ApiDeps {
   readonly sendDocInvite: (invite: DocInvite) => Promise<EmailDelivery>;
   readonly waitUntil: (promise: Promise<unknown>) => void;
   readonly now: () => number;
+  /**
+   * The origins allowed to frame the app (FRAME_ANCESTORS), which may also
+   * frame a page's sandboxed HTML around it. Empty when unset.
+   */
+  readonly frameAncestors?: ReadonlyArray<string>;
 }
 
 const json = (body: unknown, status = 200, headers: HeadersInit = {}) =>
@@ -250,9 +264,12 @@ function isSameOriginWrite(request: Request, deps: ApiDeps): boolean {
   if (origin !== null && !isOwnOrigin(origin, request, deps)) return false;
   if (request.method !== "POST") return true;
   const type = request.headers.get("Content-Type") ?? "";
-  // Image uploads send raw bytes; image types are not CORS-safelisted either.
+  // Image and page uploads send raw bytes; image types and text/html are not
+  // CORS-safelisted either.
   return (
-    type.startsWith("application/json") || Object.hasOwn(IMAGE_TYPES, type)
+    type.startsWith("application/json") ||
+    Object.hasOwn(IMAGE_TYPES, type) ||
+    type.split(";")[0]!.trim() === "text/html"
   );
 }
 
@@ -357,6 +374,7 @@ async function handleProject(
       await deps.rooms.setDocProject(docId, { projectId, origin });
     await Diagrams.moveProjectDiagrams(deps.db, { from: id, to: projectId });
     await Sheets.moveProjectSheets(deps.db, { from: id, to: projectId });
+    await HtmlPages.moveProjectPages(deps.db, { from: id, to: projectId });
     return json({ moved: docIds.length });
   }
   // `{themeId}`: the default theme of the project's diagrams; null falls back to Neutral.
@@ -1003,6 +1021,24 @@ export async function handleApi(
       if (response) return response;
     }
 
+    if (resource === "pages" && id && sub === "members" && segments.length <= 4) {
+      const response = await handleMembers(
+        request,
+        { scope: Access.pageScope(id), subId, method, principal },
+        deps,
+      );
+      if (response) return response;
+    }
+
+    if (resource === "pages" && segments.length <= 5) {
+      const response = await handlePages(
+        request,
+        { segments, method, url, principal },
+        deps,
+      );
+      if (response) return response;
+    }
+
     if (resource === "sheets" && segments.length <= 3) {
       const response = await handleSheets(request, { id, sub, method, url, principal }, deps);
       if (response) return response;
@@ -1025,6 +1061,15 @@ export async function handleApi(
     if (cause instanceof Docs.NotFoundError) return error(404, "not_found");
     if (cause instanceof Diagrams.DiagramForbiddenError)
       return error(403, "forbidden");
+    if (cause instanceof HtmlPages.PageForbiddenError)
+      return json({ error: "forbidden", required: cause.required }, 403);
+    if (cause instanceof HtmlPages.InvalidPageError) {
+      const tooLarge = cause.code === "too_large";
+      return json(
+        { error: tooLarge ? "page_too_large" : cause.code, message: cause.message },
+        tooLarge ? 413 : 400,
+      );
+    }
     if (cause instanceof DiagramThemes.DiagramThemeError) {
       return json({ error: cause.code, message: cause.message }, cause.status);
     }
@@ -1488,6 +1533,181 @@ async function handleDiagrams(
   if (method === "DELETE") {
     await need("owner");
     await Diagrams.deleteDiagram(deps.db, deps.images, id);
+    return json({ ok: true });
+  }
+
+  return null;
+}
+
+/** The request body as bytes, refused past MAX_PAGE_BYTES before and after reading. */
+async function pageBody(request: Request): Promise<ArrayBuffer | Response> {
+  const declared = Number(request.headers.get("Content-Length") ?? "0");
+  const tooLarge = () =>
+    json(
+      { error: "page_too_large", message: `The file is over the ${MAX_PAGE_BYTES / (1024 * 1024)} MB limit for a page.` },
+      413,
+    );
+  if (declared > MAX_PAGE_BYTES) return tooLarge();
+  const body = await request.arrayBuffer();
+  return body.byteLength > MAX_PAGE_BYTES ? tooLarge() : body;
+}
+
+/** An optional short text from the query string: undefined when absent, null when malformed. */
+function queryText(url: URL, name: string, max: number): string | null | undefined {
+  const value = url.searchParams.get(name);
+  if (value === null) return undefined;
+  return str(value, max);
+}
+
+/**
+ * Pages (uploaded HTML), under `/api/pages`:
+ * - `GET /api/pages[?projectId=<id>|none]`: the pages the person is on.
+ * - `POST /api/pages?title=&projectId=&note=` with the HTML as the body: a new page.
+ * - `GET|PATCH|DELETE /api/pages/:id`: the page with its versions; rename or move; delete.
+ * - `POST /api/pages/:id/versions?note=` with the HTML: the next version.
+ * - `GET /api/pages/:id/versions/:n/content`: that version's HTML, sandboxed, into a frame only.
+ * Null for other paths.
+ */
+async function handlePages(
+  request: Request,
+  route: {
+    readonly segments: ReadonlyArray<string>;
+    readonly method: string;
+    readonly url: URL;
+    readonly principal: Auth.Principal;
+  },
+  deps: ApiDeps,
+): Promise<Response | null> {
+  const [, id, sub, versionPart, leaf] = route.segments;
+  const { method, url } = route;
+  const userId = route.principal.userId;
+  const now = deps.now();
+
+  if (!id && method === "GET") {
+    const param = url.searchParams.get("projectId");
+    const projectId = param === null ? undefined : param === "none" ? null : param;
+    const [pages, uses] = await Promise.all([
+      HtmlPages.listPages(deps.db, { userId, projectId }),
+      HtmlPages.pageUsesById(deps.db, userId),
+    ]);
+    return json({ pages: pages.map((page) => ({ ...page, uses: uses.get(page.id) ?? [] })) });
+  }
+
+  if (!id && method === "POST") {
+    const title = queryText(url, "title", MAX_PAGE_TITLE_LENGTH);
+    const note = queryText(url, "note", MAX_PAGE_NOTE_LENGTH);
+    const projectParam = url.searchParams.get("projectId");
+    if (title === null || note === null || projectParam === "") return error(400, "invalid_page");
+    const projectId = projectParam === null || projectParam === "none" ? null : projectParam;
+    if (projectId && !(await Access.canSeeProject(deps.db, projectId, userId))) {
+      return error(404, "not_found");
+    }
+    const body = await pageBody(request);
+    if (body instanceof Response) return body;
+    const page = await HtmlPages.createPage(deps.db, deps.images, {
+      projectId,
+      title: title ?? DEFAULT_PAGE_TITLE,
+      html: body,
+      note: note ?? null,
+      createdBy: userId,
+      now,
+    });
+    return json(
+      { page: await HtmlPages.pageView(deps.db, page, HtmlPages.PAGE_OWNER_ACCESS) },
+      201,
+    );
+  }
+
+  if (!id) return null;
+  if (!isPageId(id)) return error(404, "not_found");
+  const need = (access: HtmlPages.PageNeed) =>
+    HtmlPages.requirePage(deps.db, { pageId: id, userId, need: access });
+
+  if (sub === "versions" && !versionPart && method === "POST") {
+    const note = queryText(url, "note", MAX_PAGE_NOTE_LENGTH);
+    if (note === null) return error(400, "invalid_note");
+    const { access } = await need("edit");
+    const body = await pageBody(request);
+    if (body instanceof Response) return body;
+    const page = await HtmlPages.addPageVersion(deps.db, deps.images, {
+      pageId: id,
+      html: body,
+      note: note ?? null,
+      createdBy: userId,
+      now,
+    });
+    return json({ page: await HtmlPages.pageView(deps.db, page, access) }, 201);
+  }
+
+  if (sub === "versions" && versionPart && leaf === "content" && SAFE_METHODS.has(method)) {
+    if (!/^[1-9]\d{0,8}$/.test(versionPart)) return error(404, "not_found");
+    // Only into a frame: as a tab of its own it would show under the app's address.
+    if (!HtmlPages.isFrameLoad(request)) {
+      return new Response("This page opens inside UP Docs.", {
+        status: 403,
+        headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" },
+      });
+    }
+    await need("view");
+    return (
+      (await HtmlPages.pageContentResponse(deps.db, deps.images, {
+        pageId: id,
+        version: Number(versionPart),
+        frameAncestors: deps.frameAncestors ?? [],
+      })) ?? error(404, "not_found")
+    );
+  }
+
+  if (sub === "versions" && versionPart && leaf === "download" && method === "GET") {
+    if (!/^[1-9]\d{0,8}$/.test(versionPart)) return error(404, "not_found");
+    const { page } = await need("view");
+    const read = await HtmlPages.readPageHtml(deps.db, deps.images, {
+      pageId: id,
+      version: Number(versionPart),
+    });
+    if (!read) return error(404, "not_found");
+    const name = `${page.title.replace(/[^\w .-]+/g, "").trim().slice(0, 80) || "page"}-v${read.version.version}.html`;
+    return new Response(read.html, {
+      headers: {
+        // A file to save, never a page that runs here: attachment, and sandboxed even if shown.
+        ...HtmlPages.pageContentHeaders(deps.frameAncestors ?? []),
+        "Content-Disposition": `attachment; filename="${name}"`,
+        "Cache-Control": "private, no-store",
+      },
+    });
+  }
+
+  if (sub === "uses" && !versionPart && method === "GET") {
+    await need("edit");
+    return json(await HtmlPages.pageUsage(deps.db, { pageId: id, userId }));
+  }
+
+  if (sub) return null;
+
+  if (method === "GET") {
+    const { page, access } = await need("view");
+    return json({ page: await HtmlPages.pageView(deps.db, page, access) });
+  }
+
+  if (method === "PATCH") {
+    const body = await readJson(request);
+    const title = body.title === undefined ? undefined : str(body.title, MAX_PAGE_TITLE_LENGTH);
+    if (title === null) return error(400, "invalid_title");
+    const projectId = projectIdArg(body.projectId);
+    if (projectId === false) return error(400, "invalid_project");
+    if (title === undefined && projectId === undefined) return error(400, "empty_write");
+    // Editors rename; moving it to another project is the owner's.
+    const { access } = await need(projectId === undefined ? "edit" : "owner");
+    if (projectId && !(await Access.canSeeProject(deps.db, projectId, userId))) {
+      return error(404, "not_found");
+    }
+    const page = await HtmlPages.updatePage(deps.db, { pageId: id, title, projectId, now });
+    return json({ page: await HtmlPages.pageView(deps.db, page, access) });
+  }
+
+  if (method === "DELETE") {
+    await need("owner");
+    await HtmlPages.deletePage(deps.db, deps.images, id);
     return json({ ok: true });
   }
 
@@ -2015,6 +2235,15 @@ async function memberListRole(
   userId: string,
 ): Promise<DocRole> {
   if (scope.kind === "doc") return Access.requireDocRole(deps.db, scope.id, userId, "viewer");
+  if (scope.kind === "page") {
+    const { access } = await HtmlPages.requirePage(deps.db, {
+      pageId: scope.id,
+      userId,
+      need: "view",
+    });
+    if (!access.member) throw new Docs.NotFoundError("page");
+    return access.role;
+  }
   const { access } = await Diagrams.requireDiagram(deps.db, {
     diagramId: scope.id,
     userId,
@@ -2121,6 +2350,10 @@ export async function inviteToScope(
     const firstTab = tabs.find((tab) => tab.parentTabId === null);
     title = doc.title;
     url = `${deps.publicOrigin}/d/${doc.id}${firstTab ? `/${firstTab.id}` : ""}`;
+  } else if (scope.kind === "page") {
+    const page = await HtmlPages.getPage(deps.db, scope.id);
+    title = page.title;
+    url = pageUrl(deps.publicOrigin, page.id);
   } else {
     const diagram = await Diagrams.getDiagram(deps.db, scope.id);
     title = diagram.title;

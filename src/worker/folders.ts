@@ -1,4 +1,4 @@
-// Folders inside a project, shared by its docs, diagrams and sheets. Only the
+// Folders inside a project, shared by its docs, diagrams, sheets and pages. Only the
 // admin creates, renames, deletes folders and files items in them, like
 // projects. Anyone who can see the project reads the folders that lead to items
 // they can open (see listProjectFolders).
@@ -33,6 +33,7 @@ const ITEM_TABLE: Readonly<Record<FolderItemKind, string>> = {
   doc: "docs",
   diagram: "diagrams",
   sheet: "sheets",
+  page: "pages",
 };
 
 /** A folder name from the wire: trimmed text, or null when blank, not text or too long. */
@@ -73,7 +74,11 @@ export async function listProjectFolders(
            AND (?3 OR EXISTS (SELECT 1 FROM diagram_members m WHERE m.diagram_id = g.id AND m.user_id = ?2))
          UNION ALL
          SELECT 'sheet', s.id, s.folder_id FROM sheets s
-         WHERE s.project_id = ?1 AND s.folder_id IS NOT NULL AND (?3 OR s.created_by = ?2)`,
+         WHERE s.project_id = ?1 AND s.folder_id IS NOT NULL AND (?3 OR s.created_by = ?2)
+         UNION ALL
+         SELECT 'page', p.id, p.folder_id FROM pages p
+         WHERE p.project_id = ?1 AND p.folder_id IS NOT NULL
+           AND (?3 OR EXISTS (SELECT 1 FROM page_members m WHERE m.page_id = p.id AND m.user_id = ?2))`,
       )
       .bind(input.projectId, input.userId, all),
     db
