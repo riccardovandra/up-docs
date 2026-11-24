@@ -36,4 +36,6 @@ INSERT INTO public_links (token, kind, doc_id, created_by, created_at)
 SELECT token, 'doc', doc_id, created_by, created_at FROM doc_public_links;
 
 -- doc_public_links stays until a later migration drops it, so the Worker
--- version still running while this applies keeps serving its links.
+-- version still running while this applies keeps serving its links. Until
+-- then the Worker writes doc links to both tables, so rolling back never
+-- revives a link that was turned off or reset.

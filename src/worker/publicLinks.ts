@@ -71,25 +71,50 @@ export async function createPublicLink(
   },
 ): Promise<PublicLink> {
   const token = randomToken(32);
-  const column = COLUMNS[input.target.kind];
+  const { target } = input;
+  const column = COLUMNS[target.kind];
   await db.batch([
-    db.prepare(`DELETE FROM public_links WHERE ${column} = ?`).bind(input.target.id),
+    db.prepare(`DELETE FROM public_links WHERE ${column} = ?`).bind(target.id),
     db
       .prepare(
         `INSERT INTO public_links (token, kind, ${column}, created_by, created_at)
          VALUES (?, ?, ?, ?, ?)`,
       )
-      .bind(token, input.target.kind, input.target.id, input.userId, input.now),
+      .bind(token, target.kind, target.id, input.userId, input.now),
+    ...legacyDocLink(db, target, { token, userId: input.userId, now: input.now }),
   ]);
   return toLink(token, input.now, input.publicOrigin);
 }
 
 export async function deletePublicLink(db: D1Database, target: PublicTarget): Promise<void> {
-  await db
-    .prepare(`DELETE FROM public_links WHERE ${COLUMNS[target.kind]} = ?`)
-    .bind(target.id)
-    .run();
+  await db.batch([
+    db.prepare(`DELETE FROM public_links WHERE ${COLUMNS[target.kind]} = ?`).bind(target.id),
+    ...legacyDocLink(db, target, null),
+  ]);
 }
+
+/**
+ * Keeps doc_public_links (the table before 0026) the same as public_links for
+ * docs, so a rollback to a Worker that still reads it never revives a link
+ * that was turned off or reset. Drop this with that table.
+ */
+const legacyDocLink = (
+  db: D1Database,
+  target: PublicTarget,
+  link: { readonly token: string; readonly userId: string; readonly now: number } | null,
+): Array<D1PreparedStatement> => {
+  if (target.kind !== "doc") return [];
+  const clear = db.prepare("DELETE FROM doc_public_links WHERE doc_id = ?").bind(target.id);
+  if (!link) return [clear];
+  return [
+    clear,
+    db
+      .prepare(
+        "INSERT INTO doc_public_links (doc_id, token, created_by, created_at) VALUES (?, ?, ?, ?)",
+      )
+      .bind(target.id, link.token, link.userId, link.now),
+  ];
+};
 
 const toLink = (token: string, createdAt: number, publicOrigin: string): PublicLink => ({
   token,

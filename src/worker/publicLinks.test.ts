@@ -220,6 +220,21 @@ describe("public links", () => {
     expect((await visit(picture)).status).toBe(404);
   });
 
+  it("keeps the old doc link table in step, so a rollback never revives a link", async () => {
+    const { api, admin, send, docA, publish } = await setup();
+    const legacy = () =>
+      api.db
+        .prepare("SELECT token FROM doc_public_links WHERE doc_id = ?")
+        .bind(docA.doc.id)
+        .all<{ token: string }>();
+    const first = (await publish(docA.doc.id)).body.link.token;
+    expect((await legacy()).results).toEqual([{ token: first }]);
+    const second = (await publish(docA.doc.id)).body.link.token;
+    expect((await legacy()).results).toEqual([{ token: second }]);
+    await send(admin, "DELETE", `/api/docs/${docA.doc.id}/public-link`);
+    expect((await legacy()).results).toEqual([]);
+  });
+
   it("stops working at once when turned off, reset or the doc is deleted", async () => {
     const { send, admin, docA, publish, visit } = await setup();
     const first = (await publish(docA.doc.id)).body.link.token;
