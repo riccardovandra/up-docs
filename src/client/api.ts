@@ -1,5 +1,5 @@
 import type { EmbedSnapshot } from "../shared/embeds.ts";
-import type { PublicLink } from "../shared/publicLinks.ts";
+import { PUBLIC_COLLECTIONS, type PublicLink } from "../shared/publicLinks.ts";
 import type {
   DocMember,
   DocRole,
@@ -96,15 +96,18 @@ export interface ShareTarget {
 const membersPath = (target: ShareTarget) =>
   `/api/${target.kind === "doc" ? "docs" : target.kind === "page" ? "pages" : "diagrams"}/${target.id}/members`;
 
+const publicLinkPath = (target: ShareTarget) =>
+  `/api/${PUBLIC_COLLECTIONS[target.kind]}/${target.id}/public-link`;
+
 export const api = {
-  /** The doc's public link, or null. Owners only, from a browser session. */
-  publicLink: (docId: string) =>
-    request<{ link: PublicLink | null }>("GET", `/api/docs/${docId}/public-link`),
+  /** The item's public link, or null. Owners only, from a browser session. */
+  publicLink: (target: ShareTarget) =>
+    request<{ link: PublicLink | null }>("GET", publicLinkPath(target)),
   /** Turns the public link on, or replaces it with a new one; the old one stops working. */
-  createPublicLink: (docId: string) =>
-    request<{ link: PublicLink }>("PUT", `/api/docs/${docId}/public-link`),
-  removePublicLink: (docId: string) =>
-    request<{ link: null }>("DELETE", `/api/docs/${docId}/public-link`),
+  createPublicLink: (target: ShareTarget) =>
+    request<{ link: PublicLink }>("PUT", publicLinkPath(target)),
+  removePublicLink: (target: ShareTarget) =>
+    request<{ link: null }>("DELETE", publicLinkPath(target)),
   me: () => request<Me>("GET", "/api/me"),
   setName: (name: string) => request<Me>("PATCH", "/api/me", { name }),
   /** People on any doc the caller is on, for the share picker. */

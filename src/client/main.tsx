@@ -8,8 +8,8 @@ import "./styles.css";
 import { startTheme } from "./theme.ts";
 import { isPublicToken } from "../shared/publicLinks.ts";
 
-const PublicDocPage = lazy(() =>
-  import("./pages/PublicDocPage.tsx").then((module) => ({ default: module.PublicDocPage })),
+const PublicLinkPage = lazy(() =>
+  import("./pages/PublicLinkPage.tsx").then((module) => ({ default: module.PublicLinkPage })),
 );
 
 /** The token of a public link's page (`/p/<token>`), or null for every other page. */
@@ -31,7 +31,7 @@ createRoot(document.getElementById("root")!).render(
   <StrictMode>
     {token !== null ? (
       <Suspense fallback={null}>
-        <PublicDocPage token={token} />
+        <PublicLinkPage token={token} />
       </Suspense>
     ) : (
       <App />

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 
 import type { PublicLink } from "../../shared/publicLinks.ts";
-import { api, ApiError } from "../api.ts";
+import { api, ApiError, type ShareTarget } from "../api.ts";
 import { copyText } from "../copyText.ts";
 
 const failure = (cause: unknown) =>
@@ -9,12 +9,31 @@ const failure = (cause: unknown) =>
     ? "Public links can be changed only from the browser, signed in."
     : "That did not work. Try again.";
 
+/** What a visitor sees, and what stays private, per kind of item. */
+const WORDS: Readonly<Record<ShareTarget["kind"], { readonly noun: string; readonly sees: string }>> =
+  {
+    doc: {
+      noun: "doc",
+      sees: "can read every tab of this doc, without signing in. Comments and people stay private.",
+    },
+    diagram: {
+      noun: "diagram",
+      sees: "can view every page of this diagram as a picture, without signing in. Its source, comments and people stay private.",
+    },
+    page: {
+      noun: "page",
+      sees: "can open the latest version of this page, without signing in. Earlier versions and people stay private.",
+    },
+  };
+
 /**
- * "Anyone with the link" for a doc's owner: turn a read-only public link on
- * or off, copy it, or replace it so the old one stops working.
+ * "Anyone with the link" for an item's owner, the same for every kind: turn a
+ * read-only public link on or off, copy it, or replace it so the old one
+ * stops working.
  */
-export function PublicLinkSection(props: { readonly docId: string }) {
-  const { docId } = props;
+export function PublicLinkSection(props: { readonly target: ShareTarget }) {
+  const { kind, id } = props.target;
+  const words = WORDS[kind];
   const [link, setLink] = useState<PublicLink | null | undefined>(undefined);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -22,7 +41,7 @@ export function PublicLinkSection(props: { readonly docId: string }) {
 
   useEffect(() => {
     let live = true;
-    api.publicLink(docId).then(
+    api.publicLink({ kind, id }).then(
       (result) => live && setLink(result.link),
       (cause: unknown) => {
         if (!live) return;
@@ -33,7 +52,7 @@ export function PublicLinkSection(props: { readonly docId: string }) {
     return () => {
       live = false;
     };
-  }, [docId]);
+  }, [kind, id]);
 
   const run = async (call: () => Promise<{ link: PublicLink | null }>) => {
     if (busy) return;
@@ -60,12 +79,12 @@ export function PublicLinkSection(props: { readonly docId: string }) {
         <p className="muted share-status">Loading…</p>
       ) : link === null ? (
         <div className="share-public-row">
-          <span className="muted">Off. Only people with access can open this doc.</span>
+          <span className="muted">Off. Only people with access can open this {words.noun}.</span>
           <button
             type="button"
             className="button secondary small"
             disabled={busy}
-            onClick={() => void run(() => api.createPublicLink(docId))}
+            onClick={() => void run(() => api.createPublicLink({ kind, id }))}
           >
             Create public link
           </button>
@@ -73,8 +92,7 @@ export function PublicLinkSection(props: { readonly docId: string }) {
       ) : (
         <>
           <p className="share-public-warning">
-            Anyone with this link can read every tab of this doc, without signing in. Comments and
-            people stay private.
+            Anyone with this link {words.sees}
           </p>
           <p className="share-email-link share-public-url">{link.url}</p>
           <div className="share-public-actions">
@@ -86,7 +104,7 @@ export function PublicLinkSection(props: { readonly docId: string }) {
               className="button secondary small"
               disabled={busy}
               title="Make a new link. The current one stops working."
-              onClick={() => void run(() => api.createPublicLink(docId))}
+              onClick={() => void run(() => api.createPublicLink({ kind, id }))}
             >
               Reset link
             </button>
@@ -94,7 +112,7 @@ export function PublicLinkSection(props: { readonly docId: string }) {
               type="button"
               className="button secondary small"
               disabled={busy}
-              onClick={() => void run(() => api.removePublicLink(docId))}
+              onClick={() => void run(() => api.removePublicLink({ kind, id }))}
             >
               Turn off
             </button>

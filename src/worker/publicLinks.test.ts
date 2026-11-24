@@ -115,7 +115,7 @@ describe("public links", () => {
     expect(response.headers.get("Referrer-Policy")).toBe("no-referrer");
     expect(response.headers.get("Set-Cookie")).toBeNull();
     const body = (await response.json()) as PublicDoc;
-    expect(Object.keys(body).toSorted()).toEqual(["diagrams", "docId", "tabs", "title", "updatedAt"]);
+    expect(Object.keys(body).toSorted()).toEqual(["diagrams", "docId", "kind", "tabs", "title", "updatedAt"]);
     expect(body.title).toBe("Shared plan");
     expect(body.tabs).toHaveLength(1);
     expect(body.tabs[0]!.markdown).toContain("Shared secret-free text");

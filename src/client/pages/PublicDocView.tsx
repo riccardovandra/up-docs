@@ -1,5 +1,5 @@
 import type { Editor } from "@tiptap/core";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 
 import type { EmbedSnapshot } from "../../shared/embeds.ts";
 import { publicApiBase, type PublicDoc } from "../../shared/publicLinks.ts";
@@ -8,69 +8,28 @@ import { useColumnWidth } from "../doc/toolbar/columnWidth.ts";
 import { DocToolbar } from "../doc/toolbar/DocToolbar.tsx";
 import { TabEditor } from "../editor/TabEditor.tsx";
 import { setPublicShare } from "../publicMode.ts";
-
-/** How often an open public page re-reads the doc, besides on focus. */
-const REFRESH_MS = 60_000;
+import { publicGet } from "./publicGet.ts";
 
 const noop = () => undefined;
 const refuse = () => Promise.reject(new Error("read_only"));
 
-/** One read of the link's API. No cookies go with it: the token is the only credential. */
-async function publicGet<T>(path: string): Promise<T> {
-  const response = await fetch(path, { credentials: "omit", referrerPolicy: "no-referrer" });
-  if (!response.ok) throw new Error(String(response.status));
-  return (await response.json()) as T;
-}
-
 /**
- * The page a public link opens: one doc, every tab, read-only, with no
- * session, comments, sharing or account controls. It re-reads the doc on
- * focus and every minute instead of holding a live connection.
+ * A doc a public link opens: every tab, read-only, with no session, comments,
+ * sharing or account controls. PublicLinkPage loads it and re-reads it.
  */
-export function PublicDocPage(props: { readonly token: string }) {
-  const { token } = props;
+export function PublicDocView(props: { readonly token: string; readonly doc: PublicDoc }) {
+  const { token, doc } = props;
   const base = publicApiBase(token);
-  const [doc, setDoc] = useState<PublicDoc | null>(null);
-  const [missing, setMissing] = useState(false);
   const [activeTabId, setActiveTabId] = useState<string | null>(null);
   const [editor, setEditor] = useState<Editor | null>(null);
   const [width, toggleWidth] = useColumnWidth("public");
 
-  const load = useCallback(() => {
-    publicGet<PublicDoc>(base).then(
-      (next) => {
-        setDoc((current) => (current && current.updatedAt === next.updatedAt &&
-          sameTabs(current, next) ? current : next));
-        setMissing(false);
-      },
-      () => {
-        setDoc(null);
-        setMissing(true);
-      },
-    );
-  }, [base]);
-
-  useEffect(() => {
-    load();
-    const timer = window.setInterval(load, REFRESH_MS);
-    window.addEventListener("focus", load);
-    return () => {
-      window.clearInterval(timer);
-      window.removeEventListener("focus", load);
-    };
-  }, [load]);
-
   // Before the editor renders: assets and links read it while they mount.
   const diagrams = useMemo(
-    () => new Map((doc?.diagrams ?? []).map((diagram) => [diagram.id, diagram])),
+    () => new Map(doc.diagrams.map((diagram) => [diagram.id, diagram])),
     [doc],
   );
-  const docId = doc?.docId ?? null;
-  if (docId) setPublicShare({ token, docId, diagrams, openTab: setActiveTabId });
-
-  useEffect(() => {
-    document.title = doc ? doc.title : "UP Docs";
-  }, [doc]);
+  setPublicShare({ token, docId: doc.docId, diagrams, openTab: setActiveTabId });
 
   const loadEmbed = useCallback(
     async (url: string): Promise<EmbedSnapshot> =>
@@ -78,16 +37,6 @@ export function PublicDocPage(props: { readonly token: string }) {
         .embed,
     [base],
   );
-
-  if (missing) {
-    return (
-      <div className="public-doc-missing">
-        <h1>This link does not work</h1>
-        <p>The document is no longer shared, or the link is incomplete.</p>
-      </div>
-    );
-  }
-  if (!doc) return null;
 
   const tabs = [...doc.tabs].sort((a, b) => a.position - b.position);
   const activeTab =
@@ -155,14 +104,3 @@ export function PublicDocPage(props: { readonly token: string }) {
     </div>
   );
 }
-
-const sameTabs = (a: PublicDoc, b: PublicDoc) =>
-  a.tabs.length === b.tabs.length &&
-  a.tabs.every((tab, index) => {
-    const other = b.tabs[index];
-    return other?.id === tab.id && other.version === tab.version && other.title === tab.title;
-  }) &&
-  a.diagrams.length === b.diagrams.length &&
-  a.diagrams.every(
-    (diagram, index) => b.diagrams[index]?.pictureVersion === diagram.pictureVersion,
-  );

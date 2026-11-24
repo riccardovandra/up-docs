@@ -445,7 +445,7 @@ export function ShareDialog(props: {
               ))}
             </ul>
           )}
-          {isDoc && callerRole === "owner" ? <PublicLinkSection docId={id} /> : null}
+          {callerRole === "owner" ? <PublicLinkSection target={target} /> : null}
         </>
       )}
 
