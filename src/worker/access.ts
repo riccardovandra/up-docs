@@ -87,6 +87,9 @@ export async function userIdForEmail(
   return row?.user_id ?? null;
 }
 
+/** Every people list: a person on any of them may sign in. */
+const MEMBER_TABLE_NAMES = ["doc_members", "diagram_members", "page_members"] as const;
+
 /** Owners, and anyone with a pending or accepted membership on some doc, diagram or page. */
 export async function canSignIn(
   db: D1Database,
@@ -98,20 +101,14 @@ export async function canSignIn(
   if (owners.has(address)) return true;
   const row = await db
     .prepare(
-      `SELECT 1 FROM doc_members WHERE email = ?
-       UNION ALL
-       SELECT 1 FROM doc_members m JOIN user_emails e ON e.user_id = m.user_id WHERE e.email = ?
-       UNION ALL
-       SELECT 1 FROM diagram_members WHERE email = ?
-       UNION ALL
-       SELECT 1 FROM diagram_members m JOIN user_emails e ON e.user_id = m.user_id WHERE e.email = ?
-       UNION ALL
-       SELECT 1 FROM page_members WHERE email = ?
-       UNION ALL
-       SELECT 1 FROM page_members m JOIN user_emails e ON e.user_id = m.user_id WHERE e.email = ?
-       LIMIT 1`,
+      // EXISTS terms, not UNION ALL: D1 refuses a compound SELECT of more than 5 terms.
+      `SELECT 1 WHERE ${MEMBER_TABLE_NAMES.map(
+        (table) =>
+          `EXISTS (SELECT 1 FROM ${table} WHERE email = ?1)
+           OR EXISTS (SELECT 1 FROM ${table} m JOIN user_emails e ON e.user_id = m.user_id WHERE e.email = ?1)`,
+      ).join("\n           OR ")}`,
     )
-    .bind(address, address, address, address, address, address)
+    .bind(address)
     .first();
   return row !== null;
 }
@@ -141,7 +138,7 @@ export async function claimInvites(
     );
   }
   // An invite to a doc, diagram or page the person already belongs to keeps their current role.
-  for (const table of ["doc_members", "diagram_members", "page_members"]) {
+  for (const table of MEMBER_TABLE_NAMES) {
     statements.push(
       db
         .prepare(`UPDATE OR IGNORE ${table} SET user_id = ?, email = NULL WHERE email = ?`)

@@ -15,6 +15,20 @@ const migrationFiles = () =>
     .toSorted();
 
 /**
+ * D1 refuses a compound SELECT of more than 5 terms ("too many terms in
+ * compound SELECT"); node:sqlite allows 500. Counted over the whole
+ * statement, which is stricter than D1 for unions in separate subqueries.
+ */
+export const D1_MAX_COMPOUND_SELECT = 5;
+
+function checkD1Limits(sql: string): void {
+  const joins = sql.match(/\b(UNION|INTERSECT|EXCEPT)\b/gi)?.length ?? 0;
+  if (joins + 1 > D1_MAX_COMPOUND_SELECT) {
+    throw new Error("D1_ERROR: too many terms in compound SELECT: SQLITE_ERROR");
+  }
+}
+
+/**
  * The subset of D1 the services use, backed by an in-memory node:sqlite
  * database with the real migrations. `before` stops at that migration file
  * prefix; `applyMigrationsFrom` runs the rest later, to test a backfill.
@@ -27,7 +41,11 @@ export function makeTestD1(options: { readonly before?: string } = {}): D1Databa
     sqlite.exec(NodeFS.readFileSync(new URL(file, MIGRATIONS), "utf8"));
   }
 
-  const statement = (sql: string, params: Array<NodeSqlite.SQLInputValue> = []) => ({
+  const statement = (sql: string, params: Array<NodeSqlite.SQLInputValue> = []) => {
+    checkD1Limits(sql);
+    return statementOf(sql, params);
+  };
+  const statementOf = (sql: string, params: Array<NodeSqlite.SQLInputValue> = []) => ({
     bind: (...values: Array<unknown>) => statement(sql, values as Array<NodeSqlite.SQLInputValue>),
     first: async () => (sqlite.prepare(sql).get(...params) as unknown) ?? null,
     rows: () => sqlite.prepare(sql).all(...params),
