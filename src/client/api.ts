@@ -89,12 +89,12 @@ export const clientId = crypto.randomUUID();
 
 /** What a share panel lists people for: a doc, a Draw.io diagram or a page. */
 export interface ShareTarget {
-  readonly kind: "doc" | "diagram" | "page";
+  readonly kind: "doc" | "diagram" | "page" | "sheet";
   readonly id: string;
 }
 
 const membersPath = (target: ShareTarget) =>
-  `/api/${target.kind === "doc" ? "docs" : target.kind === "page" ? "pages" : "diagrams"}/${target.id}/members`;
+  `/api/${PUBLIC_COLLECTIONS[target.kind]}/${target.id}/members`;
 
 const publicLinkPath = (target: ShareTarget) =>
   `/api/${PUBLIC_COLLECTIONS[target.kind]}/${target.id}/public-link`;

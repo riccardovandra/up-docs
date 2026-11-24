@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
 
 import { PAGE_SANDBOX } from "../../shared/htmlPages.ts";
 import {
@@ -17,6 +17,11 @@ import { setPublicShare } from "../publicMode.ts";
 import { PublicDocView } from "./PublicDocView.tsx";
 import { publicGet } from "./publicGet.ts";
 
+// The formula engine loads only for a sheet.
+const PublicSheetView = lazy(() =>
+  import("./PublicSheetView.tsx").then((module) => ({ default: module.PublicSheetView })),
+);
+
 /** How often an open public page re-reads its item, besides on focus. */
 const REFRESH_MS = 60_000;
 
@@ -24,6 +29,7 @@ const NOUNS: Readonly<Record<PublicItem["kind"], string>> = {
   doc: "document",
   diagram: "diagram",
   page: "page",
+  sheet: "sheet",
 };
 
 /**
@@ -79,11 +85,18 @@ export function PublicLinkPage(props: { readonly token: string }) {
   if (!item) return null;
   if (item.kind === "doc") return <PublicDocView token={token} doc={item} />;
   if (item.kind === "diagram") return <PublicDiagramView token={token} item={item} />;
+  if (item.kind === "sheet") {
+    return (
+      <Suspense fallback={null}>
+        <PublicSheetView item={item} />
+      </Suspense>
+    );
+  }
   return <PublicPageView token={token} item={item} />;
 }
 
 /** The header every public view shares: the title and a read-only badge. */
-function PublicHeader(props: { readonly title: string; readonly kind: PublicItem["kind"] }) {
+export function PublicHeader(props: { readonly title: string; readonly kind: PublicItem["kind"] }) {
   return (
     <header className="doc-header">
       <div className="doc-header-title">

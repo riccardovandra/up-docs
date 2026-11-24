@@ -1,16 +1,16 @@
 // Sheets: the D1 store, who may see and change one, and the ordered write path
 // every edit list takes. The REST API and the MCP tools both call
 // `requireSheet`, `loadSheet`, `applySheetEdits`, `updateSheet` and
-// `deleteSheet`, so both share one behaviour. A sheet is managed by its creator
-// and the admin, like a diagram; nothing links a sheet into a doc yet, so
-// nobody else sees one.
+// `deleteSheet`, so both share one behaviour. A sheet is shared like a doc or
+// a diagram: its people list (sheet_members) gives each person a role, and the
+// admin owns every sheet. Nothing links a sheet into a doc yet.
 //
 // Every write to one sheet runs in that sheet's SheetRoom (`SheetEngine` holds
 // the logic, so tests run it without a Durable Object): it applies the edit
 // list with the engine against `base`, writes the changes and the new revision
 // to D1 in one batch, then broadcasts the edits to the sheet's open sockets.
 
-import { isAdmin } from "../shared/access.ts";
+import { hasRole, isAdmin, type DocRole } from "../shared/access.ts";
 import {
   applyEdits,
   createWorkbook,
@@ -38,25 +38,58 @@ import {
   type SheetRoomMessage,
 } from "../shared/sheets.ts";
 import { randomId } from "./crypto.ts";
+import { memberRole, sheetOwnerStatement, sheetScope } from "./access.ts";
 import { getProject, NotFoundError } from "./docs.ts";
 
 // ---- access ----
 
-/** The creator and the admin manage a sheet: see, edit, rename, move and delete it. */
-export const canManageSheet = (sheet: Pick<SheetMeta, "createdBy">, userId: string) =>
-  isAdmin(userId) || (sheet.createdBy !== null && sheet.createdBy === userId);
+/** What each ask on a sheet needs: see it, change it, or share, move and delete it. */
+export type SheetNeed = "view" | "edit" | "owner";
+
+const NEED_ROLE: Readonly<Record<SheetNeed, DocRole>> = {
+  view: "viewer",
+  edit: "editor",
+  owner: "owner",
+};
+
+/** A role on a sheet that falls short of what the ask needs. */
+export class SheetForbiddenError extends Error {
+  readonly required: DocRole;
+
+  constructor(required: DocRole) {
+    super(`forbidden: sheet ${required}`);
+    this.required = required;
+  }
+}
 
 /**
- * The sheet, once `userId` is known to manage it. One they cannot is
- * NotFoundError, as with docs and diagrams, so ids do not reveal what exists.
+ * The person's role on a sheet: their row on its people list, or owner for
+ * the admin. Null when they are not on it.
+ */
+export async function sheetRole(
+  db: D1Database,
+  sheetId: string,
+  userId: string,
+): Promise<DocRole | null> {
+  if (isAdmin(userId)) return "owner";
+  return memberRole(db, sheetScope(sheetId), userId);
+}
+
+/**
+ * The sheet, once `userId` is known to have the access asked for. A sheet
+ * the person is not on is NotFoundError, as with docs and diagrams, so ids do
+ * not reveal what exists; one whose role falls short is SheetForbiddenError.
  */
 export async function requireSheet(
   db: D1Database,
-  input: { readonly sheetId: string; readonly userId: string },
-): Promise<SheetMeta> {
+  input: { readonly sheetId: string; readonly userId: string; readonly need: SheetNeed },
+): Promise<{ readonly sheet: SheetMeta; readonly role: DocRole }> {
   const sheet = await getSheetMeta(db, input.sheetId);
-  if (!canManageSheet(sheet, input.userId)) throw new NotFoundError("sheet");
-  return sheet;
+  const role = await sheetRole(db, sheet.id, input.userId);
+  if (!role) throw new NotFoundError("sheet");
+  const required = NEED_ROLE[input.need];
+  if (!hasRole(role, required)) throw new SheetForbiddenError(required);
+  return { sheet, role };
 }
 
 // ---- meta ----
@@ -93,18 +126,22 @@ export async function getSheetMeta(db: D1Database, sheetId: string): Promise<She
 }
 
 /**
- * The sheets a person manages, newest edit first: their own, or every sheet
- * for the admin. `projectId` narrows to one project, or to sheets in no
- * project when null.
+ * The sheets a person is on, newest edit first, with their role on each; every
+ * sheet for the admin, who owns them all. `projectId` narrows to one project,
+ * or to sheets in no project when null.
  */
 export async function listSheets(
   db: D1Database,
   input: { readonly userId: string; readonly projectId?: string | null | undefined },
-): Promise<ReadonlyArray<SheetMeta>> {
+): Promise<ReadonlyArray<SheetMeta & { readonly role: DocRole }>> {
   const { results } = await db
     .prepare(
-      `SELECT ${META_COLUMNS} FROM sheets
-       WHERE (?1 OR created_by = ?2) AND (?3 OR project_id IS ?4)
+      `SELECT ${META_COLUMNS}, (SELECT m.role FROM sheet_members m
+           WHERE m.sheet_id = sheets.id AND m.user_id = ?2) AS role
+       FROM sheets
+       WHERE (?1 OR EXISTS (SELECT 1 FROM sheet_members m
+           WHERE m.sheet_id = sheets.id AND m.user_id = ?2))
+         AND (?3 OR project_id IS ?4)
        ORDER BY updated_at DESC, id`,
     )
     .bind(
@@ -113,8 +150,11 @@ export async function listSheets(
       input.projectId === undefined ? 1 : 0,
       input.projectId ?? null,
     )
-    .all<SheetRow>();
-  return results.map(toMeta);
+    .all<SheetRow & { role: DocRole | null }>();
+  return results.map((row) => ({
+    ...toMeta(row),
+    role: isAdmin(input.userId) ? "owner" : (row.role ?? "viewer"),
+  }));
 }
 
 /**
@@ -148,6 +188,7 @@ export async function createSheet(
          VALUES (?, ?, ?, 0, ?, ?, ?)`,
       )
       .bind(sheet.id, sheet.projectId, sheet.title, sheet.createdBy, sheet.createdAt, sheet.updatedAt),
+    sheetOwnerStatement(db, { sheetId: sheet.id, userId: input.createdBy, now: input.now }),
     ...upsertTabStatements(db, sheet.id, records.sheets),
   ]);
   return { sheet, records };

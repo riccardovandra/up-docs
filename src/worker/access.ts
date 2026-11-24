@@ -88,9 +88,9 @@ export async function userIdForEmail(
 }
 
 /** Every people list: a person on any of them may sign in. */
-const MEMBER_TABLE_NAMES = ["doc_members", "diagram_members", "page_members"] as const;
+const MEMBER_TABLE_NAMES = ["doc_members", "diagram_members", "page_members", "sheet_members"] as const;
 
-/** Owners, and anyone with a pending or accepted membership on some doc, diagram or page. */
+/** Owners, and anyone with a pending or accepted membership on some doc, diagram, page or sheet. */
 export async function canSignIn(
   db: D1Database,
   email: string,
@@ -101,7 +101,7 @@ export async function canSignIn(
   if (owners.has(address)) return true;
   const row = await db
     .prepare(
-      // EXISTS terms, not UNION ALL: D1 refuses a compound SELECT of more than 5 terms.
+      // EXISTS terms, not UNION ALL: D1 allows at most 5 terms in a compound SELECT.
       `SELECT 1 WHERE ${MEMBER_TABLE_NAMES.map(
         (table) =>
           `EXISTS (SELECT 1 FROM ${table} WHERE email = ?1)
@@ -137,7 +137,7 @@ export async function claimInvites(
         .bind(address, userId, now),
     );
   }
-  // An invite to a doc, diagram or page the person already belongs to keeps their current role.
+  // An invite to a doc, diagram, page or sheet the person already belongs to keeps their current role.
   for (const table of MEMBER_TABLE_NAMES) {
     statements.push(
       db
@@ -257,16 +257,32 @@ export const pageOwnerStatement = (
     )
     .bind(randomId(), input.pageId, input.userId, input.userId, input.now);
 
+/** Makes `userId` the owner of a new sheet; batch it with the sheet's insert. */
+export const sheetOwnerStatement = (
+  db: D1Database,
+  input: { readonly sheetId: string; readonly userId: string; readonly now: number },
+) =>
+  db
+    .prepare(
+      `INSERT INTO sheet_members (id, sheet_id, user_id, email, role, added_by, created_at)
+       VALUES (?, ?, ?, NULL, 'owner', ?, ?)`,
+    )
+    .bind(randomId(), input.sheetId, input.userId, input.userId, input.now);
+
 /**
- * What a membership list belongs to. Docs, Draw.io diagrams and pages are
- * shared the same way: one row per person or pending invite, in a table of their own.
+ * What a membership list belongs to. Docs, Draw.io diagrams, pages and sheets
+ * are shared the same way: one row per person or pending invite, in a table of their own.
  */
-export type MemberScope = { readonly kind: "doc" | "diagram" | "page"; readonly id: string };
+export type MemberScope = {
+  readonly kind: "doc" | "diagram" | "page" | "sheet";
+  readonly id: string;
+};
 
 const MEMBER_TABLES = {
   doc: { table: "doc_members", key: "doc_id" },
   diagram: { table: "diagram_members", key: "diagram_id" },
   page: { table: "page_members", key: "page_id" },
+  sheet: { table: "sheet_members", key: "sheet_id" },
 } as const;
 
 const docScope = (docId: string): MemberScope => ({ kind: "doc", id: docId });
@@ -275,6 +291,7 @@ export const diagramScope = (diagramId: string): MemberScope => ({
   id: diagramId,
 });
 export const pageScope = (pageId: string): MemberScope => ({ kind: "page", id: pageId });
+export const sheetScope = (sheetId: string): MemberScope => ({ kind: "sheet", id: sheetId });
 
 interface MemberRow {
   id: string;
@@ -585,6 +602,12 @@ export async function listPeople(
        SELECT DISTINCT o.user_id, o.email AS pending_email, u.email AS user_email, u.name
        FROM page_members o
        JOIN page_members me ON me.page_id = o.page_id AND me.user_id = ?1
+       LEFT JOIN users u ON u.id = o.user_id
+       WHERE o.user_id IS NULL OR o.user_id <> ?1
+       UNION
+       SELECT DISTINCT o.user_id, o.email AS pending_email, u.email AS user_email, u.name
+       FROM sheet_members o
+       JOIN sheet_members me ON me.sheet_id = o.sheet_id AND me.user_id = ?1
        LEFT JOIN users u ON u.id = o.user_id
        WHERE o.user_id IS NULL OR o.user_id <> ?1
        LIMIT 500`,

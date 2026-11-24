@@ -268,3 +268,44 @@ describe("MCP sheet tools", () => {
     expect(readCells(workbook, "Pre-orders", "D4")).toMatchObject({ rows: [[{ value: 464.5 }]] });
   });
 });
+
+describe("MCP sheet sharing", () => {
+  it("shares a sheet with share_doc {sheetId}, and the role limits what an agent may do", async () => {
+    const mcp = await makeMcpHarness();
+    const { sheetId } = await newSheet(mcp, { title: "Budget" });
+    const shared = await mcp.tool("share_doc", { sheetId, email: "guest@example.com", role: "viewer" });
+    expect(shared.isError).toBe(false);
+    const members = await mcp.tool("list_members", { sheetId });
+    expect(members.body.members.map((m: { email: string; role: string }) => m.role).sort()).toEqual([
+      "owner",
+      "viewer",
+    ]);
+
+    const guest = await mcp.asUser("guest@example.com");
+    const listed = await guest("list_sheets", {});
+    expect(listed.body.sheets).toMatchObject([{ sheetId, role: "viewer" }]);
+    expect((await guest("read_sheet", { sheetId })).isError).toBe(false);
+    const edit = await guest("edit_sheet", {
+      sheetId,
+      base: 0,
+      edits: [{ kind: "writeCells", sheet: "Sheet1", topLeft: "A1", rows: [["x"]] }],
+    });
+    expect(edit.isError).toBe(true);
+    expect(edit.body).toMatchObject({ error: "forbidden", required: "editor" });
+    const share = await guest("share_doc", { sheetId, email: "x@example.com", role: "viewer" });
+    expect(share.isError).toBe(true);
+
+    await mcp.tool("share_doc", { sheetId, email: "guest@example.com", role: "editor" });
+    expect(
+      (
+        await guest("edit_sheet", {
+          sheetId,
+          base: 0,
+          edits: [{ kind: "writeCells", sheet: "Sheet1", topLeft: "A1", rows: [["x"]] }],
+        })
+      ).isError,
+    ).toBe(false);
+    const move = await guest("update_sheet", { sheetId, noProject: true });
+    expect(move.body).toMatchObject({ error: "forbidden", required: "owner" });
+  });
+});

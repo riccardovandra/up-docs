@@ -829,3 +829,9 @@
     display: none;
   }
 }
+
+/* A viewer's sheet: says why nothing can be typed. */
+.sheet-read-only {
+  font-size: 0.8rem;
+  color: var(--muted);
+}

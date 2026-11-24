@@ -15,6 +15,7 @@ import { forgetTab, leaveDoc } from "../openTabs.ts";
 import { docPath, navigate } from "../router.ts";
 import { MemberRow } from "./MemberRow.tsx";
 import { PublicLinkSection } from "./PublicLinkSection.tsx";
+import { SHEETS_PATH, sheetPath } from "../sheets/sheetsApi.ts";
 import { RoleMenu } from "./RoleMenu.tsx";
 import { ShareExportTab } from "./ShareExportTab.tsx";
 import {
@@ -40,7 +41,20 @@ export function canonicalDocUrl(docId: string, tabId?: string | null): string {
 const targetUrl = (target: ShareTarget) =>
   target.kind === "doc"
     ? canonicalDocUrl(target.id)
-    : `${publicOrigin()}${target.kind === "page" ? pagePath(target.id) : diagramPath(target.id)}`;
+    : `${publicOrigin()}${
+        target.kind === "page"
+          ? pagePath(target.id)
+          : target.kind === "sheet"
+            ? sheetPath(target.id)
+            : diagramPath(target.id)
+      }`;
+
+const NOUNS: Readonly<Record<ShareTarget["kind"], string>> = {
+  doc: "doc",
+  diagram: "diagram",
+  page: "page",
+  sheet: "sheet",
+};
 
 const errorCode = (cause: unknown) => (cause instanceof ApiError ? cause.body.error : undefined);
 
@@ -199,7 +213,10 @@ export function ShareDialog(props: {
         // Without access the page cannot load anymore.
         if (isDoc) leaveDoc(target.id);
         else if (kind === "page") navigate("/pages", { replace: true });
-        else {
+        else if (kind === "sheet") {
+          forgetTab(`sheet:${target.id}`);
+          navigate(SHEETS_PATH, { replace: true });
+        } else {
           forgetTab(`diagram:${target.id}`);
           navigate("/diagrams", { replace: true });
         }
@@ -415,7 +432,7 @@ export function ShareDialog(props: {
                     className="button secondary small"
                     onClick={() => void copyLink()}
                   >
-                    {copied ? "Copied" : isDoc ? "Copy doc link" : kind === "page" ? "Copy page link" : "Copy diagram link"}
+                    {copied ? "Copied" : `Copy ${NOUNS[kind]} link`}
                   </button>
                 </div>
               ) : null}

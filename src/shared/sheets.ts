@@ -2,6 +2,7 @@
 // room's socket, shared by the Worker, the grid page and the MCP tools. The
 // workbook itself (tabs, cells, edits, refusals) is the engine's, in `./sheet/`.
 
+import type { DocRole } from "./access.ts";
 import type { Edit, Refusal, WorkbookRecords } from "./sheet/index.ts";
 
 export const DEFAULT_SHEET_TITLE = "Untitled sheet";
@@ -40,7 +41,7 @@ export interface SheetAuthor {
 
 /** `GET /api/sheets?projectId=<id>|none`. */
 export interface SheetListResponse {
-  readonly sheets: ReadonlyArray<SheetMeta>;
+  readonly sheets: ReadonlyArray<SheetMeta & { readonly role: DocRole }>;
 }
 
 /**
@@ -50,6 +51,8 @@ export interface SheetListResponse {
 export interface SheetResponse {
   readonly sheet: SheetMeta;
   readonly records: WorkbookRecords;
+  /** The caller's role: editors and owners change cells, everyone else views. */
+  readonly role: DocRole;
 }
 
 /** `PATCH /api/sheets/:id`. */

@@ -2,12 +2,14 @@ import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type Mou
 
 import { workbookFromRecords } from "../../shared/sheet/serialize.ts";
 import { PRESENCE_HEARTBEAT_MS, type SheetMeta } from "../../shared/sheets.ts";
+import { hasRole, type DocRole } from "../../shared/access.ts";
 import { ApiError, clientId } from "../api.ts";
 import { HomeLink } from "../home/HomeLink.tsx";
 import { TitleDialog } from "../home/TitleDialog.tsx";
 import { useLockedProject } from "../lockedProject.ts";
 import { forgetTab, setSheetTabTitle } from "../openTabs.ts";
 import { navigate } from "../router.ts";
+import { ShareButton } from "../share/ShareButton.tsx";
 import type { GridOverlay } from "./Grid.tsx";
 import {
   agentOverlays,
@@ -50,6 +52,7 @@ export function SheetPage(props: { readonly sheetId: string; readonly tabId: str
   const { sheetId } = props;
   const lock = useLockedProject();
   const [meta, setMeta] = useState<SheetMeta | null>(null);
+  const [role, setRole] = useState<DocRole>("viewer");
   const [sync, setSync] = useState<SheetSync | null>(null);
   const [missing, setMissing] = useState(false);
   const [failed, setFailed] = useState(false);
@@ -91,14 +94,16 @@ export function SheetPage(props: { readonly sheetId: string; readonly tabId: str
   useEffect(() => {
     let live = true;
     sheetsApi.get(sheetId).then(
-      ({ sheet, records }) => {
+      ({ sheet, records, role: given }) => {
         if (!live) return;
+        setRole(given);
         const created = new SheetSync(workbookFromRecords(records, engineOptions()), {
           clientId,
           post: (base, edits) => postEdits(sheetId, base, edits),
           fetch: async () => {
             const fresh = await sheetsApi.get(sheetId);
             setMeta(fresh.sheet);
+            setRole(fresh.role);
             return workbookFromRecords(fresh.records, engineOptions());
           },
           onRemote: (change) => {
@@ -267,6 +272,7 @@ export function SheetPage(props: { readonly sheetId: string; readonly tabId: str
     );
   }
 
+  const canEdit = hasRole(role, "editor");
   const remove = async () => {
     if (!window.confirm(`Delete "${meta.title}" for everyone? Its tabs and cells go too.`)) return;
     try {
@@ -290,9 +296,13 @@ export function SheetPage(props: { readonly sheetId: string; readonly tabId: str
             Sheets
           </a>
           <span className="doc-header-crumb">/</span>
-          <button type="button" className="sheet-title" title="Rename" onClick={() => setRenaming(true)}>
-            {meta.title}
-          </button>
+          {canEdit ? (
+            <button type="button" className="sheet-title" title="Rename" onClick={() => setRenaming(true)}>
+              {meta.title}
+            </button>
+          ) : (
+            <span className="sheet-title">{meta.title}</span>
+          )}
         </div>
         <div className="doc-header-actions">
           <PresenceAvatars avatars={avatars} />
@@ -301,9 +311,27 @@ export function SheetPage(props: { readonly sheetId: string; readonly tabId: str
               Export CSV
             </a>
           ) : null}
-          <button type="button" className="button secondary small sheet-delete" onClick={() => void remove()}>
-            Delete
-          </button>
+          {!canEdit ? <span className="sheet-read-only">View only</span> : null}
+          {role === "owner" ? (
+            <button type="button" className="button secondary small sheet-delete" onClick={() => void remove()}>
+              Delete
+            </button>
+          ) : null}
+          <ShareButton
+            target={{ kind: "sheet", id: sheetId }}
+            role={role}
+            title={meta.title}
+            onClosed={() => {
+              // Sharing may have changed this person's own role, or removed them.
+              sheetsApi.get(sheetId).then(
+                (fresh) => {
+                  setMeta(fresh.sheet);
+                  setRole(fresh.role);
+                },
+                () => setMissing(true),
+              );
+            }}
+          />
         </div>
       </header>
 
@@ -325,6 +353,7 @@ export function SheetPage(props: { readonly sheetId: string; readonly tabId: str
         overlays={overlays}
         onSelectionChange={onSelectionChange}
         onNotice={setNotice}
+        readOnly={!canEdit}
       />
 
       {renaming ? (
