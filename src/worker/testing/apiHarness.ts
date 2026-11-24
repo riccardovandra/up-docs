@@ -176,6 +176,11 @@ export function makeApiHarness(overrides: Partial<ApiDeps> = {}) {
         sheetSockets.push({ sheetId, userId, open: true });
         return new Response(null, { status: 204 });
       },
+      closeSockets: async (sheetId, userId) => {
+        for (const socket of sheetSockets) {
+          if (socket.sheetId === sheetId && socket.userId === userId) socket.open = false;
+        }
+      },
     },
     images: {
       put: async (key, body, contentType) => {

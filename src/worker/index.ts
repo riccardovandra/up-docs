@@ -64,6 +64,7 @@ function apiDeps(request: Request, env: Env, ctx: ExecutionContext): ApiDeps {
         headers.set(SHEET_SOCKET_USER_HEADER, userId);
         return sheetRoom(env, sheetId).fetch(new Request(request, { headers }));
       },
+      closeSockets: (sheetId, userId) => sheetRoom(env, sheetId).closeSockets(userId),
     },
     images: env.IMAGES ? r2ImageStore(env.IMAGES) : d1ImageStore(env.DB),
     videos: env.IMAGES ? r2VideoStore(env.IMAGES) : null,

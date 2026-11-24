@@ -20,6 +20,10 @@ const WORDS: Readonly<Record<ShareTarget["kind"], { readonly noun: string; reado
       noun: "diagram",
       sees: "can view every page of this diagram as a picture, without signing in. Its source, comments and people stay private.",
     },
+    sheet: {
+      noun: "sheet",
+      sees: "can read every tab of this sheet, without signing in. People stay private.",
+    },
     page: {
       noun: "page",
       sees: "can open the latest version of this page, without signing in. Earlier versions and people stay private.",

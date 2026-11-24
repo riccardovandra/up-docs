@@ -460,7 +460,8 @@ export async function handleApi(
     if (request.headers.get("Upgrade") !== "websocket") return error(426, "expected_websocket");
     if (!isSheetId(id)) return error(404, "not_found");
     try {
-      await Sheets.requireSheet(deps.db, { sheetId: id, userId: principal.userId });
+      // Viewers connect too: the socket only carries what others change and who is here.
+      await Sheets.requireSheet(deps.db, { sheetId: id, userId: principal.userId, need: "view" });
     } catch (cause) {
       if (cause instanceof Docs.NotFoundError) return error(404, "not_found");
       throw cause;
@@ -622,7 +623,7 @@ export async function handleApi(
       return json({ ...(await Docs.getDoc(deps.db, id)), role, owner });
     }
 
-    // An item's public link: a doc, diagram or page. Only an owner, and only
+    // An item's public link: a doc, diagram, page or sheet. Only an owner, and only
     // from a browser session: a leaked agent token must not publish anything.
     const publicKind = publicKindOf(resource);
     if (publicKind && id && sub === "public-link" && segments.length === 3) {
@@ -1025,6 +1026,15 @@ export async function handleApi(
       if (response) return response;
     }
 
+    if (resource === "sheets" && id && sub === "members" && segments.length <= 4) {
+      const response = await handleMembers(
+        request,
+        { scope: Access.sheetScope(id), subId, method, principal },
+        deps,
+      );
+      if (response) return response;
+    }
+
     if (resource === "pages" && id && sub === "members" && segments.length <= 4) {
       const response = await handleMembers(
         request,
@@ -1066,6 +1076,8 @@ export async function handleApi(
     if (cause instanceof Diagrams.DiagramForbiddenError)
       return error(403, "forbidden");
     if (cause instanceof HtmlPages.PageForbiddenError)
+      return json({ error: "forbidden", required: cause.required }, 403);
+    if (cause instanceof Sheets.SheetForbiddenError)
       return json({ error: "forbidden", required: cause.required }, 403);
     if (cause instanceof HtmlPages.InvalidPageError) {
       const tooLarge = cause.code === "too_large";
@@ -1779,8 +1791,9 @@ function originArg(value: unknown): string | null | false {
 }
 
 /**
- * Sheets, under `/api/sheets`. Their creator and the admin list, read, edit,
- * rename, move and delete them; anyone else gets 404. Edit lists go through
+ * Sheets, under `/api/sheets`. The people on a sheet (and the admin) list and
+ * read it; editors edit and rename it; owners move, delete and share it;
+ * anyone else gets 404. Edit lists go through
  * the sheet's room (`Sheets.applySheetEdits`), which orders them against
  * `base`. Returns null when the path is not one of these routes.
  */
@@ -1820,12 +1833,13 @@ async function handleSheets(
       createdBy: userId,
       now: deps.now(),
     });
-    return json(created, 201);
+    return json({ ...created, role: "owner" }, 201);
   }
 
   if (!id) return null;
   if (!isSheetId(id)) return error(404, "not_found");
-  const need = () => Sheets.requireSheet(deps.db, { sheetId: id, userId });
+  const need = (access: Sheets.SheetNeed) =>
+    Sheets.requireSheet(deps.db, { sheetId: id, userId, need: access });
 
   if (sub === "edits" && method === "POST") {
     const body = await readJson(request);
@@ -1836,7 +1850,7 @@ async function handleSheets(
       return error(400, "invalid_edits");
     const origin = originArg(body.origin);
     if (origin === false) return error(400, "invalid_origin");
-    await need();
+    await need("edit");
     const result = await Sheets.applySheetEdits(deps.sheetRooms, id, {
       base,
       edits: edits as ReadonlyArray<Edit>,
@@ -1851,7 +1865,7 @@ async function handleSheets(
   }
 
   if (sub === "export.csv" && SAFE_METHODS.has(method)) {
-    await need();
+    await need("view");
     const { sheet, records } = await Sheets.loadSheet(deps.db, id);
     const tab = Sheets.sheetCsv(workbookFromRecords(records), url.searchParams.get("tab"));
     if (!tab) return error(404, "unknown_tab");
@@ -1867,8 +1881,8 @@ async function handleSheets(
   if (sub) return null;
 
   if (method === "GET") {
-    await need();
-    return json(await Sheets.loadSheet(deps.db, id));
+    const { role } = await need("view");
+    return json({ ...(await Sheets.loadSheet(deps.db, id)), role });
   }
 
   if (method === "PATCH") {
@@ -1881,7 +1895,8 @@ async function handleSheets(
     if (title === undefined && projectId === undefined) return error(400, "empty_write");
     const origin = originArg(body.origin);
     if (origin === false) return error(400, "invalid_origin");
-    await need();
+    // Editors rename; moving it to another project is the owner's.
+    await need(projectId === undefined ? "edit" : "owner");
     if (projectId && !(await Access.canSeeProject(deps.db, projectId, userId))) {
       return error(404, "not_found");
     }
@@ -1892,7 +1907,7 @@ async function handleSheets(
   if (method === "DELETE") {
     const origin = originArg(url.searchParams.get("origin"));
     if (origin === false) return error(400, "invalid_origin");
-    await need();
+    await need("owner");
     await deps.sheetRooms.deleteSheet(id, { origin });
     return json({ ok: true });
   }
@@ -2236,7 +2251,9 @@ const publicKindOf = (resource: string | undefined): Access.MemberScope["kind"] 
       ? "diagram"
       : resource === "pages"
         ? "page"
-        : null;
+        : resource === "sheets"
+          ? "sheet"
+          : null;
 
 /**
  * The role a principal holds on a doc or diagram, for its people list. Only
@@ -2249,6 +2266,10 @@ async function memberListRole(
   userId: string,
 ): Promise<DocRole> {
   if (scope.kind === "doc") return Access.requireDocRole(deps.db, scope.id, userId, "viewer");
+  if (scope.kind === "sheet") {
+    if (!isSheetId(scope.id)) throw new Docs.NotFoundError("sheet");
+    return (await Sheets.requireSheet(deps.db, { sheetId: scope.id, userId, need: "view" })).role;
+  }
   if (scope.kind === "page") {
     const { access } = await HtmlPages.requirePage(deps.db, {
       pageId: scope.id,
@@ -2329,6 +2350,7 @@ async function handleMembers(
     });
     // Diagram pages re-read over HTTP; only a doc has open sockets to close.
     if (userId && scope.kind === "doc") await deps.rooms.closeSockets(scope.id, userId);
+    if (userId && scope.kind === "sheet") await deps.sheetRooms.closeSockets(scope.id, userId);
     return json({ members: await members() });
   }
   return null;
@@ -2368,6 +2390,10 @@ export async function inviteToScope(
     const page = await HtmlPages.getPage(deps.db, scope.id);
     title = page.title;
     url = pageUrl(deps.publicOrigin, page.id);
+  } else if (scope.kind === "sheet") {
+    const sheet = await Sheets.getSheetMeta(deps.db, scope.id);
+    title = sheet.title;
+    url = `${deps.publicOrigin}/sheets/${sheet.id}`;
   } else {
     const diagram = await Diagrams.getDiagram(deps.db, scope.id);
     title = diagram.title;

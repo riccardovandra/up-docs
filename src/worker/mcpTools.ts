@@ -705,14 +705,20 @@ async function shareTarget(
 ): Promise<{
   readonly scope: Access.MemberScope;
   readonly role: DocRole;
-  readonly noun: "doc" | "diagram" | "page";
+  readonly noun: "doc" | "diagram" | "page" | "sheet";
 }> {
-  const given = [args.docId, args.diagramId, args.pageId].filter((value) => value !== undefined);
+  const given = [args.docId, args.diagramId, args.pageId, args.sheetId].filter(
+    (value) => value !== undefined,
+  );
   if (given.length !== 1) {
     fail(
       "invalid_argument",
-      'Pass "docId" for a doc, "diagramId" for a Draw.io diagram, or "pageId" for a page (one of them).',
+      'Pass "docId" for a doc, "diagramId" for a Draw.io diagram, "pageId" for a page, or "sheetId" for a sheet (one of them).',
     );
+  }
+  if (args.sheetId !== undefined) {
+    const { sheet, role } = await sheetWith(ctx, sheetIdArg(args), "view");
+    return { scope: Access.sheetScope(sheet.id), role, noun: "sheet" };
   }
   if (args.docId !== undefined) {
     const docId = requireString(args, "docId");
@@ -1477,18 +1483,30 @@ function sheetIdArg(args: Args): string {
   );
 }
 
-/** A sheet the token user manages; any other is not_found, like REST's 404. */
-async function sheetWith(ctx: ToolContext, sheetId: string): Promise<SheetMeta> {
+/** A sheet the token user is on with the access asked for; any other is not_found, like REST's 404. */
+async function sheetWith(
+  ctx: ToolContext,
+  sheetId: string,
+  need: Sheets.SheetNeed,
+): Promise<{ readonly sheet: SheetMeta; readonly role: DocRole }> {
   try {
     return await Sheets.requireSheet(ctx.deps.db, {
       sheetId,
       userId: ctx.principal.userId,
+      need,
     });
   } catch (cause) {
     if (cause instanceof Docs.NotFoundError) {
       return fail(
         "not_found",
-        "No sheet with that id that you can see. list_sheets lists yours.",
+        "No sheet with that id that you can see. list_sheets lists the ones you are on.",
+      );
+    }
+    if (cause instanceof Sheets.SheetForbiddenError) {
+      return fail(
+        "forbidden",
+        `This needs the ${cause.required} role on the sheet, and you have less. read_sheet still reads it, create_sheet makes one of your own, and a sheet owner can give you more with share_doc {sheetId}.`,
+        { required: cause.required },
       );
     }
     throw cause;
@@ -1968,26 +1986,28 @@ export const TOOLS = [
   {
     name: "list_members",
     description:
-      "List the people who can open a doc, a Draw.io diagram (diagramId) or a page (pageId), and their roles (owner, editor, commenter, viewer). Pending people were invited but have not signed in yet.",
+      "List the people who can open a doc, a Draw.io diagram (diagramId), a page (pageId) or a sheet (sheetId), and their roles (owner, editor, commenter, viewer). Pending people were invited but have not signed in yet.",
     inputSchema: {
       type: "object",
       properties: {
         docId: { type: "string" },
         diagramId: { type: "string", description: "A Draw.io diagram's id or link, instead of docId." },
         pageId: { type: "string", description: "A page's id or link, instead of docId." },
+        sheetId: { type: "string", description: "A sheet's id or link, instead of docId." },
       },
     },
   },
   {
     name: "share_doc",
     description:
-      "Give a person access to a doc, a Draw.io diagram (diagramId) or a page (pageId), by email, or change their role. Docs, diagrams and pages are private until shared. On a diagram, editors change the drawing, commenters comment and viewers see it; on a page, editors upload new versions and everyone else views it. New people get an email with the link when email is set up; the result says if none was sent. Owner only.",
+      "Give a person access to a doc, a Draw.io diagram (diagramId), a page (pageId) or a sheet (sheetId), by email, or change their role. Docs, diagrams, pages and sheets are private until shared. On a diagram, editors change the drawing, commenters comment and viewers see it; on a page, editors upload new versions and everyone else views it; on a sheet, editors change cells and everyone else views it. New people get an email with the link when email is set up; the result says if none was sent. Owner only.",
     inputSchema: {
       type: "object",
       properties: {
         docId: { type: "string" },
         diagramId: { type: "string", description: "A Draw.io diagram's id or link, instead of docId." },
         pageId: { type: "string", description: "A page's id or link, instead of docId." },
+        sheetId: { type: "string", description: "A sheet's id or link, instead of docId." },
         email: { type: "string" },
         role: { type: "string", enum: DOC_ROLES },
       },
@@ -1997,13 +2017,14 @@ export const TOOLS = [
   {
     name: "unshare_doc",
     description:
-      "Remove a person's access to a doc, a Draw.io diagram (diagramId) or a page (pageId). Owner only, except that anyone may remove themselves; each keeps at least one owner.",
+      "Remove a person's access to a doc, a Draw.io diagram (diagramId), a page (pageId) or a sheet (sheetId). Owner only, except that anyone may remove themselves; each keeps at least one owner.",
     inputSchema: {
       type: "object",
       properties: {
         docId: { type: "string" },
         diagramId: { type: "string", description: "A Draw.io diagram's id or link, instead of docId." },
         pageId: { type: "string", description: "A page's id or link, instead of docId." },
+        sheetId: { type: "string", description: "A sheet's id or link, instead of docId." },
         email: { type: "string" },
       },
       required: ["email"],
@@ -2243,7 +2264,7 @@ export const TOOLS = [
   {
     name: "create_sheet",
     description:
-      'Create a sheet: a shared spreadsheet with tabs and formulas that people watch change live. File it like create_doc: projectKey (with projectName if the project is new) or projectId; omit both for no project. Returns the sheet, its revision (0), its one tab "Sheet1" and its url; share the url, then build it with edit_sheet (format_guide {topic: "sheet"} first).',
+      'Create a sheet: a shared spreadsheet with tabs and formulas that people watch change live. File it like create_doc: projectKey (with projectName if the project is new) or projectId; omit both for no project. Returns the sheet, its revision (0), its one tab "Sheet1" and its url; build it with edit_sheet (format_guide {topic: "sheet"} first). You become its owner; it is private until shared with share_doc {sheetId}.',
     inputSchema: {
       type: "object",
       properties: {
@@ -2257,7 +2278,7 @@ export const TOOLS = [
   {
     name: "list_sheets",
     description:
-      "List the sheets you manage (the ones you created; every sheet for the workspace admin), most recently changed first. Narrow to one project with projectId or projectKey, or pass noProject: true.",
+      "List the sheets you are on, with your role on each (every sheet for the workspace admin), most recently changed first. Narrow to one project with projectId or projectKey, or pass noProject: true.",
     inputSchema: {
       type: "object",
       properties: {
@@ -3293,6 +3314,9 @@ const handlers: Record<
     if (userId && target.scope.kind === "doc") {
       await ctx.deps.rooms.closeSockets(target.scope.id, userId);
     }
+    if (userId && target.scope.kind === "sheet") {
+      await ctx.deps.sheetRooms.closeSockets(target.scope.id, userId);
+    }
     const members = await Access.listScopeMembers(ctx.deps.db, target.scope, ctx.deps.owners);
     return { members: members.map(memberSummary) };
   },
@@ -3928,12 +3952,12 @@ const handlers: Record<
       userId: ctx.principal.userId,
       projectId,
     });
-    return { sheets: sheets.map((sheet) => sheetSummary(ctx, sheet)) };
+    return { sheets: sheets.map((sheet) => ({ ...sheetSummary(ctx, sheet), role: sheet.role })) };
   },
 
   read_sheet: async (args, ctx) => {
     const sheetId = sheetIdArg(args);
-    await sheetWith(ctx, sheetId);
+    await sheetWith(ctx, sheetId, "view");
     const { sheet, workbook } = await loadWorkbook(ctx, sheetId);
     return sheetRead(ctx, sheet, workbook);
   },
@@ -3942,7 +3966,7 @@ const handlers: Record<
     const sheetId = sheetIdArg(args);
     const tab = requireString(args, "sheet", 200);
     const range = requireString(args, "range", 100);
-    await sheetWith(ctx, sheetId);
+    await sheetWith(ctx, sheetId, "view");
     const { workbook } = await loadWorkbook(ctx, sheetId);
     const read = readCells(workbook, tab, range);
     if (isRefusal(read)) readRefused(workbook, tab, range, read);
@@ -3977,7 +4001,7 @@ const handlers: Record<
         SHEET_GUIDE,
       );
     }
-    await sheetWith(ctx, sheetId);
+    await sheetWith(ctx, sheetId, "edit");
     const result = await Sheets.applySheetEdits(ctx.deps.sheetRooms, sheetId, {
       base,
       edits: edits as ReadonlyArray<Edit>,
@@ -3991,8 +4015,10 @@ const handlers: Record<
   update_sheet: async (args, ctx) => {
     const sheetId = sheetIdArg(args);
     const title = optionalString(args, "title", MAX_SHEET_TITLE_LENGTH);
-    await sheetWith(ctx, sheetId);
+    await sheetWith(ctx, sheetId, "edit");
     const projectId = await sheetMoveTarget(ctx, args);
+    // Editors rename; moving it to another project is the owner's.
+    if (projectId !== undefined) await sheetWith(ctx, sheetId, "owner");
     if (title === undefined && projectId === undefined) {
       fail(
         "invalid_argument",

@@ -80,8 +80,15 @@ export function SheetWorkbook(props: {
    */
   readonly onSelectionChange?: (sheetId: string, selection: Selection) => void;
   readonly onNotice: (message: string) => void;
+  /**
+   * View only: cells select, copy and scroll, tabs switch, and nothing is
+   * typed, pasted, formatted or sent. The server refuses edits from a viewer
+   * anyway; this keeps the page from offering them.
+   */
+  readonly readOnly?: boolean;
 }) {
   const { sync, onNotice } = props;
+  const readOnly = props.readOnly === true;
   const workbook = useSyncExternalStore(sync.subscribe, sync.getView);
   const lastName = useRef<string | null>(null);
   const active =
@@ -124,6 +131,7 @@ export function SheetWorkbook(props: {
   /** Applies edits here and sends them; cell writes and formats can be undone. */
   const send = useCallback(
     (edits: ReadonlyArray<Edit>, options: { readonly undoable: boolean; readonly sheetId?: string }) => {
+      if (readOnly) return false;
       if (edits.length === 0) return true;
       const lists = chunkEdits(edits);
       const inverse = options.undoable ? inverseOfLists(sync.view, lists) : null;
@@ -139,7 +147,7 @@ export function SheetWorkbook(props: {
       }
       return true;
     },
-    [sync, onNotice, active.id],
+    [sync, onNotice, active.id, readOnly],
   );
   const sendUndo = (edits: ReadonlyArray<Edit>) => send(edits, { undoable: false });
 
@@ -166,6 +174,7 @@ export function SheetWorkbook(props: {
   const draftSheet = draft ? workbook.sheets.find((sheet) => sheet.id === draft.sheetId) : undefined;
 
   const startDraft = (mode: Draft["mode"], text: string, where: Draft["where"]) => {
+    if (readOnly) return;
     const { row, col } = selection.anchor;
     const original = viewCell(workbook, active.id, row, col).input;
     setDraft({
@@ -559,6 +568,8 @@ export function SheetWorkbook(props: {
   };
 
   const onContextMenu = (target: GridTarget, x: number, y: number) => {
+    // Every menu item changes the sheet.
+    if (readOnly) return;
     if (draft) finishDraft(null);
     if (target.kind === "corner") return;
     const rect = selectionRect(selection, dims);
@@ -573,6 +584,7 @@ export function SheetWorkbook(props: {
   };
 
   const addTab = () => {
+    if (readOnly) return;
     const names = new Set(workbook.sheets.map((sheet) => sheet.name.toLowerCase()));
     let n = workbook.sheets.length + 1;
     while (names.has(`sheet${n}`)) n += 1;
@@ -684,6 +696,7 @@ export function SheetWorkbook(props: {
           className="sheet-formula-bar"
           ariaLabel="Formula bar"
           inputRef={barInput}
+          readOnly={readOnly}
           value={draft ? draft.text : activeView.input}
           onChange={(text) => {
             if (draft) onDraftChange(text);
@@ -716,6 +729,7 @@ export function SheetWorkbook(props: {
           onPointer={onPointer}
           onDoubleClick={(row, col) => {
             setSelection(active.id, cellSelection({ row, col }));
+            if (readOnly) return;
             const input = viewCell(workbook, active.id, row, col).input;
             setDraft({ sheetId: active.id, row, col, text: input, original: input, mode: "edit", where: "cell", pointing: null, point: null, pointSheetId: null });
             caretAfter.current = input.length;
@@ -731,12 +745,14 @@ export function SheetWorkbook(props: {
           }}
           onKeyDown={onGridKey}
         />
-        <Toolbar
-          format={activeView.format}
-          onFormat={applyFormat}
-          onNumberFormat={(pattern) => applyFormat({ numberFormat: pattern === null ? null : { pattern } })}
-          onDecimals={nextDecimals}
-        />
+        {readOnly ? null : (
+          <Toolbar
+            format={activeView.format}
+            onFormat={applyFormat}
+            onNumberFormat={(pattern) => applyFormat({ numberFormat: pattern === null ? null : { pattern } })}
+            onDecimals={nextDecimals}
+          />
+        )}
       </div>
 
       <TabsBar
@@ -751,6 +767,7 @@ export function SheetWorkbook(props: {
           send([{ kind: "deleteSheet", sheet: sheetId }], { undoable: false });
         }}
         onMove={(sheetId, afterId) => send([{ kind: "moveSheets", sheets: [sheetId], afterSheet: afterId }], { undoable: false })}
+        readOnly={readOnly}
       />
 
       {menu ? (

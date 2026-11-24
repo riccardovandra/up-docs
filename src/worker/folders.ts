@@ -54,7 +54,7 @@ export async function getFolder(db: D1Database, folderId: string): Promise<Folde
 /**
  * A project's folders and where its items sit. With `all` (the admin) every
  * folder and placement; otherwise only the items `userId` can open (docs and
- * diagrams they are a member of, sheets they created) and the folders on the
+ * diagrams, pages and sheets they are a member of) and the folders on the
  * way to them, so a guest never learns names of folders holding nothing of theirs.
  */
 export async function listProjectFolders(
@@ -74,7 +74,8 @@ export async function listProjectFolders(
            AND (?3 OR EXISTS (SELECT 1 FROM diagram_members m WHERE m.diagram_id = g.id AND m.user_id = ?2))
          UNION ALL
          SELECT 'sheet', s.id, s.folder_id FROM sheets s
-         WHERE s.project_id = ?1 AND s.folder_id IS NOT NULL AND (?3 OR s.created_by = ?2)
+         WHERE s.project_id = ?1 AND s.folder_id IS NOT NULL
+           AND (?3 OR EXISTS (SELECT 1 FROM sheet_members m WHERE m.sheet_id = s.id AND m.user_id = ?2))
          UNION ALL
          SELECT 'page', p.id, p.folder_id FROM pages p
          WHERE p.project_id = ?1 AND p.folder_id IS NOT NULL

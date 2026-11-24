@@ -1,5 +1,5 @@
 // Public links. The token is the only credential: it opens one item (a doc,
-// a diagram or a page), read-only. Everything here runs before the API's
+// a diagram, a page or a sheet), read-only. Everything here runs before the API's
 // sign-in check, so it never reads a cookie or bearer token, and every route
 // resolves the item from the token on the server; no route takes an item id
 // from the visitor without checking it against the token's item.
@@ -15,6 +15,7 @@ import {
   type PublicKind,
   type PublicLink,
   type PublicPage,
+  type PublicSheet,
 } from "../shared/publicLinks.ts";
 import { videoFileType } from "../shared/video.ts";
 import { randomToken } from "./crypto.ts";
@@ -23,6 +24,7 @@ import * as Docs from "./docs.ts";
 import * as Embeds from "./embeds.ts";
 import * as HtmlPages from "./htmlPages.ts";
 import * as Images from "./images.ts";
+import * as Sheets from "./sheets.ts";
 import type { ImageStore } from "./images.ts";
 import * as Videos from "./videos.ts";
 import type { VideoStore } from "./videos.ts";
@@ -192,6 +194,12 @@ export async function publicDiagram(db: D1Database, diagramId: string): Promise<
   };
 }
 
+/** A linked sheet: its title, tabs and cells, never who made or changed it. */
+export async function publicSheet(db: D1Database, sheetId: string): Promise<PublicSheet> {
+  const { sheet, records } = await Sheets.loadSheet(db, sheetId);
+  return { kind: "sheet", title: sheet.title, updatedAt: sheet.updatedAt, records };
+}
+
 /** A linked page: its title and latest version, never who made it or where it lives. */
 export async function publicPage(db: D1Database, pageId: string): Promise<PublicPage> {
   const page = await HtmlPages.getPage(db, pageId);
@@ -220,13 +228,14 @@ const notFound = () => publicJson({ error: "not_found" }, 404);
 
 /**
  * `/api/public/:token[/...]`, GET and HEAD only. `` is the item itself
- * (PublicDoc, PublicDiagram or PublicPage); what else a link serves depends
+ * (PublicDoc, PublicDiagram, PublicPage or PublicSheet); what else a link serves depends
  * on what it opens:
  * - a doc: `images/:file`, `videos/:file` (its own uploads),
  *   `diagrams/:id/picture.svg|png[?page=n]` (a diagram the doc may show) and
  *   `embeds?url=` (its saved copy of a post; never fetched from the web here)
  * - a diagram: `diagrams/:id/picture.svg|png[?page=n]`, its own id only
  * - a page: `content`, its latest version's HTML, sandboxed, into a frame only
+ * - a sheet: nothing else; `` carries every tab and cell
  * Anything else, and any unknown or revoked token, is the same 404.
  */
 export async function handlePublic(
@@ -252,7 +261,9 @@ export async function handlePublic(
           ? await routeDiagram(request, { diagramId: target.id, ...at }, deps)
           : target.kind === "page"
             ? await routePage(request, { pageId: target.id, ...at }, deps)
-            : null;
+            : at.kind === undefined
+              ? Response.json(await publicSheet(deps.db, target.id))
+              : null;
     return response ? withPublicHeaders(response) : notFound();
   } catch (cause) {
     if (cause instanceof Docs.NotFoundError) return notFound();

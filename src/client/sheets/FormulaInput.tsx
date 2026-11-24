@@ -17,6 +17,7 @@ export function FormulaInput(props: {
   readonly onKeyDown: (event: KeyboardEvent<HTMLInputElement>) => void;
   readonly onFocus?: () => void;
   readonly onBlur?: () => void;
+  readonly readOnly?: boolean;
 }) {
   const mirror = useRef<HTMLDivElement>(null);
   const formula = props.value.startsWith("=");
@@ -54,6 +55,7 @@ export function FormulaInput(props: {
         </div>
       ) : null}
       <input
+        readOnly={props.readOnly}
         ref={props.inputRef}
         className="formula-field"
         aria-label={props.ariaLabel}

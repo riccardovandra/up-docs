@@ -16,7 +16,10 @@ export function TabsBar(props: {
   readonly onDelete: (sheetId: string) => void;
   /** Moves a tab after another, or to the front with null. */
   readonly onMove: (sheetId: string, afterId: string | null) => void;
+  /** View only: tabs switch, but cannot be added, renamed, deleted or moved. */
+  readonly readOnly?: boolean;
 }) {
+  const editable = !props.readOnly;
   const [renaming, setRenaming] = useState<{ id: string; name: string } | null>(null);
   const [dragging, setDragging] = useState<string | null>(null);
   const [menu, setMenu] = useState<{ id: string; x: number; y: number } | null>(null);
@@ -39,9 +42,11 @@ export function TabsBar(props: {
 
   return (
     <div className="sheet-tabs" role="tablist" aria-label="Tabs">
-      <button type="button" className="sheet-tab-add" aria-label="Add tab" title="Add tab" onClick={props.onAdd}>
-        +
-      </button>
+      {editable ? (
+        <button type="button" className="sheet-tab-add" aria-label="Add tab" title="Add tab" onClick={props.onAdd}>
+          +
+        </button>
+      ) : null}
       {props.sheets.map((sheet) =>
         renaming?.id === sheet.id ? (
           <input
@@ -67,13 +72,15 @@ export function TabsBar(props: {
             role="tab"
             aria-selected={sheet.id === props.activeId}
             className={`sheet-tab${dragging === sheet.id ? " dragging" : ""}`}
-            draggable
+            draggable={editable}
             onMouseDown={(event) => event.preventDefault()}
             onClick={() => props.onSelect(sheet.id)}
-            onDoubleClick={() => setRenaming({ id: sheet.id, name: sheet.name })}
+            onDoubleClick={() => {
+              if (editable) setRenaming({ id: sheet.id, name: sheet.name });
+            }}
             onContextMenu={(event) => {
               event.preventDefault();
-              setMenu({ id: sheet.id, x: event.clientX, y: event.clientY });
+              if (editable) setMenu({ id: sheet.id, x: event.clientX, y: event.clientY });
             }}
             onDragStart={(event) => {
               setDragging(sheet.id);

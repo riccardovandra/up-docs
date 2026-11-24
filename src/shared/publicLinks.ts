@@ -1,10 +1,12 @@
 // Public links: anyone with `/p/<token>` sees one item, read-only and without
 // signing in. Every kind of item shares the same link: a doc (every tab), a
-// Draw.io diagram (its pictures), a page (its HTML, sandboxed) or a sheet.
+// Draw.io diagram (its pictures), a page (its HTML, sandboxed) or a sheet
+// (every tab, its cells as stored).
 // Shared by the Worker's public routes and the SPA.
 
 import type { DiagramSummary } from "./drawio.ts";
 import type { Tab } from "./protocol.ts";
+import type { WorkbookRecords } from "./sheet/serialize.ts";
 
 /** A token as `randomToken(32)` issues it: 32 bytes, base64url, no padding. */
 const TOKEN = /^[A-Za-z0-9_-]{43}$/;
@@ -65,7 +67,15 @@ export interface PublicPage {
   readonly version: number;
 }
 
-export type PublicItem = PublicDoc | PublicDiagram | PublicPage;
+/** `GET /api/public/:token` for a sheet: its tabs and cells as stored, never who wrote them. */
+export interface PublicSheet {
+  readonly kind: "sheet";
+  readonly title: string;
+  readonly updatedAt: number;
+  readonly records: WorkbookRecords;
+}
+
+export type PublicItem = PublicDoc | PublicDiagram | PublicPage | PublicSheet;
 
 /** A page's HTML under a link: always the latest version, sandboxed, into a frame only. */
 export const publicPageContentPath = (token: string) => `${publicApiBase(token)}/content`;
