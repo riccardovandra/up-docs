@@ -3314,6 +3314,9 @@ const handlers: Record<
     if (userId && target.scope.kind === "doc") {
       await ctx.deps.rooms.closeSockets(target.scope.id, userId);
     }
+    if (userId && target.scope.kind === "sheet") {
+      await ctx.deps.sheetRooms.closeSockets(target.scope.id, userId);
+    }
     const members = await Access.listScopeMembers(ctx.deps.db, target.scope, ctx.deps.owners);
     return { members: members.map(memberSummary) };
   },

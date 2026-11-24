@@ -56,6 +56,17 @@ export class SheetRoom extends DurableObject<Env> {
     return this.engine;
   }
 
+  /** Closes the sockets of someone removed from the sheet, so they stop receiving its edits. */
+  async closeSockets(userId: string): Promise<void> {
+    for (const socket of this.ctx.getWebSockets(userId)) {
+      try {
+        socket.close(4403, "access_removed");
+      } catch {
+        // Already closing.
+      }
+    }
+  }
+
   private broadcast(message: SheetRoomMessage): void {
     const payload = JSON.stringify(message);
     for (const socket of this.ctx.getWebSockets()) {

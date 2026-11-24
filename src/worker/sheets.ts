@@ -588,6 +588,8 @@ export interface SheetRooms {
   deleteSheet(sheetId: string, input: { readonly origin: string | null }): Promise<void>;
   /** `userId` tags the socket, for S4's presence. */
   openSocket(sheetId: string, request: Request, userId: string): Promise<Response>;
+  /** Closes the sockets of someone removed from the sheet, so they stop receiving its edits. */
+  closeSockets(sheetId: string, userId: string): Promise<void>;
 }
 
 // ---- entry points for REST and MCP (access checked by the caller with requireSheet) ----

@@ -623,7 +623,7 @@ export async function handleApi(
       return json({ ...(await Docs.getDoc(deps.db, id)), role, owner });
     }
 
-    // An item's public link: a doc, diagram or page. Only an owner, and only
+    // An item's public link: a doc, diagram, page or sheet. Only an owner, and only
     // from a browser session: a leaked agent token must not publish anything.
     const publicKind = publicKindOf(resource);
     if (publicKind && id && sub === "public-link" && segments.length === 3) {
@@ -1791,8 +1791,9 @@ function originArg(value: unknown): string | null | false {
 }
 
 /**
- * Sheets, under `/api/sheets`. Their creator and the admin list, read, edit,
- * rename, move and delete them; anyone else gets 404. Edit lists go through
+ * Sheets, under `/api/sheets`. The people on a sheet (and the admin) list and
+ * read it; editors edit and rename it; owners move, delete and share it;
+ * anyone else gets 404. Edit lists go through
  * the sheet's room (`Sheets.applySheetEdits`), which orders them against
  * `base`. Returns null when the path is not one of these routes.
  */
@@ -2349,6 +2350,7 @@ async function handleMembers(
     });
     // Diagram pages re-read over HTTP; only a doc has open sockets to close.
     if (userId && scope.kind === "doc") await deps.rooms.closeSockets(scope.id, userId);
+    if (userId && scope.kind === "sheet") await deps.sheetRooms.closeSockets(scope.id, userId);
     return json({ members: await members() });
   }
   return null;

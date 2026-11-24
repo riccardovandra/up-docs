@@ -129,6 +129,22 @@ describe("sheet sharing", () => {
     expect((await send(viewer, "GET", `/api/sheets/${sheetId}`)).status).toBe(404);
   });
 
+  it("closes a removed person's open sheet sockets, and only theirs", async () => {
+    const { api, admin, send, sheetId, person } = await setup();
+    const viewer = await person("viewer@example.com", "viewer");
+    const ws = (cookie: string) =>
+      api.call("GET", `/api/sheets/${sheetId}/ws`, { headers: { Cookie: cookie, Upgrade: "websocket" } });
+    expect((await ws(viewer)).status).toBe(204);
+    expect((await ws(admin)).status).toBe(204);
+    const members = (
+      await send<{ members: Array<DocMember> }>(admin, "GET", `/api/sheets/${sheetId}/members`)
+    ).body.members;
+    const row = members.find((member) => member.email === "viewer@example.com")!;
+    await send(admin, "DELETE", `/api/sheets/${sheetId}/members/${row.id}`);
+    expect(api.sheetSockets.map((socket) => socket.open)).toEqual([false, true]);
+    expect((await ws(viewer)).status).toBe(404);
+  });
+
   it("emails a new person a link to the sheet", async () => {
     const { api, admin, send, sheetId } = await setup();
     await send(admin, "POST", `/api/sheets/${sheetId}/members`, {
