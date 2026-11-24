@@ -1980,6 +1980,16 @@ span.tab-row-toggle {
   color: var(--muted);
 }
 
+/* A public diagram has no side panel: the picture takes the whole width. */
+.public-diagram .diagram-viewer {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+/* A public page: the header, then its HTML filling the rest of the window. */
+.public-page {
+  height: 100dvh;
+}
+
 .public-doc-missing {
   max-width: 32rem;
   margin: 15vh auto 0;

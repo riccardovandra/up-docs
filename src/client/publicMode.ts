@@ -1,14 +1,15 @@
-// Public mode: the page a public link opens (`/p/<token>`). Set once, before
-// the editor mounts, by PublicDocPage; the page never turns into the signed-in
-// app in the same load. While it is on, every asset the editor shows goes
-// through the link's own routes, and only the shared doc's assets load.
+// Public mode: the page a public link opens (`/p/<token>`). Set before the
+// editor or a diagram picture mounts, by the public views; the page never
+// turns into the signed-in app in the same load. While it is on, every asset
+// shown goes through the link's own routes, and only the shared item's assets load.
 
 import type { DiagramSummary } from "../shared/drawio.ts";
 import { publicApiBase } from "../shared/publicLinks.ts";
 
 interface PublicShare {
   readonly token: string;
-  readonly docId: string;
+  /** The shared doc; null when the link opens a diagram or a page. */
+  readonly docId: string | null;
   /** The linked diagrams the link may show, by id. */
   readonly diagrams: ReadonlyMap<string, DiagramSummary>;
   /** Shows another tab of the shared doc. */
@@ -37,9 +38,9 @@ export function assetSrc(src: string): string | null {
   if (!share) return src;
   const base = publicApiBase(share.token);
   const image = IMAGE.exec(src);
-  if (image) return image[1] === share.docId ? `${base}/images/${image[2]}` : null;
+  if (image) return share.docId !== null && image[1] === share.docId ? `${base}/images/${image[2]}` : null;
   const video = VIDEO.exec(src);
-  if (video) return video[1] === share.docId ? `${base}/videos/${video[2]}` : null;
+  if (video) return share.docId !== null && video[1] === share.docId ? `${base}/videos/${video[2]}` : null;
   const picture = PICTURE.exec(src);
   if (picture && share.diagrams.has(picture[1]!)) {
     return `${base}/diagrams/${picture[1]}/${picture[2]}${picture[3] ?? ""}`;
@@ -56,7 +57,7 @@ export function followPublicLink(appPath: string, url: string): boolean {
   const share = current;
   if (!share) return false;
   const [first, docId, tabId] = appPath.split("/").filter(Boolean);
-  if (first === "d" && docId === share.docId && tabId) share.openTab(tabId);
+  if (first === "d" && share.docId !== null && docId === share.docId && tabId) share.openTab(tabId);
   else window.location.assign(url);
   return true;
 }

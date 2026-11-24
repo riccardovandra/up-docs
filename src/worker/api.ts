@@ -414,6 +414,7 @@ export async function handleApi(
       db: deps.db,
       images: deps.images,
       videos: deps.videos,
+      frameAncestors: deps.frameAncestors ?? [],
     });
   }
 
@@ -621,17 +622,20 @@ export async function handleApi(
       return json({ ...(await Docs.getDoc(deps.db, id)), role, owner });
     }
 
-    // The doc's public link. Only an owner, and only from a browser session:
-    // a leaked agent token must not be able to publish a doc.
-    if (resource === "docs" && id && sub === "public-link" && segments.length === 3) {
+    // An item's public link: a doc, diagram or page. Only an owner, and only
+    // from a browser session: a leaked agent token must not publish anything.
+    const publicKind = publicKindOf(resource);
+    if (publicKind && id && sub === "public-link" && segments.length === 3) {
       if (principal.kind !== "session") return error(403, "session_required");
-      await need(id, "owner");
+      const target = { kind: publicKind, id };
+      const role = await memberListRole(deps, target, principal.userId);
+      if (role !== "owner") throw new Access.ForbiddenError("owner");
       if (method === "GET") {
-        return json({ link: await PublicLinks.getPublicLink(deps.db, id, deps.publicOrigin) });
+        return json({ link: await PublicLinks.getPublicLink(deps.db, target, deps.publicOrigin) });
       }
       if (method === "PUT") {
         const link = await PublicLinks.createPublicLink(deps.db, {
-          docId: id,
+          target,
           userId: principal.userId,
           now,
           publicOrigin: deps.publicOrigin,
@@ -639,7 +643,7 @@ export async function handleApi(
         return json({ link });
       }
       if (method === "DELETE") {
-        await PublicLinks.deletePublicLink(deps.db, id);
+        await PublicLinks.deletePublicLink(deps.db, target);
         return json({ link: null });
       }
       return error(405, "method_not_allowed");
@@ -2223,6 +2227,16 @@ async function handleComments(
 }
 
 const MAX_EMAIL_LENGTH = 320;
+
+/** The kind of item a REST collection holds, when its items can have a public link. */
+const publicKindOf = (resource: string | undefined): Access.MemberScope["kind"] | null =>
+  resource === "docs"
+    ? "doc"
+    : resource === "diagrams"
+      ? "diagram"
+      : resource === "pages"
+        ? "page"
+        : null;
 
 /**
  * The role a principal holds on a doc or diagram, for its people list. Only

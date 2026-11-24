@@ -115,7 +115,7 @@ describe("public links", () => {
     expect(response.headers.get("Referrer-Policy")).toBe("no-referrer");
     expect(response.headers.get("Set-Cookie")).toBeNull();
     const body = (await response.json()) as PublicDoc;
-    expect(Object.keys(body).toSorted()).toEqual(["diagrams", "docId", "tabs", "title", "updatedAt"]);
+    expect(Object.keys(body).toSorted()).toEqual(["diagrams", "docId", "kind", "tabs", "title", "updatedAt"]);
     expect(body.title).toBe("Shared plan");
     expect(body.tabs).toHaveLength(1);
     expect(body.tabs[0]!.markdown).toContain("Shared secret-free text");
@@ -218,6 +218,21 @@ describe("public links", () => {
     // Unlinked from the doc: gone again.
     await write(docA, "No diagram now");
     expect((await visit(picture)).status).toBe(404);
+  });
+
+  it("keeps the old doc link table in step, so a rollback never revives a link", async () => {
+    const { api, admin, send, docA, publish } = await setup();
+    const legacy = () =>
+      api.db
+        .prepare("SELECT token FROM doc_public_links WHERE doc_id = ?")
+        .bind(docA.doc.id)
+        .all<{ token: string }>();
+    const first = (await publish(docA.doc.id)).body.link.token;
+    expect((await legacy()).results).toEqual([{ token: first }]);
+    const second = (await publish(docA.doc.id)).body.link.token;
+    expect((await legacy()).results).toEqual([{ token: second }]);
+    await send(admin, "DELETE", `/api/docs/${docA.doc.id}/public-link`);
+    expect((await legacy()).results).toEqual([]);
   });
 
   it("stops working at once when turned off, reset or the doc is deleted", async () => {
