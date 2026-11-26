@@ -10,7 +10,14 @@ import { reviveError, type TabWriteResult } from "./docs.ts";
 import { resolvePublicOrigin, type Env } from "./env.ts";
 import { withEmbedPolicy } from "./embed.ts";
 import { d1ImageStore, r2ImageStore } from "./images.ts";
-import { designerOrigin, designerResponse, isDesignerHost, isDesignerPath } from "./designerHost.ts";
+import {
+  designerOrigin,
+  designerResponse,
+  isDesignerHost,
+  isDesignerPath,
+  refuseDesignerOriginRequest,
+} from "./designerHost.ts";
+import { isDesignAgentSocketPath } from "../shared/design.ts";
 import { handleDrawioLink, handleMcp, handlePageLink } from "./mcp.ts";
 import { PUBLIC_HEADERS } from "./publicLinks.ts";
 import { r2VideoStore } from "./videos.ts";
@@ -99,6 +106,11 @@ export default {
         frameAncestors: parseEmbedOrigins(env.FRAME_ANCESTORS),
       });
     }
+    // The editor's code never reaches the app with the app's cookie (see designerHost.ts).
+    const fromEditor = refuseDesignerOriginRequest(request, designer);
+    if (fromEditor) return fromEditor;
+    // Reserved for S3's design agent socket: served by nothing else until then.
+    if (isDesignAgentSocketPath(pathname)) return new Response("Not found", { status: 404 });
     if (isDesignerPath(pathname)) {
       // With an editor origin of its own, the app's origin never serves the editor.
       if (designer) return new Response("Not found", { status: 404 });

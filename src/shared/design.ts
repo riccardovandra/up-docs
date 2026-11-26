@@ -41,6 +41,16 @@ export const designSavePath = (
 ) => `/api/designs/${designId}/versions?baseVersion=${input.baseVersion}&figBytes=${input.figBytes}`;
 
 /**
+ * The agent bridge's WebSocket for one open design (S3). Reserved by S2: it is
+ * the only app path a request from the editor's origin may reach, and it must
+ * authenticate with a one-use ticket, never the session cookie. Until S3
+ * serves it, it answers 404.
+ */
+export const designAgentSocketPath = (designId: string) => `/api/designs/${designId}/agent`;
+const AGENT_SOCKET_PATH = /^\/api\/designs\/[A-Za-z0-9_-]{1,64}\/agent$/;
+export const isDesignAgentSocketPath = (pathname: string) => AGENT_SOCKET_PATH.test(pathname);
+
+/**
  * Where the editor's build is served on its origin. On the editor's own
  * origin every path is the editor's; on the app's origin (no DESIGNER_ORIGIN)
  * only this prefix is.

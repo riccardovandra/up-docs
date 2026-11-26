@@ -13,7 +13,7 @@
 // there the editor gets no 'unsafe-eval', and the agent tools that compile
 // JSX at run time (render, replace_node, apply_patch) do not work; S3 hides them.
 
-import { DESIGNER_BASE_PATH } from "../shared/design.ts";
+import { DESIGNER_BASE_PATH, isDesignAgentSocketPath } from "../shared/design.ts";
 
 /**
  * The editor's own origin, or null to serve it under /designer/ on the app's
@@ -34,6 +34,30 @@ export function designerOrigin(input: {
 /** Whether the request came to the editor's own host. */
 export const isDesignerHost = (request: Request, origin: string | null) =>
   origin !== null && new URL(request.url).host === new URL(origin).host;
+
+/**
+ * A request to the app made by the editor's code: refused before any app
+ * route runs, whatever its method or Upgrade. The editor and the app are
+ * usually the same site (design.<domain> and docs.<domain>), so the browser
+ * sends the app's session cookie, even SameSite=Strict, with the editor's
+ * requests and socket handshakes; without this, code running in the editor
+ * could act as the signed-in person. The one path it may reach is the design
+ * agent socket (S3), which takes a one-use ticket and never the cookie; it is
+ * 404 until S3 serves it. Null for any other request.
+ */
+export function refuseDesignerOriginRequest(
+  request: Request,
+  origin: string | null,
+): Response | null {
+  if (origin === null || request.headers.get("Origin") !== origin) return null;
+  const { pathname } = new URL(request.url);
+  // The one exception, left to the route that serves it (S3; 404 until then).
+  if (isDesignAgentSocketPath(pathname)) return null;
+  return new Response("Forbidden", {
+    status: 403,
+    headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" },
+  });
+}
 
 /** Whether the path is the editor's on the app's origin. */
 export const isDesignerPath = (pathname: string) =>

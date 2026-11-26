@@ -1,6 +1,8 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { designAgentSocketPath } from "../shared/design.ts";
 import { designerOrigin } from "./designerHost.ts";
+import { makeApiHarness } from "./testing/apiHarness.ts";
 import type { Env } from "./env.ts";
 import worker from "./index.ts";
 
@@ -124,5 +126,77 @@ describe("the app's host", () => {
     expect((await get("https://docs.test/designer", {})).status).toBe(302);
     // Still never the app's page for a missing editor file.
     expect((await get("https://docs.test/designer/missing.js", {})).status).toBe(404);
+  });
+});
+
+describe("requests from the editor's origin to the app", () => {
+  afterEach(() => void vi.useRealTimers());
+  /** The real Worker with a database, a signed-in cookie, a doc and a sheet, and rooms that answer. */
+  async function signedIn() {
+    const api = makeApiHarness();
+    // The real Worker reads Date.now(); keep it on the harness clock so the session is current.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(api.clock.now);
+    const cookie = await api.signIn();
+    const headers = { Cookie: cookie };
+    const doc = (await (await api.call("POST", "/api/docs", { body: { title: "Plan" }, headers })).json()) as {
+      doc: { id: string };
+    };
+    const sheet = (await (await api.call("POST", "/api/sheets", { body: { title: "Numbers" }, headers })).json()) as {
+      sheet: { id: string };
+    };
+    const room = {
+      idFromName: (name: string) => name,
+      get: () => ({ fetch: async () => new Response("room") }),
+    };
+    const vars = {
+      ...env(OWN),
+      DB: api.db,
+      DOC_ROOM: room,
+      SHEET_ROOM: room,
+      OWNER_EMAILS: "owner@example.com, second@example.com",
+    } as unknown as Env;
+    const call = (path: string, origin: string, init: RequestInit = {}) =>
+      worker.fetch(
+        new Request(`https://docs.test${path}`, {
+          ...init,
+          headers: { Cookie: cookie, Origin: origin, ...(init.headers as Record<string, string>) },
+        }) as never,
+        vars,
+        ctx,
+      );
+    return { call, docId: doc.doc.id, sheetId: sheet.sheet.id };
+  }
+  const EDITOR = "https://design.docs.test";
+  const APP = "https://docs.test";
+  const socket = { headers: { Upgrade: "websocket" } };
+
+  it("refuses them with 403 even with a valid session cookie: sockets, REST and pages", async () => {
+    const { call, docId, sheetId } = await signedIn();
+    const cases: Array<[string, RequestInit]> = [
+      [`/api/docs/${docId}/ws`, socket],
+      [`/api/sheets/${sheetId}/ws`, socket],
+      ["/api/me", {}],
+      [`/api/docs/${docId}`, { method: "DELETE" }],
+      ["/designs", {}],
+      ["/mcp", { method: "POST", body: "{}" }],
+    ];
+    for (const [path, init] of cases) {
+      const response = await call(path, EDITOR, init);
+      expect([path, response.status]).toEqual([path, 403]);
+    }
+    // The same requests from the app itself go through.
+    expect(await (await call(`/api/docs/${docId}/ws`, APP, socket)).text()).toBe("room");
+    expect(await (await call(`/api/sheets/${sheetId}/ws`, APP, socket)).text()).toBe("room");
+    expect((await call("/api/me", APP)).status).toBe(200);
+    expect((await call("/designs", APP)).status).toBe(200);
+  });
+
+  it("leaves only the reserved design agent socket path, which nothing serves yet", async () => {
+    const { call } = await signedIn();
+    const path = designAgentSocketPath("abc123");
+    expect((await call(path, EDITOR, socket)).status).toBe(404);
+    expect((await call(path, APP, socket)).status).toBe(404);
+    expect((await call(path, APP)).status).toBe(404);
   });
 });
