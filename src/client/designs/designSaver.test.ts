@@ -46,34 +46,39 @@ describe("DesignSaver", () => {
     expect(h.statuses.at(-1)).toBe("saved");
   });
 
-  it("keeps a failed save for Retry", async () => {
+  it("keeps a failed save until a fresh one from the editor replaces it", async () => {
     const h = harness(1);
     h.saver.offer(save(1));
     h.reply({ ok: false, message: "offline" });
     await h.settle();
     expect(h.saver.status).toMatchObject({ kind: "failed", conflict: false });
     expect(h.saver.unsaved).toBe(true);
-    expect(h.acks).toEqual([]);
-    h.saver.retry();
+    h.saver.prepareRetry();
+    // Nothing is resent: the editor sends a fresh save with a new number.
+    expect(h.sent).toHaveLength(1);
+    h.saver.offer(save(2));
     h.reply({ ok: true, version: 2 });
     await h.settle();
-    expect(h.sent.map((each) => each.seq)).toEqual([1, 1]);
-    expect(h.acks).toEqual([1]);
+    expect(h.sent).toEqual([
+      { base: 1, seq: 1 },
+      { base: 1, seq: 2 },
+    ]);
     expect(h.saver.unsaved).toBe(false);
   });
 
-  it("after a conflict, Retry saves on top of the newer version", async () => {
+  it("after a conflict, the fresh save goes on top of the newer version", async () => {
     const h = harness(1);
     h.saver.offer(save(1));
     h.reply({ ok: false, message: "stale", currentVersion: 7 });
     await h.settle();
     expect(h.saver.status).toMatchObject({ kind: "failed", conflict: true });
-    h.saver.retry();
+    h.saver.prepareRetry();
+    h.saver.offer(save(2));
     h.reply({ ok: true, version: 8 });
     await h.settle();
     expect(h.sent).toEqual([
       { base: 1, seq: 1 },
-      { base: 7, seq: 1 },
+      { base: 7, seq: 2 },
     ]);
   });
 

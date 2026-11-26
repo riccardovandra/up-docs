@@ -4,6 +4,7 @@ import {
   DESIGNER_MESSAGE,
   DESIGNER_PROTOCOL,
   DESIGNS_PATH,
+  designPath,
   designerFrameUrl,
   parseDesignerMessage,
   type DesignView,
@@ -92,6 +93,13 @@ export function DesignPage(props: { readonly designId: string }) {
   /** Asks the editor to save what is unsaved; null while no editor is open. */
   const flushEditor = useRef<(() => Promise<FlushResult>) | null>(null);
   const [leaving, setLeaving] = useState(false);
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
   const title = useRef("");
   title.current = design?.title ?? "";
 
@@ -160,16 +168,28 @@ export function DesignPage(props: { readonly designId: string }) {
     saver.current = queue;
     let live = true;
     let opened = false;
-    const flushWaiters: Array<(result: FlushResult) => void> = [];
+    // `flushed` carries no id, and the editor answers flushes in the order asked: the n-th
+    // answer is the n-th request's, so a wait never takes an earlier (or timed-out) one's.
+    let flushesSent = 0;
+    let flushesAnswered = 0;
+    const flushWaiters = new Map<number, (result: FlushResult) => void>();
+    const sendFlush = () => {
+      flushesSent += 1;
+      post({ type: DESIGNER_MESSAGE.flush });
+      return flushesSent;
+    };
     flushEditor.current = () =>
       new Promise<FlushResult>((resolve) => {
         if (!opened) return resolve({ saved: false, unsaved: false });
-        const timer = window.setTimeout(() => resolve(null), FLUSH_WAIT_MS);
-        flushWaiters.push((result) => {
+        const ticket = sendFlush();
+        const timer = window.setTimeout(() => {
+          flushWaiters.delete(ticket);
+          resolve(null);
+        }, FLUSH_WAIT_MS);
+        flushWaiters.set(ticket, (result) => {
           window.clearTimeout(timer);
           resolve(result);
         });
-        post({ type: DESIGNER_MESSAGE.flush });
       });
     const started = window.setTimeout(() => {
       if (live) setEditorError("The editor did not start. Reload the page to try again.");
@@ -220,11 +240,13 @@ export function DesignPage(props: { readonly designId: string }) {
         case DESIGNER_MESSAGE.save:
           queue.offer({ seq: message.seq, fig: message.fig, png: message.png });
           break;
-        case DESIGNER_MESSAGE.flushed:
-          for (const resolve of flushWaiters.splice(0)) {
-            resolve({ saved: message.saved, unsaved: message.unsaved });
-          }
+        case DESIGNER_MESSAGE.flushed: {
+          flushesAnswered += 1;
+          const waiter = flushWaiters.get(flushesAnswered);
+          flushWaiters.delete(flushesAnswered);
+          waiter?.({ saved: message.saved, unsaved: message.unsaved });
           break;
+        }
         case DESIGNER_MESSAGE.error:
           // A save this page refused already shows as "Save failed" in the header.
           if (message.reason === "save-failed" && queue.status.kind === "failed") break;
@@ -237,7 +259,7 @@ export function DesignPage(props: { readonly designId: string }) {
     };
     // A tab being hidden may be closed next: save what is unsaved now (no answer awaited).
     const onHidden = () => {
-      if (document.visibilityState === "hidden" && opened) post({ type: DESIGNER_MESSAGE.flush });
+      if (document.visibilityState === "hidden" && opened) sendFlush();
     };
     window.addEventListener("message", onMessage);
     window.addEventListener("beforeunload", beforeUnload);
@@ -248,7 +270,8 @@ export function DesignPage(props: { readonly designId: string }) {
       window.removeEventListener("message", onMessage);
       window.removeEventListener("beforeunload", beforeUnload);
       document.removeEventListener("visibilitychange", onHidden);
-      for (const resolve of flushWaiters.splice(0)) resolve(null);
+      for (const resolve of flushWaiters.values()) resolve(null);
+      flushWaiters.clear();
       saver.current = null;
       flushEditor.current = null;
     };
@@ -261,6 +284,8 @@ export function DesignPage(props: { readonly designId: string }) {
     const result = flushEditor.current
       ? await flushEditor.current()
       : { saved: false, unsaved: false };
+    // Gone meanwhile (Back, or another link): this page no longer decides anything.
+    if (!mounted.current || window.location.pathname !== designPath(designId)) return;
     setLeaving(false);
     const unsaved = result === null || result.unsaved || saver.current?.unsaved === true;
     if (unsaved && !window.confirm("A change is not saved yet. Leave the design anyway?")) return;
@@ -359,7 +384,15 @@ export function DesignPage(props: { readonly designId: string }) {
               leaving={leaving}
               status={status}
               design={design}
-              onRetry={() => saver.current?.retry()}
+              onRetry={() => {
+                // A fresh save from the editor, with a new number it waits on; after a
+                // conflict, made on top of the newer version.
+                saver.current?.prepareRetry();
+                frame.current?.contentWindow?.postMessage(
+                  { type: DESIGNER_MESSAGE.saveNow },
+                  editorOrigin ?? "",
+                );
+              }}
             />
           ) : null}
           {design.role === "owner" && changesHere ? (

@@ -80,14 +80,15 @@ export class DesignSaver {
     void this.#run();
   }
 
-  /** Sends the failed save again; after a conflict, on top of the newer version. */
-  retry(): void {
+  /**
+   * Before asking the editor for a fresh save (Retry): after a conflict, that save goes on
+   * top of the newer version. The failed file stays until the fresh one replaces it, but is
+   * never sent again: the editor has given up on its number and counts its edits unsaved.
+   */
+  prepareRetry(): void {
     if (!this.#failed) return;
     if (this.#conflictVersion !== null) this.#baseVersion = this.#conflictVersion;
     this.#conflictVersion = null;
-    this.#waiting = this.#failed;
-    this.#failed = null;
-    void this.#run();
   }
 
   /** After the design was loaded again: later saves build on `version`. */
