@@ -88,7 +88,7 @@ The library's Designs tab keeps designs made in [OpenPencil](https://github.com/
 
 - The build downloads the pinned editor release, checks its sha256 and unpacks it into `dist/designer/` (`scripts/fetch-designer.ts`, run by `bun run build`). `DESIGNER_TARBALL=<path>` uses a local tarball instead.
 - **Give the editor its own hostname (recommended).** Add a second custom domain to the Worker, such as `design.example.com`, and set `DESIGNER_ORIGIN` to its origin (`PUBLIC_ORIGIN` must be set too). On that hostname the Worker serves only the editor's files: no API, no sign-in. The app frames it and the two talk only by `postMessage`, each checking the other's origin, so the editor's code never runs with your session.
-- Without `DESIGNER_ORIGIN` the editor is served under `/designer/` on the app's own origin. That works, but is less isolated: the editor's code then shares the app's origin.
+- Without `DESIGNER_ORIGIN` the editor is served under `/designer/` on the app's own origin. That works, but is less isolated: the editor's code then shares the app's origin. So there the editor gets no `'unsafe-eval'` in its CSP, and the agent tools that compile JSX at run time (`render`, `replace_node`, `apply_patch`) are not available; on its own origin, which holds no session, the editor's CSP allows `'unsafe-eval'` for them.
 - Each save is the whole `.fig` file (up to 20 MB) and a PNG picture (up to 4 MB; a bigger one is not kept and the card keeps the older picture), stored in R2, or in D1 without a bucket. The last 20 versions are kept, plus the one the picture came from. A save made from an older version than the latest is refused, so two tabs never overwrite each other silently.
 - On a phone or tablet the design page shows the picture only.
 

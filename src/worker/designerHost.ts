@@ -9,7 +9,9 @@
 //
 // Without DESIGNER_ORIGIN (a fresh Deploy to Cloudflare install), the editor
 // is served under /designer/ on the app's own origin. That works, but is less
-// isolated: the editor's code then shares the app's origin and session.
+// isolated: the editor's code then shares the app's origin and session. So
+// there the editor gets no 'unsafe-eval', and the agent tools that compile
+// JSX at run time (render, replace_node, apply_patch) do not work; S3 hides them.
 
 import { DESIGNER_BASE_PATH } from "../shared/design.ts";
 
@@ -39,7 +41,10 @@ export const isDesignerPath = (pathname: string) =>
 
 /**
  * The editor's CSP. CanvasKit, Taffy and HarfBuzz are WebAssembly, so
- * 'wasm-unsafe-eval', but never 'unsafe-eval'. `appOrigin` (own-origin mode)
+ * 'wasm-unsafe-eval'. On its own origin the editor also gets 'unsafe-eval':
+ * the agent tools render, replace_node and apply_patch compile JSX with
+ * `new Function`, and that origin holds no session. Never on the app's
+ * origin (the /designer/ fallback). `appOrigin` (own-origin mode)
  * may frame it and take its agent socket; `frameAncestors` are T3 Code's
  * origins, which may frame the app around it.
  */
@@ -51,7 +56,7 @@ export function designerCsp(input: {
   const socket = app ? ` ${app.replace(/^http/, "ws")}` : "";
   return [
     "default-src 'self'",
-    "script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' blob:",
+    `script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'${app ? " 'unsafe-eval'" : ""} blob:`,
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' blob: data:",
     "font-src 'self' blob: data:",

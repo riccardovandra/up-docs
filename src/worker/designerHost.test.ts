@@ -65,8 +65,8 @@ describe("the editor's own host", () => {
     expect(response.status).toBe(200);
     expect(await response.text()).toBe(EDITOR_INDEX);
     const csp = response.headers.get("Content-Security-Policy")!;
-    expect(csp).toContain("script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' blob:");
-    expect(csp).not.toContain("'unsafe-eval'");
+    // Its own origin holds no session, so the JSX-compiling agent tools may eval there.
+    expect(csp).toContain("script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' 'unsafe-eval' blob:");
     expect(csp).toContain("frame-ancestors https://docs.test https://app.t3.codes");
     expect(csp).toContain("connect-src 'self' blob: data: wss://docs.test");
     expect(response.headers.get("X-Content-Type-Options")).toBe("nosniff");
@@ -100,6 +100,12 @@ describe("the editor's own host", () => {
 describe("the app's host", () => {
   it("never serves the editor when it has an origin of its own", async () => {
     expect((await get("https://docs.test/designer/", OWN)).status).toBe(404);
+    // The app's own pages never allow eval.
+    for (const vars of [OWN, {}]) {
+      const app = await get("https://docs.test/designs", vars);
+      expect(app.status).toBe(200);
+      expect(app.headers.get("Content-Security-Policy") ?? "").not.toContain("unsafe-eval");
+    }
     expect((await get("https://docs.test/designer/assets/main-abc.js", OWN)).status).toBe(404);
   });
 
@@ -110,6 +116,11 @@ describe("the app's host", () => {
     expect(response.headers.get("Content-Security-Policy")).toContain(
       "frame-ancestors 'self' https://app.t3.codes",
     );
+    // The app's origin never allows eval, also for the editor served on it.
+    expect(response.headers.get("Content-Security-Policy")).toContain(
+      "script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' blob:",
+    );
+    expect(response.headers.get("Content-Security-Policy")).not.toContain("'unsafe-eval'");
     expect((await get("https://docs.test/designer", {})).status).toBe(302);
     // Still never the app's page for a missing editor file.
     expect((await get("https://docs.test/designer/missing.js", {})).status).toBe(404);
