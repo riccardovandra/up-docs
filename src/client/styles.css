@@ -807,9 +807,25 @@ span.tab-row-toggle {
 }
 
 .tab-editor .ProseMirror :is(h4, h5, h6) {
-  font-size: 1rem;
   font-weight: 600;
+  line-height: 1.4;
   margin-top: 1.4em;
+  margin-bottom: 0;
+}
+
+.tab-editor .ProseMirror h4 {
+  font-size: 1.1rem;
+}
+
+.tab-editor .ProseMirror h5 {
+  font-size: 1rem;
+}
+
+.tab-editor .ProseMirror h6 {
+  font-size: 0.875rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
 }
 
 .tab-editor .ProseMirror :is(ul, ol) {
@@ -833,10 +849,12 @@ span.tab-row-toggle {
 }
 
 .tab-editor .ProseMirror blockquote {
-  border-left: 3px solid var(--border);
-  margin-left: 0;
-  padding-left: 1rem;
-  color: var(--muted);
+  border-left: 3px solid var(--accent);
+  margin-inline: 0;
+  padding: 0.1em 0 0.1em 1rem;
+  font-family: var(--font-doc-serif);
+  font-size: 1.1rem;
+  font-style: italic;
 }
 
 .tab-editor .ProseMirror a {

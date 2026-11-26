@@ -7,7 +7,10 @@ import { useState, type MouseEvent, type ReactNode } from "react";
 import { ChevronDown, CodeIcon, CommentIcon, LinkIcon, ListIcon } from "../doc/toolbar/icons.tsx";
 import { linkHref } from "./linkHref.ts";
 
-type TextStyle = "paragraph" | 1 | 2 | 3;
+type HeadingLevel = 1 | 2 | 3 | 4 | 5 | 6;
+type TextStyle = "paragraph" | HeadingLevel | "quote";
+
+const HEADING_LEVELS: ReadonlyArray<HeadingLevel> = [1, 2, 3, 4, 5, 6];
 type ListKind = "bulletList" | "orderedList" | "taskList";
 
 const TEXT_STYLES: ReadonlyArray<{ readonly value: TextStyle; readonly label: string }> = [
@@ -15,6 +18,10 @@ const TEXT_STYLES: ReadonlyArray<{ readonly value: TextStyle; readonly label: st
   { value: 1, label: "Heading 1" },
   { value: 2, label: "Heading 2" },
   { value: 3, label: "Heading 3" },
+  { value: 4, label: "Heading 4" },
+  { value: 5, label: "Heading 5" },
+  { value: 6, label: "Heading 6" },
+  { value: "quote", label: "Quote" },
 ];
 
 const LISTS: ReadonlyArray<{ readonly value: ListKind; readonly label: string }> = [
@@ -55,7 +62,9 @@ export function SelectionToolbar(props: {
       strike: current.isActive("strike"),
       code: current.isActive("code"),
       link: current.isActive("link"),
-      style: ([1, 2, 3] as const).find((level) => current.isActive("heading", { level })) ?? null,
+      style: current.isActive("blockquote")
+        ? ("quote" as const)
+        : (HEADING_LEVELS.find((level) => current.isActive("heading", { level })) ?? null),
       list: LISTS.find((list) => current.isActive(list.value))?.value ?? null,
     }),
   });
@@ -64,8 +73,16 @@ export function SelectionToolbar(props: {
   const setMenu = (id: "style" | "list" | null) => setOpenMenu(id === null ? null : { id, at });
 
   const chain = () => editor.chain().focus();
-  const setStyle = (style: TextStyle) =>
-    (style === "paragraph" ? chain().setParagraph() : chain().setHeading({ level: style })).run();
+  // Quote wraps the selected blocks; the other styles set the block type and
+  // lift it out of a quote, so picking Text on a quote turns it back to text.
+  const setStyle = (style: TextStyle) => {
+    if (style === "quote") {
+      chain().toggleBlockquote().run();
+      return;
+    }
+    const run = state.style === "quote" ? chain().lift("blockquote") : chain();
+    (style === "paragraph" ? run.setParagraph() : run.setHeading({ level: style })).run();
+  };
   const toggleList = (list: ListKind) => {
     const run = chain();
     (list === "bulletList"
