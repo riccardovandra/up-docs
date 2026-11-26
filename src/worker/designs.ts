@@ -312,14 +312,17 @@ export async function saveDesignVersion(
   const figKey = designFigKey(input.designId, version, token);
   const pictureKey = designPictureKey(input.designId, version, token);
   const withPicture = picture === "ok" && input.png !== null;
-  await store.put(figKey, input.fig, "application/octet-stream");
-  if (withPicture) await store.put(pictureKey, input.png!, "image/png");
   const dropObjects = async () => {
-    await store.delete(figKey);
-    if (withPicture) await store.delete(pictureKey);
+    // Each on its own: one failing must not leave the other behind.
+    await Promise.allSettled([
+      store.delete(figKey),
+      ...(withPicture ? [store.delete(pictureKey)] : []),
+    ]);
   };
   let updated: SummaryRow | undefined;
   try {
+    await store.put(figKey, input.fig, "application/octet-stream");
+    if (withPicture) await store.put(pictureKey, input.png!, "image/png");
     // One transaction: the version row exists only when this save took the number.
     const [moved] = await db.batch<SummaryRow>([
       db
@@ -358,7 +361,11 @@ export async function saveDesignVersion(
     await dropObjects();
     throw new StaleDesignError(await getDesign(db, input.designId));
   }
-  await pruneVersions(db, store, toSummary(updated));
+  // The save is stored: a failed cleanup must not report it as failed. Rows whose
+  // objects could not go stay, so the next save tries them again.
+  await pruneVersions(db, store, toSummary(updated)).catch((cause: unknown) => {
+    console.error("design version cleanup failed", cause);
+  });
   const design = toSummary(updated);
   return picture === "too_large" || picture === "invalid"
     ? { design, pictureSkipped: picture }
@@ -369,17 +376,21 @@ export async function saveDesignVersion(
 async function pruneVersions(db: D1Database, store: ImageStore, design: DesignSummary) {
   const { results } = await db
     .prepare(
-      `DELETE FROM design_versions
-       WHERE design_id = ?1 AND version <= ?2 AND version IS NOT ?3
-       RETURNING version, token, fig_bytes, picture_bytes`,
+      `SELECT version, token, fig_bytes, picture_bytes FROM design_versions
+       WHERE design_id = ?1 AND version <= ?2 AND version IS NOT ?3`,
     )
     .bind(design.id, design.version - DESIGN_VERSIONS_KEPT, design.pictureVersion)
     .all<VersionRow>();
+  // Objects first, then the row: a row is the only record of its objects' keys.
   for (const row of results) {
     await store.delete(designFigKey(design.id, row.version, row.token));
     if (row.picture_bytes !== null) {
       await store.delete(designPictureKey(design.id, row.version, row.token));
     }
+    await db
+      .prepare("DELETE FROM design_versions WHERE design_id = ? AND version = ?")
+      .bind(design.id, row.version)
+      .run();
   }
 }
 
@@ -650,16 +661,24 @@ export async function handleDesigns(
   if (sub === "picture" && leaf && method === "GET") {
     if (!VERSION.test(leaf)) return error(404, "not_found");
     await need("view");
+    // A version's picture never changes, but access can: revalidate every load
+    // (after the check above), and answer 304 when the browser has it.
+    const etag = `"${id}-${leaf}"`;
+    const cache = { "Cache-Control": "private, no-cache", ETag: etag };
+    // The picture itself, not only its row: answer 304 only for one that still exists.
     const picture = await readDesignPicture(deps.db, deps.images, {
       designId: id,
       version: Number(leaf),
     });
     if (!picture) return error(404, "not_found");
+    if (request.headers.get("If-None-Match") === etag) {
+      if (picture.body instanceof ReadableStream) await picture.body.cancel();
+      return new Response(null, { status: 304, headers: cache });
+    }
     return new Response(picture.body, {
       headers: {
         "Content-Type": "image/png",
-        // A version's picture never changes; the URL names the version.
-        "Cache-Control": "private, max-age=31536000, immutable",
+        ...cache,
         "X-Content-Type-Options": "nosniff",
         "Content-Security-Policy": "default-src 'none'; sandbox",
       },

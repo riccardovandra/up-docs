@@ -45,6 +45,8 @@ export class DesignSaver {
   #running = false;
   #waiting: PendingSave | null = null;
   #failed: PendingSave | null = null;
+  /** Saves replaced by a newer one: acknowledged once a newer file is stored. */
+  #covered: Array<number> = [];
   /** The server's version after a stale refusal: Retry saves on top of it. */
   #conflictVersion: number | null = null;
   #status: SaveStatus = { kind: "idle" };
@@ -72,7 +74,7 @@ export class DesignSaver {
   offer(save: PendingSave): void {
     // A newer file replaces a failed or waiting one: it holds their changes too.
     const superseded = this.#waiting ?? this.#failed;
-    if (superseded && superseded.seq < save.seq) this.#deps.ack(superseded.seq);
+    if (superseded && superseded.seq < save.seq) this.#covered.push(superseded.seq);
     this.#failed = null;
     this.#waiting = save;
     void this.#run();
@@ -117,6 +119,8 @@ export class DesignSaver {
         }
         if (outcome.ok) {
           this.#baseVersion = outcome.version;
+          for (const seq of this.#covered.filter((each) => each < save.seq)) this.#deps.ack(seq);
+          this.#covered = this.#covered.filter((each) => each > save.seq);
           this.#deps.ack(save.seq);
           this.#deps.onSaved?.(outcome.version, outcome.note);
           if (!this.#waiting) this.#set({ kind: "saved", at: this.#deps.now() });
@@ -124,7 +128,7 @@ export class DesignSaver {
         }
         if (this.#waiting) {
           // A newer file is already here and holds this one's changes: try that instead.
-          this.#deps.ack(save.seq);
+          this.#covered.push(save.seq);
           if (outcome.currentVersion === undefined) continue;
         }
         if (outcome.currentVersion !== undefined) this.#conflictVersion = outcome.currentVersion;

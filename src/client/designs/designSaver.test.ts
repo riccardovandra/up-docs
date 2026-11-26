@@ -30,8 +30,8 @@ describe("DesignSaver", () => {
     h.saver.offer(save(1));
     h.saver.offer(save(2));
     h.saver.offer(save(3));
-    // 2 is superseded by 3 while 1 is in flight.
-    expect(h.acks).toEqual([2]);
+    // 2 is superseded by 3 while 1 is in flight; nothing is acknowledged before it is stored.
+    expect(h.acks).toEqual([]);
     h.reply({ ok: true, version: 4 });
     await h.settle();
     h.reply({ ok: true, version: 5 });
@@ -40,7 +40,7 @@ describe("DesignSaver", () => {
       { base: 3, seq: 1 },
       { base: 4, seq: 3 },
     ]);
-    expect(h.acks).toEqual([2, 1, 3]);
+    expect(h.acks).toEqual([1, 2, 3]);
     expect(h.saver.baseVersion).toBe(5);
     expect(h.saver.unsaved).toBe(false);
     expect(h.statuses.at(-1)).toBe("saved");
@@ -83,9 +83,10 @@ describe("DesignSaver", () => {
     h.reply({ ok: false, message: "offline" });
     await h.settle();
     h.saver.offer(save(2));
-    expect(h.acks).toEqual([1]);
+    expect(h.acks).toEqual([]);
     h.reply({ ok: true, version: 2 });
     await h.settle();
+    expect(h.acks).toEqual([1, 2]);
     expect(h.sent.map((each) => each.seq)).toEqual([1, 2]);
     expect(h.saver.status.kind).toBe("saved");
   });

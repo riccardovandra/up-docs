@@ -79,7 +79,7 @@ async function setup() {
 
 describe("designs API", () => {
   it("creates an empty design, saves versions and serves the file and picture", async () => {
-    const { admin, send, save, create } = await setup();
+    const { api, admin, send, save, create } = await setup();
     const design = await create(admin, { title: "Landing" });
     expect(design).toMatchObject({ title: "Landing", version: 0, pictureVersion: null, role: "owner" });
     expect(design.editor).toEqual({ origin: null });
@@ -99,7 +99,12 @@ describe("designs API", () => {
     const picture = await send<string>(admin, "GET", `/api/designs/${design.id}/picture/1`);
     expect(picture.status).toBe(200);
     expect(picture.headers.get("Content-Type")).toBe("image/png");
-    expect(picture.headers.get("Cache-Control")).toContain("immutable");
+    // Revalidated every load (access can change), and cheap when the browser has it.
+    expect(picture.headers.get("Cache-Control")).toBe("private, no-cache");
+    const again = await api.call("GET", `/api/designs/${design.id}/picture/1`, {
+      headers: { Cookie: admin, "If-None-Match": picture.headers.get("ETag")! },
+    });
+    expect(again.status).toBe(304);
 
     // A save with no picture keeps the older one.
     const second = await save(admin, design.id, { baseVersion: 1, fig: fig("two"), png: null });
@@ -149,6 +154,62 @@ describe("designs API", () => {
     expect((await send(admin, "GET", `/api/designs/${design.id}/fig?version=2`)).status).toBe(404);
     expect((await send(admin, "GET", `/api/designs/${design.id}/fig?version=${total}`)).status).toBe(200);
     expect((await send(admin, "GET", `/api/designs/${design.id}/picture/1`)).status).toBe(200);
+  });
+
+  it("leaves no object behind when storing a save fails, and keeps a stored save when cleanup fails", async () => {
+    const { api, admin, save, create, objectKeys } = await setup();
+    const design = await create(admin);
+    const store = api.deps.images;
+    const deps = api.deps as { images: typeof store };
+    // The picture upload fails after the .fig is stored.
+    deps.images = {
+      ...store,
+      put: async (key, body, type) => {
+        if (key.endsWith(".png")) throw new Error("R2 down");
+        await store.put(key, body, type);
+      },
+    };
+    await expect(save(admin, design.id, { baseVersion: 0, fig: fig("a") })).rejects.toThrow("R2 down");
+    expect(objectKeys()).toEqual([]);
+
+    // Deleting old versions fails: the save still succeeds, and the rows stay for a later retry.
+    deps.images = { ...store, delete: async () => Promise.reject(new Error("R2 down")) };
+    for (let version = 1; version <= DESIGN_VERSIONS_KEPT + 1; version += 1) {
+      const saved = await save(admin, design.id, { baseVersion: version - 1, fig: fig(`v${version}`), png: null });
+      expect(saved.status).toBe(201);
+    }
+    const count = async () =>
+      (await api.db
+        .prepare("SELECT count(*) AS n FROM design_versions WHERE design_id = ?")
+        .bind(design.id)
+        .first<{ n: number }>())!.n;
+    expect(await count()).toBe(DESIGN_VERSIONS_KEPT + 1);
+    deps.images = store;
+    await save(admin, design.id, { baseVersion: DESIGN_VERSIONS_KEPT + 1, fig: fig("next"), png: null });
+    expect(await count()).toBe(DESIGN_VERSIONS_KEPT);
+    expect(objectKeys()).toHaveLength(DESIGN_VERSIONS_KEPT);
+  });
+
+  it("does not answer 304 for a pruned version's picture", async () => {
+    const { api, admin, save, create } = await setup();
+    const design = await create(admin);
+    await save(admin, design.id, { baseVersion: 0, fig: fig("v1") });
+    await save(admin, design.id, { baseVersion: 1, fig: fig("v2") });
+    for (let version = 3; version <= DESIGN_VERSIONS_KEPT + 1; version += 1) {
+      await save(admin, design.id, { baseVersion: version - 1, fig: fig(`v${version}`), png: null });
+    }
+    const cached = await api.call("GET", `/api/designs/${design.id}/picture/1`, {
+      headers: { Cookie: admin, "If-None-Match": `"${design.id}-1"` },
+    });
+    expect(cached.status).toBe(404);
+    // Its row left behind with the object gone (a cleanup that stopped half way): still 404.
+    const latest = `designs/${design.id}/2-`;
+    const key = [...api.images.keys()].find((each) => each.startsWith(latest) && each.endsWith(".png"))!;
+    api.images.delete(key);
+    const half = await api.call("GET", `/api/designs/${design.id}/picture/2`, {
+      headers: { Cookie: admin, "If-None-Match": `"${design.id}-2"` },
+    });
+    expect(half.status).toBe(404);
   });
 
   it("refuses files that are too large or not .fig, with a clear error", async () => {
