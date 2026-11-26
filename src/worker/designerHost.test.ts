@@ -45,19 +45,30 @@ const env = (vars: Partial<Env> = {}): Env =>
   }) as unknown as Env;
 
 const OWN = { PUBLIC_ORIGIN: "https://docs.test", DESIGNER_ORIGIN: "https://design.docs.test" };
-const ctx = { waitUntil: () => undefined, passThroughOnException: () => undefined } as unknown as ExecutionContext;
-const get = (url: string, vars: Partial<Env>) => worker.fetch(new Request(url) as never, env(vars), ctx);
+const ctx = {
+  waitUntil: () => undefined,
+  passThroughOnException: () => undefined,
+} as unknown as ExecutionContext;
+const get = (url: string, vars: Partial<Env>) =>
+  worker.fetch(new Request(url) as never, env(vars), ctx);
 
 describe("designerOrigin", () => {
   it("needs both origins, and a different one for the editor", () => {
     expect(designerOrigin(OWN)).toBe("https://design.docs.test");
-    expect(designerOrigin({ DESIGNER_ORIGIN: "https://design.docs.test/x/" , PUBLIC_ORIGIN: "https://docs.test" })).toBe(
-      "https://design.docs.test",
-    );
+    expect(
+      designerOrigin({
+        DESIGNER_ORIGIN: "https://design.docs.test/x/",
+        PUBLIC_ORIGIN: "https://docs.test",
+      }),
+    ).toBe("https://design.docs.test");
     expect(designerOrigin({ DESIGNER_ORIGIN: "https://design.docs.test" })).toBeNull();
     expect(designerOrigin({ PUBLIC_ORIGIN: "https://docs.test" })).toBeNull();
-    expect(designerOrigin({ DESIGNER_ORIGIN: "https://docs.test", PUBLIC_ORIGIN: "https://docs.test" })).toBeNull();
-    expect(designerOrigin({ DESIGNER_ORIGIN: "not a url", PUBLIC_ORIGIN: "https://docs.test" })).toBeNull();
+    expect(
+      designerOrigin({ DESIGNER_ORIGIN: "https://docs.test", PUBLIC_ORIGIN: "https://docs.test" }),
+    ).toBeNull();
+    expect(
+      designerOrigin({ DESIGNER_ORIGIN: "not a url", PUBLIC_ORIGIN: "https://docs.test" }),
+    ).toBeNull();
   });
 });
 
@@ -68,7 +79,9 @@ describe("the editor's own host", () => {
     expect(await response.text()).toBe(EDITOR_INDEX);
     const csp = response.headers.get("Content-Security-Policy")!;
     // Its own origin holds no session, so the JSX-compiling agent tools may eval there.
-    expect(csp).toContain("script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' 'unsafe-eval' blob:");
+    expect(csp).toContain(
+      "script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' 'unsafe-eval' blob:",
+    );
     expect(csp).toContain("frame-ancestors https://docs.test https://app.t3.codes");
     expect(csp).toContain("connect-src 'self' blob: data: wss://docs.test");
     expect(csp).toContain("form-action 'none'");
@@ -88,12 +101,23 @@ describe("the editor's own host", () => {
   });
 
   it("serves nothing else: no API, no MCP, no app pages or files", async () => {
-    for (const path of ["/api/me", "/api/designs", "/mcp", "/d/abc", "/designs", "/assets/app.js", "/designer/missing.js"]) {
+    for (const path of [
+      "/api/me",
+      "/api/designs",
+      "/mcp",
+      "/d/abc",
+      "/designs",
+      "/assets/app.js",
+      "/designer/missing.js",
+    ]) {
       const response = await get(`https://design.docs.test${path}`, OWN);
       expect([path, response.status]).toEqual([path, 404]);
     }
     const post = await worker.fetch(
-      new Request("https://design.docs.test/api/auth/password", { method: "POST", body: "{}" }) as never,
+      new Request("https://design.docs.test/api/auth/password", {
+        method: "POST",
+        body: "{}",
+      }) as never,
       env(OWN),
       ctx,
     );
@@ -141,10 +165,14 @@ describe("requests from the editor's origin to the app", () => {
     vi.setSystemTime(api.clock.now);
     const cookie = await api.signIn();
     const headers = { Cookie: cookie };
-    const doc = (await (await api.call("POST", "/api/docs", { body: { title: "Plan" }, headers })).json()) as {
+    const doc = (await (
+      await api.call("POST", "/api/docs", { body: { title: "Plan" }, headers })
+    ).json()) as {
       doc: { id: string };
     };
-    const sheet = (await (await api.call("POST", "/api/sheets", { body: { title: "Numbers" }, headers })).json()) as {
+    const sheet = (await (
+      await api.call("POST", "/api/sheets", { body: { title: "Numbers" }, headers })
+    ).json()) as {
       sheet: { id: string };
     };
     const room = {

@@ -49,7 +49,11 @@ export const designsApi = {
   /** Stores a save as the next version; ApiError 409 `version_conflict` when it is stale. */
   save: async (
     designId: string,
-    input: { readonly baseVersion: number; readonly fig: ArrayBuffer; readonly png: ArrayBuffer | null },
+    input: {
+      readonly baseVersion: number;
+      readonly fig: ArrayBuffer;
+      readonly png: ArrayBuffer | null;
+    },
   ): Promise<DesignSaveResult> => {
     const response = await fetch(
       designSavePath(designId, { baseVersion: input.baseVersion, figBytes: input.fig.byteLength }),
@@ -68,12 +72,17 @@ export const designsApi = {
 
 /** A refused save, with the newer design when it was stale. */
 export class DesignSaveError extends ApiError {
-  declare readonly body: { readonly error?: string; readonly message?: string; readonly design?: DesignView };
+  declare readonly body: {
+    readonly error?: string;
+    readonly message?: string;
+    readonly design?: DesignView;
+  };
 }
 
 /** A refusal in words. */
 export function designErrorText(cause: unknown): string {
-  const body = cause instanceof ApiError ? (cause.body as { error?: string; message?: string }) : {};
+  const body =
+    cause instanceof ApiError ? (cause.body as { error?: string; message?: string }) : {};
   if (body.error === "version_conflict") {
     return "This design was saved somewhere else since it opened here.";
   }

@@ -106,7 +106,9 @@ async function main(): Promise<void> {
   let tarball: string;
   if (override) {
     tarball = path.resolve(override);
-    console.log(`designer: local tarball ${tarball} (sha256 ${sha256Of(fs.readFileSync(tarball))})`);
+    console.log(
+      `designer: local tarball ${tarball} (sha256 ${sha256Of(fs.readFileSync(tarball))})`,
+    );
   } else {
     const lock = parseLock(fs.readFileSync(path.join(root, "designer.lock.json"), "utf8"));
     tarball = await download(lock, path.join(root, "node_modules", ".cache", "up-docs-designer"));

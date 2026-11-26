@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, type MouseEvent } from "react
 
 import {
   DESIGNER_MESSAGE,
+  DESIGNER_PROTOCOL,
   DESIGNS_PATH,
   designerFrameUrl,
   parseDesignerMessage,
@@ -25,6 +26,11 @@ import "./designs.css";
 
 /** How long the editor may take to say it is ready before the page says it did not start. */
 const EDITOR_START_MS = 30_000;
+/** How long leaving waits for the editor to save what is unsaved (it can take 20 s or more). */
+const FLUSH_WAIT_MS = 30_000;
+
+/** The editor's answer to `flush`, or null when it did not answer in time. */
+type FlushResult = { readonly saved: boolean; readonly unsaved: boolean } | null;
 
 const PICTURE_NOTES = {
   too_large: "Saved. The picture was too large to keep, so cards show the previous one.",
@@ -34,6 +40,7 @@ const PICTURE_NOTES = {
 function StatusLine(props: {
   readonly status: SaveStatus;
   readonly design: DesignView;
+  readonly leaving: boolean;
   readonly onRetry: () => void;
 }) {
   const { status } = props;
@@ -47,8 +54,9 @@ function StatusLine(props: {
       </span>
     );
   }
-  const text =
-    status.kind === "saving"
+  const text = props.leaving
+    ? "Saving before leaving…"
+    : status.kind === "saving"
       ? "Saving…"
       : status.kind === "saved" || props.design.version > 0
         ? "Saved"
@@ -81,6 +89,9 @@ export function DesignPage(props: { readonly designId: string }) {
   const [renaming, setRenaming] = useState(false);
   const frame = useRef<HTMLIFrameElement>(null);
   const saver = useRef<DesignSaver | null>(null);
+  /** Asks the editor to save what is unsaved; null while no editor is open. */
+  const flushEditor = useRef<(() => Promise<FlushResult>) | null>(null);
+  const [leaving, setLeaving] = useState(false);
   const title = useRef("");
   title.current = design?.title ?? "";
 
@@ -148,6 +159,18 @@ export function DesignPage(props: { readonly designId: string }) {
     });
     saver.current = queue;
     let live = true;
+    let opened = false;
+    const flushWaiters: Array<(result: FlushResult) => void> = [];
+    flushEditor.current = () =>
+      new Promise<FlushResult>((resolve) => {
+        if (!opened) return resolve({ saved: false, unsaved: false });
+        const timer = window.setTimeout(() => resolve(null), FLUSH_WAIT_MS);
+        flushWaiters.push((result) => {
+          window.clearTimeout(timer);
+          resolve(result);
+        });
+        post({ type: DESIGNER_MESSAGE.flush });
+      });
     const started = window.setTimeout(() => {
       if (live) setEditorError("The editor did not start. Reload the page to try again.");
     }, EDITOR_START_MS);
@@ -181,16 +204,30 @@ export function DesignPage(props: { readonly designId: string }) {
       switch (message.type) {
         case DESIGNER_MESSAGE.ready:
           window.clearTimeout(started);
+          if (message.protocol !== DESIGNER_PROTOCOL) {
+            setEditorError(
+              `This editor build (${message.version ?? "unknown version"}) does not match this UP Docs. Update UP Docs or its pinned editor.`,
+            );
+            break;
+          }
           setEditorError(null);
           void sendLoad();
           break;
         case DESIGNER_MESSAGE.loaded:
+          opened = true;
           setEditorReady(true);
           break;
         case DESIGNER_MESSAGE.save:
           queue.offer({ seq: message.seq, fig: message.fig, png: message.png });
           break;
+        case DESIGNER_MESSAGE.flushed:
+          for (const resolve of flushWaiters.splice(0)) {
+            resolve({ saved: message.saved, unsaved: message.unsaved });
+          }
+          break;
         case DESIGNER_MESSAGE.error:
+          // A save this page refused already shows as "Save failed" in the header.
+          if (message.reason === "save-failed" && queue.status.kind === "failed") break;
           setEditorError(message.message);
           break;
       }
@@ -198,27 +235,47 @@ export function DesignPage(props: { readonly designId: string }) {
     const beforeUnload = (event: BeforeUnloadEvent) => {
       if (queue.unsaved) event.preventDefault();
     };
+    // A tab being hidden may be closed next: save what is unsaved now (no answer awaited).
+    const onHidden = () => {
+      if (document.visibilityState === "hidden" && opened) post({ type: DESIGNER_MESSAGE.flush });
+    };
     window.addEventListener("message", onMessage);
     window.addEventListener("beforeunload", beforeUnload);
+    document.addEventListener("visibilitychange", onHidden);
     return () => {
       live = false;
       window.clearTimeout(started);
       window.removeEventListener("message", onMessage);
       window.removeEventListener("beforeunload", beforeUnload);
+      document.removeEventListener("visibilitychange", onHidden);
+      for (const resolve of flushWaiters.splice(0)) resolve(null);
       saver.current = null;
+      flushEditor.current = null;
     };
   }, [showEditor, editorOrigin, designId]);
 
-  const leave = (path: string) => (event: MouseEvent) => {
-    if (event.metaKey || event.ctrlKey) return;
-    event.preventDefault();
-    if (
-      saver.current?.unsaved &&
-      !window.confirm("A change is not saved yet. Leave the design anyway?")
-    ) {
-      return;
-    }
+  /** Saves what the editor has not saved yet, then leaves; asks first if something stays unsaved. */
+  const leaveTo = async (path: string) => {
+    if (leaving) return;
+    setLeaving(true);
+    const result = flushEditor.current
+      ? await flushEditor.current()
+      : { saved: false, unsaved: false };
+    setLeaving(false);
+    const unsaved = result === null || result.unsaved || saver.current?.unsaved === true;
+    if (unsaved && !window.confirm("A change is not saved yet. Leave the design anyway?")) return;
     navigate(path);
+  };
+
+  /** Every in-app link in the header (UP Docs, Designs) leaves through `leaveTo`. */
+  const onHeaderClick = (event: MouseEvent) => {
+    if (event.metaKey || event.ctrlKey || event.shiftKey || event.button !== 0) return;
+    const link = (event.target as Element).closest("a[href]");
+    const href = link?.getAttribute("href");
+    if (!href?.startsWith("/")) return;
+    event.preventDefault();
+    event.stopPropagation();
+    void leaveTo(href);
   };
 
   const back = (label: string) => (
@@ -266,11 +323,11 @@ export function DesignPage(props: { readonly designId: string }) {
 
   return (
     <div className="design-page">
-      <header className="doc-header design-page-header">
+      <header className="doc-header design-page-header" onClickCapture={onHeaderClick}>
         <div className="doc-header-title">
           <HomeLink />
           <span className="doc-header-crumb">/</span>
-          <a href={DESIGNS_PATH} className="home-link design-crumb" onClick={leave(DESIGNS_PATH)}>
+          <a href={DESIGNS_PATH} className="home-link design-crumb">
             <DesignIcon size={16} />
             Designs
           </a>
@@ -288,13 +345,18 @@ export function DesignPage(props: { readonly designId: string }) {
             <span className="design-title">{design.title}</span>
           )}
           <span className="design-project">
-            {design.projectId === null ? <NoProjectBadge /> : <ProjectBadge name={project?.name ?? "?"} />}
+            {design.projectId === null ? (
+              <NoProjectBadge />
+            ) : (
+              <ProjectBadge name={project?.name ?? "?"} />
+            )}
             {design.projectId === null ? "No project" : (project?.name ?? "")}
           </span>
         </div>
         <div className="doc-header-actions">
           {showEditor ? (
             <StatusLine
+              leaving={leaving}
               status={status}
               design={design}
               onRetry={() => saver.current?.retry()}

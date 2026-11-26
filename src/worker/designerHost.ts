@@ -139,12 +139,17 @@ export async function designerResponse(
   if (url.pathname === base) {
     return Response.redirect(`${url.origin}${DESIGNER_BASE_PATH}${url.search}`, 302);
   }
-  const path = url.pathname.startsWith(DESIGNER_BASE_PATH) ? url.pathname : `${base}${url.pathname}`;
+  const path = url.pathname.startsWith(DESIGNER_BASE_PATH)
+    ? url.pathname
+    : `${base}${url.pathname}`;
   // Only the editor's files: no dot segments, no encoded slashes.
   if (/(^|\/)\.\.?(\/|$)|%2f|%5c/i.test(path)) return notFound();
   const fetchAsset = (assetPath: string) =>
     input.assets.fetch(
-      new Request(`${url.origin}${assetPath}`, { method: request.method, headers: request.headers }),
+      new Request(`${url.origin}${assetPath}`, {
+        method: request.method,
+        headers: request.headers,
+      }),
     );
   const response = await fetchAsset(path);
   if (response.status === 200 && (await isAppFallback(input.assets, url.origin, response))) {

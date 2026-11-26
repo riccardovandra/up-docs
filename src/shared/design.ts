@@ -38,7 +38,8 @@ export const designFigPath = (designId: string) => `/api/designs/${designId}/fig
 export const designSavePath = (
   designId: string,
   input: { readonly baseVersion: number; readonly figBytes: number },
-) => `/api/designs/${designId}/versions?baseVersion=${input.baseVersion}&figBytes=${input.figBytes}`;
+) =>
+  `/api/designs/${designId}/versions?baseVersion=${input.baseVersion}&figBytes=${input.figBytes}`;
 
 /**
  * The agent bridge's WebSocket for one open design (S3). Reserved by S2: it is
@@ -107,26 +108,47 @@ export interface DesignSaveResult {
 export const designPictureUrl = (design: Pick<DesignSummary, "id" | "pictureVersion">) =>
   design.pictureVersion === null ? null : designPicturePath(design.id, design.pictureVersion);
 
-// Host protocol (the fork's src/app/host/up-docs.ts). Every message is a `{ type, ... }` object.
+// Host protocol, version 1: the fork's src/app/host/up-docs/bridge.ts (its header is the
+// source of truth). Every message is a `{ type, ... }` object, posted only to the other
+// side's exact origin; each side ignores messages from any other origin or window.
+export const DESIGNER_PROTOCOL = 1;
+
 export const DESIGNER_MESSAGE = {
-  /** editor -> host: ready for `load`. */
+  /** editor -> host: `{ protocol, version }`, ready for `load`. */
   ready: "up-designer:ready",
-  /** host -> editor: `{ bytes: ArrayBuffer | null, name?, socketURL? }`. */
+  /** host -> editor: `{ bytes: ArrayBuffer | null, name?, socketURL? }`. Blank only the first time. */
   load: "up-designer:load",
   /** editor -> host: `{ nodes }`, once the file is open. */
   loaded: "up-designer:loaded",
-  /** editor -> host: `{ seq, fig: ArrayBuffer, png: ArrayBuffer | null, nodes }`. */
+  /** host -> editor: `{ socketURL }`, a new agent bridge ticket (S3). */
+  connect: "up-designer:connect",
+  /** editor -> host: `{ seq, fig, png | null, width, height, nodes }`, one at a time. */
   save: "up-designer:save",
-  /** host -> editor: `{ seq }`, the save with that number is stored. */
+  /** host -> editor: `{ seq }` within 10 s, or the editor counts the save as failed. */
   saved: "up-designer:saved",
   /** host -> editor: save now, changed or not. */
   saveNow: "up-designer:save-now",
-  /** editor -> host: `{ message }`, something failed inside the editor. */
+  /** host -> editor: save only what is unsaved (a page about to close). */
+  flush: "up-designer:flush",
+  /** editor -> host: `{ saved, unsaved }`, the answer to `flush`. */
+  flushed: "up-designer:flushed",
+  /** editor -> host: `{ reason, message }`. */
   error: "up-designer:error",
 } as const;
 
+export type DesignerErrorReason =
+  | "unsupported-browser"
+  | "boot-failed"
+  | "invalid-message"
+  | "load-failed"
+  | "save-failed";
+
 export type DesignerEditorMessage =
-  | { readonly type: typeof DESIGNER_MESSAGE.ready }
+  | {
+      readonly type: typeof DESIGNER_MESSAGE.ready;
+      readonly protocol: number | null;
+      readonly version: string | null;
+    }
   | { readonly type: typeof DESIGNER_MESSAGE.loaded; readonly nodes: number | null }
   | {
       readonly type: typeof DESIGNER_MESSAGE.save;
@@ -134,7 +156,17 @@ export type DesignerEditorMessage =
       readonly fig: ArrayBuffer;
       readonly png: ArrayBuffer | null;
     }
-  | { readonly type: typeof DESIGNER_MESSAGE.error; readonly message: string };
+  | {
+      readonly type: typeof DESIGNER_MESSAGE.flushed;
+      readonly saved: boolean;
+      readonly unsaved: boolean;
+    }
+  | {
+      readonly type: typeof DESIGNER_MESSAGE.error;
+      /** One of DesignerErrorReason, or another string from a newer editor. */
+      readonly reason: string;
+      readonly message: string;
+    };
 
 const isBuffer = (value: unknown): value is ArrayBuffer => value instanceof ArrayBuffer;
 
@@ -144,7 +176,11 @@ export function parseDesignerMessage(data: unknown): DesignerEditorMessage | nul
   const fields = data as Record<string, unknown>;
   switch (fields.type) {
     case DESIGNER_MESSAGE.ready:
-      return { type: DESIGNER_MESSAGE.ready };
+      return {
+        type: DESIGNER_MESSAGE.ready,
+        protocol: typeof fields.protocol === "number" ? fields.protocol : null,
+        version: typeof fields.version === "string" ? fields.version.slice(0, 100) : null,
+      };
     case DESIGNER_MESSAGE.loaded:
       return {
         type: DESIGNER_MESSAGE.loaded,
@@ -158,9 +194,17 @@ export function parseDesignerMessage(data: unknown): DesignerEditorMessage | nul
         fig: fields.fig,
         png: isBuffer(fields.png) && fields.png.byteLength > 0 ? fields.png : null,
       };
+    case DESIGNER_MESSAGE.flushed:
+      // Anything but an explicit `unsaved: false` counts as unsaved.
+      return {
+        type: DESIGNER_MESSAGE.flushed,
+        saved: fields.saved === true,
+        unsaved: fields.unsaved !== false,
+      };
     case DESIGNER_MESSAGE.error:
       return {
         type: DESIGNER_MESSAGE.error,
+        reason: typeof fields.reason === "string" ? fields.reason.slice(0, 50) : "unknown",
         message:
           typeof fields.message === "string" && fields.message.trim()
             ? fields.message.trim().slice(0, 500)

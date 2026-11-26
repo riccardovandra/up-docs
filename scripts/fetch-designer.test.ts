@@ -19,13 +19,21 @@ afterEach(() => {
 
 describe("fetch-designer", () => {
   it("reads a pinned lock and refuses a malformed one", () => {
-    expect(parseLock(JSON.stringify({ version: "up-docs-v1", url: "https://x.test/a.tar.gz", sha256: SHA }))).toEqual({
+    expect(
+      parseLock(
+        JSON.stringify({ version: "up-docs-v1", url: "https://x.test/a.tar.gz", sha256: SHA }),
+      ),
+    ).toEqual({
       version: "up-docs-v1",
       url: "https://x.test/a.tar.gz",
       sha256: SHA,
     });
-    expect(() => parseLock(JSON.stringify({ version: "v", url: "http://x.test/a", sha256: SHA }))).toThrow(/https/);
-    expect(() => parseLock(JSON.stringify({ version: "v", url: "https://x.test/a", sha256: "ABC" }))).toThrow(/sha256/);
+    expect(() =>
+      parseLock(JSON.stringify({ version: "v", url: "http://x.test/a", sha256: SHA })),
+    ).toThrow(/https/);
+    expect(() =>
+      parseLock(JSON.stringify({ version: "v", url: "https://x.test/a", sha256: "ABC" })),
+    ).toThrow(/sha256/);
   });
 
   it("accepts only bytes whose sha256 matches the lock", () => {
@@ -37,7 +45,9 @@ describe("fetch-designer", () => {
   });
 
   it("refuses entries outside the folder and anything but files and folders", () => {
-    expect(() => checkEntries("index.html\nassets/a.js\n", "-rw-r--r-- x\ndrwxr-xr-x y\n")).not.toThrow();
+    expect(() =>
+      checkEntries("index.html\nassets/a.js\n", "-rw-r--r-- x\ndrwxr-xr-x y\n"),
+    ).not.toThrow();
     expect(() => checkEntries("../evil.sh\n", "-rw-r--r-- x\n")).toThrow(/outside/);
     expect(() => checkEntries("/etc/passwd\n", "-rw-r--r-- x\n")).toThrow(/outside/);
     expect(() => checkEntries("link\n", "lrwxr-xr-x link -> /etc\n")).toThrow(/plain/);
@@ -49,7 +59,9 @@ describe("fetch-designer", () => {
     fs.mkdirSync(path.join(source, "assets"));
     fs.writeFileSync(path.join(source, "assets", "main.js"), "main()");
     const tarball = path.join(tempDir(), "designer.tar.gz");
-    execFileSync("tar", ["-czf", tarball, "-C", source, "."], { env: { ...process.env, COPYFILE_DISABLE: "1" } });
+    execFileSync("tar", ["-czf", tarball, "-C", source, "."], {
+      env: { ...process.env, COPYFILE_DISABLE: "1" },
+    });
     const out = path.join(tempDir(), "designer");
     fs.mkdirSync(out);
     fs.writeFileSync(path.join(out, "stale.txt"), "old");

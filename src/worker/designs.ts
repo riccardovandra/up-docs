@@ -479,7 +479,10 @@ export async function deleteDesign(
   designId: string,
 ): Promise<void> {
   // The row first, so a save under way fails its update and removes its own objects.
-  const row = await db.prepare("DELETE FROM designs WHERE id = ? RETURNING id").bind(designId).first();
+  const row = await db
+    .prepare("DELETE FROM designs WHERE id = ? RETURNING id")
+    .bind(designId)
+    .first();
   if (!row) throw new NotFoundError("design");
   await store.deletePrefix(designsPrefix(designId));
 }
