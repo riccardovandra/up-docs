@@ -64,6 +64,7 @@ import { readDrawioLayout } from "../shared/drawioModel.ts";
 import * as PublicLinks from "./publicLinks.ts";
 import * as Folders from "./folders.ts";
 import * as HtmlPages from "./htmlPages.ts";
+import * as Designs from "./designs.ts";
 import {
   DEFAULT_PAGE_TITLE,
   isPageId,
@@ -190,6 +191,8 @@ export interface ApiDeps {
    * frame a page's sandboxed HTML around it. Empty when unset.
    */
   readonly frameAncestors?: ReadonlyArray<string>;
+  /** The design editor's own origin (DESIGNER_ORIGIN); unset serves it under /designer/ here. */
+  readonly designerOrigin?: string | null;
 }
 
 const json = (body: unknown, status = 200, headers: HeadersInit = {}) =>
@@ -264,10 +267,11 @@ function isSameOriginWrite(request: Request, deps: ApiDeps): boolean {
   if (origin !== null && !isOwnOrigin(origin, request, deps)) return false;
   if (request.method !== "POST") return true;
   const type = request.headers.get("Content-Type") ?? "";
-  // Image and page uploads send raw bytes; image types and text/html are not
-  // CORS-safelisted either.
+  // Image, page and design uploads send raw bytes; image types, text/html and
+  // application/octet-stream are not CORS-safelisted either.
   return (
     type.startsWith("application/json") ||
+    type.split(";")[0]!.trim() === "application/octet-stream" ||
     Object.hasOwn(IMAGE_TYPES, type) ||
     type.split(";")[0]!.trim() === "text/html"
   );
@@ -375,6 +379,7 @@ async function handleProject(
     await Diagrams.moveProjectDiagrams(deps.db, { from: id, to: projectId });
     await Sheets.moveProjectSheets(deps.db, { from: id, to: projectId });
     await HtmlPages.moveProjectPages(deps.db, { from: id, to: projectId });
+    await Designs.moveProjectDesigns(deps.db, { from: id, to: projectId });
     return json({ moved: docIds.length });
   }
   // `{themeId}`: the default theme of the project's diagrams; null falls back to Neutral.
@@ -1053,6 +1058,15 @@ export async function handleApi(
       if (response) return response;
     }
 
+    if (resource === "designs" && segments.length <= 4) {
+      const response = await Designs.handleDesigns(
+        request,
+        { segments, method, url, userId: principal.userId },
+        deps,
+      );
+      if (response) return response;
+    }
+
     if (resource === "sheets" && segments.length <= 3) {
       const response = await handleSheets(request, { id, sub, method, url, principal }, deps);
       if (response) return response;
@@ -1078,6 +1092,8 @@ export async function handleApi(
     if (cause instanceof HtmlPages.PageForbiddenError)
       return json({ error: "forbidden", required: cause.required }, 403);
     if (cause instanceof Sheets.SheetForbiddenError)
+      return json({ error: "forbidden", required: cause.required }, 403);
+    if (cause instanceof Designs.DesignForbiddenError)
       return json({ error: "forbidden", required: cause.required }, 403);
     if (cause instanceof HtmlPages.InvalidPageError) {
       const tooLarge = cause.code === "too_large";

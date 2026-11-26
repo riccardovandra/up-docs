@@ -15,6 +15,10 @@ export type Route =
   | { readonly name: "pages" }
   /** One page's own view. */
   | { readonly name: "page"; readonly pageId: string }
+  /** The library's Designs view: OpenPencil designs. */
+  | { readonly name: "designs" }
+  /** One design's own page, with the editor. */
+  | { readonly name: "design"; readonly designId: string }
   | { readonly name: "doc"; readonly docId: string; readonly tabId: string | null }
   | { readonly name: "settings" }
   /** A T3 Code project file, by its workspace-relative path (`/local/docs/plan.md`). */
@@ -28,6 +32,9 @@ export function parseRoute(pathname: string): Route {
     return docId ? { name: "diagram", diagramId: docId } : { name: "diagrams" };
   }
   if (first === "pages") return docId ? { name: "page", pageId: docId } : { name: "pages" };
+  if (first === "designs") {
+    return docId ? { name: "design", designId: docId } : { name: "designs" };
+  }
   if (first === "sheets") {
     return docId
       ? { name: "sheet", sheetId: docId, tabId: tabId ? decodeURIComponent(tabId) : null }
@@ -55,12 +62,13 @@ export function navigate(path: string, options: { replace?: boolean } = {}): voi
   for (const listener of listeners) listener();
 }
 
-/** The home page's views: one library page shows docs, diagrams, sheets or pages. */
+/** The home page's views: one library page shows docs, diagrams, sheets, pages or designs. */
 export const isLibraryRoute = (route: Route) =>
   route.name === "library" ||
   route.name === "diagrams" ||
   route.name === "sheets" ||
-  route.name === "pages";
+  route.name === "pages" ||
+  route.name === "designs";
 
 export function usePathname(): string {
   return useSyncExternalStore(subscribePathname, () => window.location.pathname);

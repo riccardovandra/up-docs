@@ -1,0 +1,135 @@
+// The design editor's static files (the OpenPencil fork's build, unpacked
+// into dist/designer/ by scripts/fetch-designer.ts). Owner: S2.
+//
+// The editor runs on an origin of its own (DESIGNER_ORIGIN), so it gets a
+// real origin (storage, workers, HTTP cache work) but never the app's session:
+// on that host the Worker serves the editor's files and nothing else (no API,
+// no MCP, no app pages). The app frames it and the two talk only by
+// postMessage, each checking the other's origin.
+//
+// Without DESIGNER_ORIGIN (a fresh Deploy to Cloudflare install), the editor
+// is served under /designer/ on the app's own origin. That works, but is less
+// isolated: the editor's code then shares the app's origin and session.
+
+import { DESIGNER_BASE_PATH } from "../shared/design.ts";
+
+/**
+ * The editor's own origin, or null to serve it under /designer/ on the app's
+ * origin. It needs PUBLIC_ORIGIN too: the editor may only be framed by the
+ * app, and on the editor's host the app's origin cannot be read from the request.
+ */
+export function designerOrigin(input: {
+  readonly DESIGNER_ORIGIN?: string | undefined;
+  readonly PUBLIC_ORIGIN?: string | undefined;
+}): string | null {
+  const designer = input.DESIGNER_ORIGIN?.trim();
+  const app = input.PUBLIC_ORIGIN?.trim();
+  if (!designer || !app || !URL.canParse(designer) || !URL.canParse(app)) return null;
+  const origin = new URL(designer).origin;
+  return origin === new URL(app).origin || origin === "null" ? null : origin;
+}
+
+/** Whether the request came to the editor's own host. */
+export const isDesignerHost = (request: Request, origin: string | null) =>
+  origin !== null && new URL(request.url).host === new URL(origin).host;
+
+/** Whether the path is the editor's on the app's origin. */
+export const isDesignerPath = (pathname: string) =>
+  pathname === DESIGNER_BASE_PATH.slice(0, -1) || pathname.startsWith(DESIGNER_BASE_PATH);
+
+/**
+ * The editor's CSP. CanvasKit, Taffy and HarfBuzz are WebAssembly, so
+ * 'wasm-unsafe-eval', but never 'unsafe-eval'. `appOrigin` (own-origin mode)
+ * may frame it and take its agent socket; `frameAncestors` are T3 Code's
+ * origins, which may frame the app around it.
+ */
+export function designerCsp(input: {
+  readonly appOrigin: string | null;
+  readonly frameAncestors: ReadonlyArray<string>;
+}): string {
+  const app = input.appOrigin;
+  const socket = app ? ` ${app.replace(/^http/, "ws")}` : "";
+  return [
+    "default-src 'self'",
+    "script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' blob:",
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' blob: data:",
+    "font-src 'self' blob: data:",
+    `connect-src 'self' blob: data:${socket}`,
+    "worker-src 'self' blob:",
+    "object-src 'none'",
+    "base-uri 'self'",
+    `frame-ancestors ${[app ?? "'self'", ...input.frameAncestors].join(" ")}`,
+  ].join("; ");
+}
+
+const notFound = () =>
+  new Response("Not found", {
+    status: 404,
+    headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" },
+  });
+
+/** The app's own index.html, which the assets binding serves for any missing path. */
+async function isAppFallback(assets: Fetcher, origin: string, response: Response) {
+  if (!(response.headers.get("Content-Type") ?? "").startsWith("text/html")) return false;
+  const app = await assets.fetch(new Request(`${origin}/index.html`, { method: "HEAD" }));
+  const etag = response.headers.get("ETag");
+  const appEtag = app.headers.get("ETag");
+  if (etag && appEtag) return etag === appEtag;
+  // No ETags to compare: compare the bytes.
+  const [mine, theirs] = await Promise.all([
+    response.clone().text(),
+    assets.fetch(new Request(`${origin}/index.html`)).then((page) => page.text()),
+  ]);
+  return mine === theirs;
+}
+
+/**
+ * Serves one editor file. On the editor's host every path maps under
+ * /designer/ (`/` is the editor), on the app's host only /designer/ paths
+ * come here. A missing file is 404, never the app's page (the assets binding
+ * answers a missing path with it) and never the editor's index.html: in host
+ * mode the editor has no routes of its own, so the API's paths stay dead here.
+ */
+export async function designerResponse(
+  request: Request,
+  input: {
+    readonly assets: Fetcher;
+    /** Own-origin mode: the app's origin. Null when served on the app's origin. */
+    readonly appOrigin: string | null;
+    readonly frameAncestors: ReadonlyArray<string>;
+  },
+): Promise<Response> {
+  if (request.method !== "GET" && request.method !== "HEAD") {
+    return new Response("Method not allowed", { status: 405, headers: { Allow: "GET, HEAD" } });
+  }
+  const url = new URL(request.url);
+  const base = DESIGNER_BASE_PATH.slice(0, -1);
+  if (url.pathname === base) {
+    return Response.redirect(`${url.origin}${DESIGNER_BASE_PATH}${url.search}`, 302);
+  }
+  const path = url.pathname.startsWith(DESIGNER_BASE_PATH) ? url.pathname : `${base}${url.pathname}`;
+  // Only the editor's files: no dot segments, no encoded slashes.
+  if (/(^|\/)\.\.?(\/|$)|%2f|%5c/i.test(path)) return notFound();
+  const fetchAsset = (assetPath: string) =>
+    input.assets.fetch(
+      new Request(`${url.origin}${assetPath}`, { method: request.method, headers: request.headers }),
+    );
+  const response = await fetchAsset(path);
+  if (response.status === 200 && (await isAppFallback(input.assets, url.origin, response))) {
+    return notFound();
+  }
+  if (response.status === 404) return notFound();
+  const headers = new Headers(response.headers);
+  headers.set(
+    "Content-Security-Policy",
+    designerCsp({ appOrigin: input.appOrigin, frameAncestors: input.frameAncestors }),
+  );
+  headers.set("X-Content-Type-Options", "nosniff");
+  headers.set("Cross-Origin-Resource-Policy", "same-origin");
+  headers.set("Referrer-Policy", "no-referrer");
+  // Hashed build files never change; everything else revalidates.
+  const hashed = path.startsWith(`${DESIGNER_BASE_PATH}assets/`) && response.status === 200;
+  headers.set("Cache-Control", hashed ? "public, max-age=31536000, immutable" : "no-cache");
+  return new Response(response.body, { status: response.status, headers });
+}

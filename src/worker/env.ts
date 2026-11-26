@@ -21,6 +21,12 @@ export interface Env {
   readonly FRAME_ANCESTORS?: string;
   /** Unset, or no EMAIL_FROM, means no email: sign-in codes go to the console in local dev and nowhere otherwise. */
   readonly RESEND_API_KEY?: string;
+  /**
+   * The design editor's own origin, such as `https://design.example.com`: a second hostname
+   * on this Worker that serves only the editor's files. Needs PUBLIC_ORIGIN. Unset: the
+   * editor is served under /designer/ on the app's origin, which is less isolated.
+   */
+  readonly DESIGNER_ORIGIN?: string;
   /** Signs in as the admin. Unset, or under 12 characters, turns password sign-in off. */
   readonly ADMIN_PASSWORD?: string;
 }

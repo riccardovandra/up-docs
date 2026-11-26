@@ -58,6 +58,9 @@
   //   email code.
   // - EMAIL_FROM: the sender of sign-in codes and invites, its domain verified in
   //   Resend. Without it, email counts as not configured.
+  // - DESIGNER_ORIGIN: the design editor's own origin, a second hostname on this
+  //   Worker that serves only the editor's files. Needs PUBLIC_ORIGIN. Unset, the
+  //   editor is served under /designer/ on the app's origin (less isolated).
   // Secrets: ADMIN_PASSWORD, RESEND_API_KEY (`wrangler secret put <NAME>`). Without
   // RESEND_API_KEY, sign-in codes are printed to the wrangler dev console.
 }

@@ -81,6 +81,7 @@ import {
 } from "../home/folders/folderState.tsx";
 import { SheetsView } from "../sheets/SheetsView.tsx";
 import { PagesView } from "../htmlPages/PagesView.tsx";
+import { DesignsView } from "../designs/DesignsView.tsx";
 import "../home/home.css";
 
 const SEARCH_DEBOUNCE_MS = 250;
@@ -392,7 +393,15 @@ export function LibraryPage(props: { readonly kind?: LibraryKind }) {
   const folderKind =
     kind === "docs" ? "doc" : kind === "diagrams" ? "diagram" : kind === "pages" ? "page" : "sheet";
   const body =
-    kind === "pages" ? (
+    kind === "designs" ? (
+      <DesignsView
+        scope={scope}
+        scopeLabel={scope.kind === "all" ? null : scopeLabel}
+        projects={library.projects}
+        createIn={scopeProject || createsProject ? scopeLabel : "No project"}
+        resolveProjectId={createInProject}
+      />
+    ) : kind === "pages" ? (
       <PagesView
         scope={scope}
         scopeLabel={scope.kind === "all" ? null : scopeLabel}
@@ -709,7 +718,8 @@ export function LibraryPage(props: { readonly kind?: LibraryKind }) {
         projectName={scopeLabel}
         admin={admin}
       >
-        <FolderLayout kind={folderKind}>{body}</FolderLayout>
+        {/* Designs are not filed in folders (yet): no folder sidebar. */}
+        {kind === "designs" ? body : <FolderLayout kind={folderKind}>{body}</FolderLayout>}
       </FolderProvider>
     </main>
   );
