@@ -4,7 +4,6 @@ import {
   DESIGNER_MESSAGE,
   DESIGNER_PROTOCOL,
   DESIGNS_PATH,
-  designPath,
   designerFrameUrl,
   parseDesignerMessage,
   type DesignView,
@@ -16,7 +15,7 @@ import { HomeLink } from "../home/HomeLink.tsx";
 import { NoProjectBadge, ProjectBadge } from "../home/ProjectSwitcher.tsx";
 import { TitleDialog } from "../home/TitleDialog.tsx";
 import { useLockedProject } from "../lockedProject.ts";
-import { navigate } from "../router.ts";
+import { navigate, parseRoute } from "../router.ts";
 import { getAgentSocketURL } from "./agentBridge.ts";
 import { DesignIcon } from "./DesignIcon.tsx";
 import { DesignSaver, type SaveStatus } from "./designSaver.ts";
@@ -168,29 +167,34 @@ export function DesignPage(props: { readonly designId: string }) {
     saver.current = queue;
     let live = true;
     let opened = false;
-    // `flushed` carries no id, and the editor answers flushes in the order asked: the n-th
-    // answer is the n-th request's, so a wait never takes an earlier (or timed-out) one's.
-    let flushesSent = 0;
-    let flushesAnswered = 0;
-    const flushWaiters = new Map<number, (result: FlushResult) => void>();
-    const sendFlush = () => {
-      flushesSent += 1;
-      post({ type: DESIGNER_MESSAGE.flush });
-      return flushesSent;
-    };
-    flushEditor.current = () =>
+    // `flushed` carries no id, so only one flush is ever in flight: its answer is the next
+    // `flushed`. A request while one runs waits for it, then sends its own, so a leave
+    // never takes the answer to an earlier (visibility) flush. An answer with none in
+    // flight (one that timed out) is dropped.
+    let inFlight: { readonly answer: (result: FlushResult) => void } | null = null;
+    let flushChain: Promise<FlushResult> = Promise.resolve(null);
+    const flushOnce = () =>
       new Promise<FlushResult>((resolve) => {
-        if (!opened) return resolve({ saved: false, unsaved: false });
-        const ticket = sendFlush();
+        if (!live) return resolve(null);
         const timer = window.setTimeout(() => {
-          flushWaiters.delete(ticket);
+          inFlight = null;
           resolve(null);
         }, FLUSH_WAIT_MS);
-        flushWaiters.set(ticket, (result) => {
-          window.clearTimeout(timer);
-          resolve(result);
-        });
+        inFlight = {
+          answer: (result) => {
+            window.clearTimeout(timer);
+            inFlight = null;
+            resolve(result);
+          },
+        };
+        post({ type: DESIGNER_MESSAGE.flush });
       });
+    const sendFlush = () => {
+      flushChain = flushChain.then(flushOnce, flushOnce);
+      return flushChain;
+    };
+    flushEditor.current = () =>
+      opened ? sendFlush() : Promise.resolve({ saved: false, unsaved: false });
     const started = window.setTimeout(() => {
       if (live) setEditorError("The editor did not start. Reload the page to try again.");
     }, EDITOR_START_MS);
@@ -240,13 +244,9 @@ export function DesignPage(props: { readonly designId: string }) {
         case DESIGNER_MESSAGE.save:
           queue.offer({ seq: message.seq, fig: message.fig, png: message.png });
           break;
-        case DESIGNER_MESSAGE.flushed: {
-          flushesAnswered += 1;
-          const waiter = flushWaiters.get(flushesAnswered);
-          flushWaiters.delete(flushesAnswered);
-          waiter?.({ saved: message.saved, unsaved: message.unsaved });
+        case DESIGNER_MESSAGE.flushed:
+          inFlight?.answer({ saved: message.saved, unsaved: message.unsaved });
           break;
-        }
         case DESIGNER_MESSAGE.error:
           // A save this page refused already shows as "Save failed" in the header.
           if (message.reason === "save-failed" && queue.status.kind === "failed") break;
@@ -259,7 +259,8 @@ export function DesignPage(props: { readonly designId: string }) {
     };
     // A tab being hidden may be closed next: save what is unsaved now (no answer awaited).
     const onHidden = () => {
-      if (document.visibilityState === "hidden" && opened) sendFlush();
+      // Already flushing: that one covers it.
+      if (document.visibilityState === "hidden" && opened && !inFlight) void sendFlush();
     };
     window.addEventListener("message", onMessage);
     window.addEventListener("beforeunload", beforeUnload);
@@ -270,8 +271,7 @@ export function DesignPage(props: { readonly designId: string }) {
       window.removeEventListener("message", onMessage);
       window.removeEventListener("beforeunload", beforeUnload);
       document.removeEventListener("visibilitychange", onHidden);
-      for (const resolve of flushWaiters.values()) resolve(null);
-      flushWaiters.clear();
+      inFlight?.answer(null);
       saver.current = null;
       flushEditor.current = null;
     };
@@ -285,7 +285,8 @@ export function DesignPage(props: { readonly designId: string }) {
       ? await flushEditor.current()
       : { saved: false, unsaved: false };
     // Gone meanwhile (Back, or another link): this page no longer decides anything.
-    if (!mounted.current || window.location.pathname !== designPath(designId)) return;
+    const here = parseRoute(window.location.pathname);
+    if (!mounted.current || here.name !== "design" || here.designId !== designId) return;
     setLeaving(false);
     const unsaved = result === null || result.unsaved || saver.current?.unsaved === true;
     if (unsaved && !window.confirm("A change is not saved yet. Leave the design anyway?")) return;
