@@ -87,7 +87,9 @@ export function designerCsp(input: {
     `connect-src 'self' blob: data:${socket}`,
     "worker-src 'self' blob:",
     "object-src 'none'",
-    "base-uri 'self'",
+    // Editor code may not post forms (to the app or anywhere) or move its base URL.
+    "form-action 'none'",
+    "base-uri 'none'",
     `frame-ancestors ${[app ?? "'self'", ...input.frameAncestors].join(" ")}`,
   ].join("; ");
 }

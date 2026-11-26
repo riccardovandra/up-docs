@@ -71,6 +71,8 @@ describe("the editor's own host", () => {
     expect(csp).toContain("script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' 'unsafe-eval' blob:");
     expect(csp).toContain("frame-ancestors https://docs.test https://app.t3.codes");
     expect(csp).toContain("connect-src 'self' blob: data: wss://docs.test");
+    expect(csp).toContain("form-action 'none'");
+    expect(csp).toContain("base-uri 'none'");
     expect(response.headers.get("X-Content-Type-Options")).toBe("nosniff");
     // The root is the editor too.
     expect(await (await get("https://design.docs.test/", OWN)).text()).toBe(EDITOR_INDEX);
