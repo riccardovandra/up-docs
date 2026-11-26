@@ -3,9 +3,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vite build && wrangler d1 migrations apply DB --local && wrangler dev",
-    "build": "vite build",
-    "deploy": "vite build && sh scripts/deploy.sh",
+    "dev": "vite build && bun scripts/fetch-designer.ts && wrangler d1 migrations apply DB --local && wrangler dev",
+    "build": "vite build && bun scripts/fetch-designer.ts",
+    "deploy": "vite build && bun scripts/fetch-designer.ts && sh scripts/deploy.sh",
     "test": "vitest run",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.worker.json"
   },

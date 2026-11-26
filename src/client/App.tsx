@@ -24,6 +24,8 @@ const loadSheetPage = () => import("./sheets/SheetPage.tsx");
 const SheetPage = lazy(() => loadSheetPage().then((module) => ({ default: module.SheetPage })));
 const loadPageViewer = () => import("./htmlPages/PageViewer.tsx");
 const PageViewer = lazy(() => loadPageViewer().then((module) => ({ default: module.PageViewer })));
+const loadDesignPage = () => import("./designs/DesignPage.tsx");
+const DesignPage = lazy(() => loadDesignPage().then((module) => ({ default: module.DesignPage })));
 const loadSettingsPage = () => import("./pages/SettingsPage.tsx");
 const SettingsPage = lazy(() =>
   loadSettingsPage().then((module) => ({ default: module.SettingsPage })),
@@ -47,6 +49,7 @@ export function App() {
     if (first === "doc") void loadDocPage();
     if (first === "diagram") void loadDiagramPage();
     if (first === "sheet") void loadSheetPage();
+    if (first === "design") void loadDesignPage();
     if (first === "local") void loadLocalDocPage();
     if (first === "settings") void loadSettingsPage();
     api
@@ -74,7 +77,10 @@ export function App() {
       {isLibraryRoute(route) ? (
         <LibraryPage
           kind={
-            route.name === "diagrams" || route.name === "sheets" || route.name === "pages"
+            route.name === "diagrams" ||
+            route.name === "sheets" ||
+            route.name === "pages" ||
+            route.name === "designs"
               ? route.name
               : "docs"
           }
@@ -90,6 +96,9 @@ export function App() {
           <DiagramPage key={route.diagramId} diagramId={route.diagramId} />
         ) : null}
         {route.name === "page" ? <PageViewer key={route.pageId} pageId={route.pageId} /> : null}
+        {route.name === "design" ? (
+          <DesignPage key={route.designId} designId={route.designId} />
+        ) : null}
         {route.name === "sheet" ? (
           <SheetPage key={route.sheetId} sheetId={route.sheetId} tabId={route.tabId} />
         ) : null}

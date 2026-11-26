@@ -10,6 +10,14 @@ import { reviveError, type TabWriteResult } from "./docs.ts";
 import { resolvePublicOrigin, type Env } from "./env.ts";
 import { withEmbedPolicy } from "./embed.ts";
 import { d1ImageStore, r2ImageStore } from "./images.ts";
+import {
+  designerOrigin,
+  designerResponse,
+  isDesignerHost,
+  isDesignerPath,
+  refuseDesignerOriginRequest,
+} from "./designerHost.ts";
+import { isDesignAgentSocketPath } from "../shared/design.ts";
 import { handleDrawioLink, handleMcp, handlePageLink } from "./mcp.ts";
 import { PUBLIC_HEADERS } from "./publicLinks.ts";
 import { r2VideoStore } from "./videos.ts";
@@ -76,6 +84,7 @@ function apiDeps(request: Request, env: Env, ctx: ExecutionContext): ApiDeps {
     waitUntil: (promise) => ctx.waitUntil(promise),
     now: () => Date.now(),
     frameAncestors: parseEmbedOrigins(env.FRAME_ANCESTORS),
+    designerOrigin: designerOrigin(env),
   };
 }
 
@@ -88,6 +97,29 @@ function withPublicPageHeaders(response: Response): Response {
 export default {
   async fetch(request, env, ctx): Promise<Response> {
     const { pathname } = new URL(request.url);
+    // The design editor's host serves its files and nothing else: no API, no session.
+    const designer = designerOrigin(env);
+    if (isDesignerHost(request, designer)) {
+      return designerResponse(request, {
+        assets: env.ASSETS,
+        appOrigin: resolvePublicOrigin(env.PUBLIC_ORIGIN, request.url),
+        frameAncestors: parseEmbedOrigins(env.FRAME_ANCESTORS),
+      });
+    }
+    // The editor's code never reaches the app with the app's cookie (see designerHost.ts).
+    const fromEditor = refuseDesignerOriginRequest(request, designer);
+    if (fromEditor) return fromEditor;
+    // Reserved for S3's design agent socket: served by nothing else until then.
+    if (isDesignAgentSocketPath(pathname)) return new Response("Not found", { status: 404 });
+    if (isDesignerPath(pathname)) {
+      // With an editor origin of its own, the app's origin never serves the editor.
+      if (designer) return new Response("Not found", { status: 404 });
+      return designerResponse(request, {
+        assets: env.ASSETS,
+        appOrigin: null,
+        frameAncestors: parseEmbedOrigins(env.FRAME_ANCESTORS),
+      });
+    }
     if (pathname === "/api" || pathname.startsWith("/api/")) {
       const deps = apiDeps(request, env, ctx);
       // Before the API's own auth: the one-time link is the credential.

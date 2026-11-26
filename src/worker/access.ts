@@ -88,7 +88,13 @@ export async function userIdForEmail(
 }
 
 /** Every people list: a person on any of them may sign in. */
-const MEMBER_TABLE_NAMES = ["doc_members", "diagram_members", "page_members", "sheet_members"] as const;
+const MEMBER_TABLE_NAMES = [
+  "doc_members",
+  "diagram_members",
+  "page_members",
+  "sheet_members",
+  "design_members",
+] as const;
 
 /** Owners, and anyone with a pending or accepted membership on some doc, diagram, page or sheet. */
 export async function canSignIn(
@@ -268,6 +274,18 @@ export const sheetOwnerStatement = (
        VALUES (?, ?, ?, NULL, 'owner', ?, ?)`,
     )
     .bind(randomId(), input.sheetId, input.userId, input.userId, input.now);
+
+/** Makes `userId` the owner of a new design; batch it with the design's insert. */
+export const designOwnerStatement = (
+  db: D1Database,
+  input: { readonly designId: string; readonly userId: string; readonly now: number },
+) =>
+  db
+    .prepare(
+      `INSERT INTO design_members (id, design_id, user_id, email, role, added_by, created_at)
+       VALUES (?, ?, ?, NULL, 'owner', ?, ?)`,
+    )
+    .bind(randomId(), input.designId, input.userId, input.userId, input.now);
 
 /**
  * What a membership list belongs to. Docs, Draw.io diagrams, pages and sheets

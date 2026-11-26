@@ -1,0 +1,143 @@
+/* Designs: the library cards and the design page (header above the editor frame). */
+
+.design-picture {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  background: var(--home-tint, var(--surface));
+}
+
+.design-picture img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+.design-picture-empty {
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.design-card-cover {
+  height: 12.5rem;
+  padding: 1rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.design-page {
+  display: flex;
+  flex-direction: column;
+  height: calc(100dvh - var(--open-tabs-height));
+  overflow: hidden;
+  background: var(--bg);
+}
+
+.design-page-header {
+  flex: none;
+}
+
+.design-page-header .doc-header-title {
+  min-width: 0;
+}
+
+.design-page-header .doc-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.design-crumb {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.3rem 0.4rem;
+}
+
+.design-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: inherit;
+  font-weight: 600;
+  color: var(--text);
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 0.2rem 0.4rem;
+}
+
+button.design-title {
+  cursor: text;
+}
+
+button.design-title:hover {
+  border-color: var(--border);
+}
+
+.design-project {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.design-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.design-status[data-kind="failed"] {
+  color: var(--danger, #b42318);
+}
+
+.design-notice {
+  flex: none;
+  margin: 0.5rem 1rem 0;
+}
+
+.design-frame {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  border: 0;
+  background: var(--surface);
+}
+
+.design-loading {
+  flex: none;
+  padding: 0.75rem 1rem;
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+
+.design-view-only {
+  flex: 1;
+  min-height: 0;
+  padding: 1rem;
+}
+
+.design-view-only .design-picture {
+  height: 100%;
+}
+
+.design-view-only-note {
+  flex: none;
+  padding: 0.5rem 1rem 1rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+@media (max-width: 640px) {
+  .design-project {
+    display: none;
+  }
+}
