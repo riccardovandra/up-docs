@@ -13,6 +13,7 @@ import {
   MAX_DESIGN_TITLE_LENGTH,
   type DesignSummary,
 } from "../shared/design.ts";
+import { designBlock, designIdsIn } from "../shared/designBlock.ts";
 import type { DesignBridgeAnswer, DesignBridgeCommand } from "./designBridge.ts";
 import {
   DESIGN_TOOL_CATEGORIES,
@@ -386,7 +387,6 @@ export async function createDesignTool(ctx: ToolContext, args: Args, projectId: 
   };
 }
 
-export const designBlock = (designId: string) => `\`\`\`t3-design\n${designId}\n\`\`\``;
 
 export async function readDesignTool(ctx: ToolContext, args: Args) {
   const designId = designIdArg(args);
@@ -690,28 +690,19 @@ export async function exportDesignTool(ctx: ToolContext, args: Args) {
 
 // ---- designs in docs ----
 
-/** The design ids of a markdown's ```t3-design blocks (the first line of each). */
-export function designIdsIn(markdown: string): ReadonlyArray<string> {
-  const ids: Array<string> = [];
-  const fence = /^(`{3,}|~{3,})t3-design[^\n]*\n([^\n]*)/gm;
-  for (const match of markdown.matchAll(fence)) {
-    const id = match[2]!.trim();
-    if (isDesignId(id) && !ids.includes(id)) ids.push(id);
-  }
-  return ids;
-}
-
 /** The designs `markdowns` show, for read_doc: title, link and picture link of each. */
 export async function linkedDesigns(ctx: ToolContext, markdowns: ReadonlyArray<string>) {
-  const ids = [...new Set(markdowns.flatMap(designIdsIn))];
+  const ids = [...new Set(markdowns.flatMap((markdown) => designIdsIn(markdown)))];
   if (ids.length === 0) return {};
   const designs: Array<object> = [];
   for (const designId of ids.slice(0, DOC_DESIGN_LIMIT)) {
     try {
+      // A doc's reader sees the designs it shows (S4's rule).
       const { design } = await Designs.requireDesign(ctx.deps.db, {
         designId,
         userId: ctx.principal.userId,
         need: "view",
+        throughDocs: true,
       });
       const { designId: id, title, url, pictureUrl } = summary(ctx, design);
       designs.push({ designId: id, title, url, pictureUrl });

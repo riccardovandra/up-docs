@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 
 import * as Designs from "./designs.ts";
 import { MAX_INSTRUCTIONS_LENGTH, MCP_INSTRUCTIONS } from "./mcp.ts";
-import { designIdsIn } from "./mcpDesigns.ts";
 import { ORIGIN } from "./testing/apiHarness.ts";
 import { makeDesignRooms } from "./testing/designHarness.ts";
 import { makeMcpHarness } from "./testing/mcpHarness.ts";
@@ -364,7 +363,15 @@ describe("MCP design tools", () => {
     ]);
     const tab = (await mcp.tool("read_doc", { docId: seeded.doc.docId, tabId: seeded.tab.tabId })).body;
     expect(tab.designs).toHaveLength(2);
-    expect(designIdsIn("```t3-design\n  abc  \n```\n~~~t3-design\nabc\n~~~\n```t3-drawio\nzzz\n```")).toEqual(["abc"]);
+    // A malformed block is refused before anything is written.
+    const bad = await mcp.tool("edit_tab", {
+      tabId: seeded.tab.tabId,
+      find: "Intro",
+      replace: `Intro\n\n\`\`\`t3-design\n${designId}\nframe: Hero\ncaption\nextra line\n\`\`\``,
+    });
+    expect(bad.isError).toBe(true);
+    expect(bad.body.error).toBe("design_invalid");
+    expect(bad.body.format).toContain("t3-design");
   });
 
   it("routes designs and keeps diagrams on Draw.io in the instructions, within the length limit", async () => {

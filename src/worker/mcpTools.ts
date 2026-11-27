@@ -2,6 +2,7 @@
 // existing doc goes through `deps.rooms` so open editors receive it live.
 
 import type { DesignAgentPort } from "./designAgent.ts";
+import { checkDesignsIn } from "../shared/designBlock.ts";
 import * as HtmlPages from "./htmlPages.ts";
 import * as DesignTools from "./mcpDesigns.ts";
 import {
@@ -373,6 +374,13 @@ function checkMediaBlocks(markdown: string, previous?: string): void {
     fail("drawio_invalid", `${drawioProblem} Nothing was written.`, {
       format:
         "```t3-drawio\n<diagram id from list_drawio or create_drawio>\npage: <page name, optional>\npart: <part name, optional>\nOptional caption\n```",
+    });
+  }
+  const designProblem = checkDesignsIn(markdown, previous);
+  if (designProblem) {
+    fail("design_invalid", `${designProblem} Nothing was written.`, {
+      format:
+        "```t3-design\n<design id from list_designs or create_design>\nframe: <frame name, optional>\nOptional caption\n```",
     });
   }
 }
