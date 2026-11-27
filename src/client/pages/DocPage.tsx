@@ -43,6 +43,7 @@ import { OutlineRail } from "../doc/OutlineRail.tsx";
 import { TabLinkNav } from "../doc/TabLinkNav.tsx";
 import { useColumnWidth } from "../doc/toolbar/columnWidth.ts";
 import { DocToolbar } from "../doc/toolbar/DocToolbar.tsx";
+import { useDocDesigns } from "../editor/design/DocDesigns.tsx";
 import { useDocDiagrams } from "../editor/drawio/DocDiagrams.tsx";
 import { imageAttributes } from "../editor/image.ts";
 import { insertVideoFile } from "../editor/video/insertVideo.ts";
@@ -684,6 +685,13 @@ export function DocPage(props: {
     locked: lock.kind === "locked",
     onNotice: setNotice,
   });
+  // Designs (S4): "Design" in the "+" menu and its picker.
+  const designPicker = useDocDesigns({
+    projectId: doc?.projectId ?? null,
+    editable: abilities.edit,
+    locked: lock.kind === "locked",
+    onNotice: setNotice,
+  });
 
   const me = useMe();
   const [width, toggleWidth] = useColumnWidth(me?.user.id ?? "");
@@ -939,6 +947,7 @@ export function DocPage(props: {
         </aside>
       </div>
       {diagrams.element}
+      {designPicker}
     </div>
   );
 }

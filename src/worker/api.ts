@@ -30,6 +30,8 @@ import type { DocInvite } from "./email.ts";
 import * as Export from "./export.ts";
 import { docxResponse } from "./export/docx.ts";
 import { linkedDiagrams } from "./export/linkedDiagrams.ts";
+import { linkedDesigns } from "./export/linkedDesigns.ts";
+import { handleDesignDocs } from "./designDocs.ts";
 import * as Home from "./home.ts";
 import * as Images from "./images.ts";
 import * as ImageImport from "./imageImport.ts";
@@ -846,8 +848,9 @@ export async function handleApi(
       await need(id, "viewer");
       const doc = await Docs.getDoc(deps.db, id);
       const diagrams = await linkedDiagrams(deps.db, doc.tabs, principal.userId);
+      const designs = await linkedDesigns(deps.db, doc.tabs, principal.userId);
       return Export.markdownResponse(
-        Export.docMarkdown(doc, deps.publicOrigin, diagrams),
+        Export.docMarkdown(doc, deps.publicOrigin, diagrams, designs),
         doc.doc.title,
       );
     }
@@ -865,6 +868,7 @@ export async function handleApi(
         markdown: Export.docSourceMarkdown(doc),
         docUrl: `${deps.publicOrigin}/d/${id}`,
         diagrams: await linkedDiagrams(deps.db, doc.tabs, principal.userId),
+        designs: await linkedDesigns(deps.db, doc.tabs, principal.userId),
       });
     }
 
@@ -902,8 +906,9 @@ export async function handleApi(
       const tab = await Docs.getTab(deps.db, id);
       await need(tab.docId, "viewer");
       const diagrams = await linkedDiagrams(deps.db, [tab], principal.userId);
+      const designs = await linkedDesigns(deps.db, [tab], principal.userId);
       return Export.markdownResponse(
-        Export.tabMarkdown(tab, deps.publicOrigin, diagrams),
+        Export.tabMarkdown(tab, deps.publicOrigin, diagrams, designs),
         tab.title,
       );
     }
@@ -921,6 +926,7 @@ export async function handleApi(
         markdown: Export.tabSourceMarkdown(tab),
         docUrl: `${deps.publicOrigin}/d/${tab.docId}/${tab.id}`,
         diagrams: await linkedDiagrams(deps.db, [tab], principal.userId),
+        designs: await linkedDesigns(deps.db, [tab], principal.userId),
       });
     }
 
@@ -1053,6 +1059,15 @@ export async function handleApi(
       const response = await handlePages(
         request,
         { segments, method, url, principal },
+        deps,
+      );
+      if (response) return response;
+    }
+
+    // S4: re-reading designs by id, and where one is shown (designs in docs).
+    if (resource === "designs" && segments.length <= 3) {
+      const response = await handleDesignDocs(
+        { segments, method, url, userId: principal.userId },
         deps,
       );
       if (response) return response;

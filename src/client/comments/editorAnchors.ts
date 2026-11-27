@@ -1,6 +1,7 @@
 import type { Node as ProseMirrorNode } from "@tiptap/pm/model";
 
 import { anchorAt, locateAnchor, type DocAnchor } from "../../shared/anchors.ts";
+import { isDesignLanguage } from "../../shared/designBlock.ts";
 import { isDrawioLanguage } from "../../shared/drawio.ts";
 import { isEmbedLanguage } from "../../shared/embeds.ts";
 import { isVideoLanguage } from "../../shared/video.ts";
@@ -40,7 +41,10 @@ export function buildDocTextIndex(doc: ProseMirrorNode): DocTextIndex {
     const language = node.attrs.language as string | null;
     if (
       node.type.name === "codeBlock" &&
-      (isVideoLanguage(language) || isEmbedLanguage(language) || isDrawioLanguage(language))
+      (isVideoLanguage(language) ||
+        isEmbedLanguage(language) ||
+        isDrawioLanguage(language) ||
+        isDesignLanguage(language))
     ) {
       return false;
     }
