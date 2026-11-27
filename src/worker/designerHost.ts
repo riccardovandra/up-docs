@@ -116,6 +116,23 @@ async function isAppFallback(assets: Fetcher, origin: string, response: Response
 }
 
 /**
+ * A top-level navigation: `Sec-Fetch-Dest: document`, or no Sec-Fetch-Dest at
+ * all (an old browser, or curl) for an HTML file. The editor's own loads say
+ * iframe, script, worker, font, image or empty.
+ */
+function isNavigation(request: Request, html: boolean): boolean {
+  const dest = request.headers.get("Sec-Fetch-Dest");
+  return dest === "document" || (dest === null && html);
+}
+
+/** The app's Designs library, where a visit to the editor's host belongs. */
+const toApp = (appOrigin: string) =>
+  new Response(null, {
+    status: 302,
+    headers: { Location: `${appOrigin}/designs`, "Cache-Control": "no-store" },
+  });
+
+/**
  * Serves one editor file. On the editor's host every path maps under
  * /designer/ (`/` is the editor), on the app's host only /designer/ paths
  * come here. A missing file is 404, never the app's page (the assets binding
@@ -137,6 +154,8 @@ export async function designerResponse(
   const url = new URL(request.url);
   const base = DESIGNER_BASE_PATH.slice(0, -1);
   if (url.pathname === base) {
+    // `/designer` is the editor's page: a tab on its own host goes to the app.
+    if (input.appOrigin !== null && isNavigation(request, true)) return toApp(input.appOrigin);
     return Response.redirect(`${url.origin}${DESIGNER_BASE_PATH}${url.search}`, 302);
   }
   const path = url.pathname.startsWith(DESIGNER_BASE_PATH)
@@ -156,7 +175,15 @@ export async function designerResponse(
     return notFound();
   }
   if (response.status === 404) return notFound();
+  const html = (response.headers.get("Content-Type") ?? "").startsWith("text/html");
+  // On its own host the editor is only ever framed by the app: a visit in a
+  // tab of its own goes to the app's Designs library instead.
+  if (input.appOrigin !== null && isNavigation(request, html)) {
+    return toApp(input.appOrigin);
+  }
   const headers = new Headers(response.headers);
+  // The same URL is the editor in a frame and a redirect in a tab.
+  if (input.appOrigin !== null) headers.append("Vary", "Sec-Fetch-Dest");
   headers.set(
     "Content-Security-Policy",
     designerCsp({ appOrigin: input.appOrigin, frameAncestors: input.frameAncestors }),

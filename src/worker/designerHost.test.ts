@@ -49,8 +49,10 @@ const ctx = {
   waitUntil: () => undefined,
   passThroughOnException: () => undefined,
 } as unknown as ExecutionContext;
-const get = (url: string, vars: Partial<Env>) =>
-  worker.fetch(new Request(url) as never, env(vars), ctx);
+const get = (url: string, vars: Partial<Env>, headers: Record<string, string> = {}) =>
+  worker.fetch(new Request(url, { headers }) as never, env(vars), ctx);
+/** How the app's design page loads the editor. */
+const IFRAME = { "Sec-Fetch-Dest": "iframe" };
 
 describe("designerOrigin", () => {
   it("needs both origins, and a different one for the editor", () => {
@@ -74,9 +76,14 @@ describe("designerOrigin", () => {
 
 describe("the editor's own host", () => {
   it("serves the editor with its CSP, framed only by the app (and T3 Code around it)", async () => {
-    const response = await get("https://design.docs.test/designer/?host=up-docs", OWN);
+    const response = await get(
+      "https://design.docs.test/designer/?host=up-docs&parent=https%3A%2F%2Fdocs.test",
+      OWN,
+      IFRAME,
+    );
     expect(response.status).toBe(200);
     expect(await response.text()).toBe(EDITOR_INDEX);
+    expect(response.headers.get("Vary")).toContain("Sec-Fetch-Dest");
     const csp = response.headers.get("Content-Security-Policy")!;
     // Its own origin holds no session, so the JSX-compiling agent tools may eval there.
     expect(csp).toContain(
@@ -88,7 +95,43 @@ describe("the editor's own host", () => {
     expect(csp).toContain("base-uri 'none'");
     expect(response.headers.get("X-Content-Type-Options")).toBe("nosniff");
     // The root is the editor too.
-    expect(await (await get("https://design.docs.test/", OWN)).text()).toBe(EDITOR_INDEX);
+    expect(await (await get("https://design.docs.test/", OWN, IFRAME)).text()).toBe(EDITOR_INDEX);
+  });
+
+  it("sends a visit in a tab of its own to the app's Designs library", async () => {
+    const paths = [
+      "/",
+      "/designer",
+      "/designer/",
+      "/designer/?host=up-docs&parent=https%3A%2F%2Fdocs.test",
+    ];
+    for (const path of paths) {
+      // A browser's navigation, and curl or an old browser with no Sec-Fetch-Dest.
+      for (const headers of [{ "Sec-Fetch-Dest": "document" }, {}]) {
+        const response = await get(`https://design.docs.test${path}`, OWN, headers);
+        expect([path, response.status]).toEqual([path, 302]);
+        expect(response.headers.get("Location")).toBe("https://docs.test/designs");
+        expect(response.headers.get("Content-Security-Policy")).toBeNull();
+      }
+    }
+    // Outside the editor's files it stays 404, navigation or not.
+    const missing = { "Sec-Fetch-Dest": "document" };
+    expect((await get("https://design.docs.test/api/me", OWN, missing)).status).toBe(404);
+  });
+
+  it("still serves the editor's own loads: scripts, wasm, workers, fonts", async () => {
+    for (const dest of ["script", "empty", "worker", "font"]) {
+      const response = await get("https://design.docs.test/designer/assets/main-abc.js", OWN, {
+        "Sec-Fetch-Dest": dest,
+      });
+      expect([dest, response.status, await response.text()]).toEqual([dest, 200, "editor()"]);
+    }
+    const wasm = await get("https://design.docs.test/canvaskit.wasm", OWN, {
+      "Sec-Fetch-Dest": "empty",
+    });
+    expect([wasm.status, await wasm.text()]).toEqual([200, "wasm"]);
+    // No Sec-Fetch-Dest on a file that is not HTML: still the file.
+    expect((await get("https://design.docs.test/canvaskit.wasm", OWN)).status).toBe(200);
   });
 
   it("caches hashed build files for good and revalidates the rest", async () => {
@@ -135,6 +178,15 @@ describe("the app's host", () => {
       expect(app.headers.get("Content-Security-Policy") ?? "").not.toContain("unsafe-eval");
     }
     expect((await get("https://docs.test/designer/assets/main-abc.js", OWN)).status).toBe(404);
+  });
+
+  it("is unaffected by the redirect: its pages and the same-origin editor", async () => {
+    const nav = { "Sec-Fetch-Dest": "document" };
+    const designs = await get("https://docs.test/designs", OWN, nav);
+    expect(designs.status).toBe(200);
+    expect(await designs.text()).toContain("app");
+    const editor = await get("https://docs.test/designer/?host=up-docs", {}, nav);
+    expect([editor.status, await editor.text()]).toEqual([200, EDITOR_INDEX]);
   });
 
   it("serves the editor under /designer/ when no editor origin is set", async () => {
