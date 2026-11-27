@@ -99,7 +99,12 @@ describe("the editor's own host", () => {
   });
 
   it("sends a visit in a tab of its own to the app's Designs library", async () => {
-    const paths = ["/", "/designer/", "/designer/?host=up-docs&parent=https%3A%2F%2Fdocs.test"];
+    const paths = [
+      "/",
+      "/designer",
+      "/designer/",
+      "/designer/?host=up-docs&parent=https%3A%2F%2Fdocs.test",
+    ];
     for (const path of paths) {
       // A browser's navigation, and curl or an old browser with no Sec-Fetch-Dest.
       for (const headers of [{ "Sec-Fetch-Dest": "document" }, {}]) {
