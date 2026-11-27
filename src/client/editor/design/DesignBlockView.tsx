@@ -82,11 +82,13 @@ function DesignFigure(props: {
         <DesignIcon size={12} />
         Design
       </span>
-      {loaded !== "missing" ? (
+      {loaded !== "missing" || (props.editable && changesHere) ? (
         <div className="drawio-actions" role="group" aria-label="Design actions">
-          <a className="drawio-action" href={designPath(block.designId)} onClick={open}>
-            Open
-          </a>
+          {loaded !== "missing" ? (
+            <a className="drawio-action" href={designPath(block.designId)} onClick={open}>
+              Open
+            </a>
+          ) : null}
           {props.editable && changesHere ? (
             <button type="button" className="drawio-action" onClick={() => props.onRemove()}>
               Remove
