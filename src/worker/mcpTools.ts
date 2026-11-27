@@ -1,7 +1,16 @@
 // The agent tools behind `/mcp`. Reads go through `docs.ts`; every write to an
 // existing doc goes through `deps.rooms` so open editors receive it live.
 
+import type { DesignAgentPort } from "./designAgent.ts";
 import * as HtmlPages from "./htmlPages.ts";
+import * as DesignTools from "./mcpDesigns.ts";
+import {
+  fail,
+  McpToolError,
+  toBase64,
+  ToolResultWithImages,
+  type ToolImage,
+} from "./mcpResult.ts";
 import * as PageLinks from "./pageLinks.ts";
 import {
   checkPagesIn,
@@ -169,41 +178,7 @@ const MAX_NEW_DRAWIO_LINKS = 20;
 /** A larger picture is not attached: clients refuse images of several megabytes. */
 const MAX_ATTACHED_PICTURE_BYTES = 3 * 1024 * 1024;
 
-/** A picture handed to the agent beside a tool's JSON; `data` is base64. */
-export interface ToolImage {
-  readonly data: string;
-  readonly mimeType: string;
-}
-
-/** A tool result that carries pictures: `body` is the JSON, the images follow it. */
-export class ToolResultWithImages {
-  readonly body: object;
-  readonly images: ReadonlyArray<ToolImage>;
-
-  constructor(body: object, images: ReadonlyArray<ToolImage>) {
-    this.body = body;
-    this.images = images;
-  }
-}
-
-export class McpToolError extends Error {
-  readonly detail: Record<string, unknown>;
-  readonly unknownTool: boolean;
-
-  constructor(detail: Record<string, unknown>, unknownTool = false) {
-    super(typeof detail.error === "string" ? detail.error : "tool_error");
-    this.detail = detail;
-    this.unknownTool = unknownTool;
-  }
-}
-
-function fail(
-  error: string,
-  message: string,
-  extra: Record<string, unknown> = {},
-): never {
-  throw new McpToolError({ error, message, ...extra });
-}
+export { McpToolError, ToolResultWithImages, type ToolImage } from "./mcpResult.ts";
 
 export interface ToolContext {
   readonly deps: ApiDeps;
@@ -212,6 +187,8 @@ export interface ToolContext {
   readonly agentName: string;
   /** The token; its user's doc roles decide what the agent may do. */
   readonly principal: Principal;
+  /** Open design editors (designAgent.ts); unset where no Worker env is at hand. */
+  readonly designs?: DesignAgentPort | undefined;
 }
 
 type Args = Record<string, unknown>;
@@ -1325,14 +1302,6 @@ async function drawioProject(ctx: ToolContext, projectId: string | null) {
   return { projectId, key: project.key, name: project.name };
 }
 
-function toBase64(bytes: Uint8Array): string {
-  let binary = "";
-  for (let at = 0; at < bytes.length; at += 0x8000) {
-    binary += String.fromCharCode(...bytes.subarray(at, at + 0x8000));
-  }
-  return btoa(binary);
-}
-
 /** The PNG of the diagram's current picture for the agent to look at, or one line saying why not. */
 async function drawioPicture(
   ctx: ToolContext,
@@ -1621,7 +1590,7 @@ export const TOOLS = [
   {
     name: "format_guide",
     description:
-      "The full spec of one doc format, with an example: writing (how to write a doc), diagram (t3-widget), diagram_doc (a Draw.io diagram with a doc that shows its parts), drawio (Draw.io diagrams from the library and their pages, t3-drawio), table (t3-table), video (t3-video), embed (t3-embed), image (images in a doc and uploads), sheet (sheets and their formulas), comments (anchors on passages, table cells and diagram labels), sharing, or claude_push. Call it before you first write that format in a session.",
+      "The full spec of one doc format, with an example: writing (how to write a doc), diagram (t3-widget), diagram_doc (a Draw.io diagram with a doc that shows its parts), drawio (Draw.io diagrams from the library and their pages, t3-drawio), table (t3-table), video (t3-video), embed (t3-embed), image (images in a doc and uploads), sheet (sheets and their formulas), comments (anchors on passages, table cells and diagram labels), design (designs and the OpenPencil tools that edit them), sharing, or claude_push. Call it before you first write that format in a session.",
     inputSchema: {
       type: "object",
       properties: { topic: { type: "string", enum: FORMAT_TOPICS } },
@@ -1762,7 +1731,7 @@ export const TOOLS = [
   {
     name: "read_doc",
     description:
-      "Read a doc: its tab tree (ids, versions, urls), each tab's markdown and the project's facts (follow them). Pass tabId to read only that tab; a doc link /d/<docId>/<tabId> gives both. drawioDiagrams describes each Draw.io diagram the tabs link with a ```t3-drawio block (title, shapes, connections), by the id on the block's first line.",
+      "Read a doc: its tab tree (ids, versions, urls), each tab's markdown and the project's facts (follow them). Pass tabId to read only that tab; a doc link /d/<docId>/<tabId> gives both. drawioDiagrams describes each Draw.io diagram the tabs link with a ```t3-drawio block (title, shapes, connections), by the id on the block's first line. designs lists each design a ```t3-design block shows (title, link, picture link).",
     inputSchema: {
       type: "object",
       properties: { docId: { type: "string" }, tabId: { type: "string" } },
@@ -2438,6 +2407,7 @@ export const TOOLS = [
       ],
     },
   },
+  ...DesignTools.DESIGN_TOOLS,
 ] as const;
 
 type ToolName = (typeof TOOLS)[number]["name"];
@@ -2664,6 +2634,7 @@ const handlers: Record<
         projectFacts: await projectFactsFor(ctx, doc.projectId),
         tab: { ...tabSummary(ctx, tab), markdown: tab.markdown },
         ...(await linkedDrawio(ctx, [tab])),
+        ...(await DesignTools.linkedDesigns(ctx, [tab.markdown])),
       };
     }
     const threads = await DocThreads.listDocThreads(ctx.deps.db, docId);
@@ -2682,6 +2653,10 @@ const handlers: Record<
         markdown: tab.markdown,
       })),
       ...(await linkedDrawio(ctx, tabs)),
+      ...(await DesignTools.linkedDesigns(
+        ctx,
+        tabs.map((tab) => tab.markdown),
+      )),
     };
   },
 
@@ -3414,6 +3389,23 @@ const handlers: Record<
       })),
     };
   },
+
+  list_designs: async (args, ctx) =>
+    DesignTools.listDesignsTool(
+      ctx,
+      args.noProject === true
+        ? null
+        : args.projectId != null || args.projectKey != null
+          ? (await existingProject(ctx, args)).id
+          : undefined,
+    ),
+  create_design: async (args, ctx) =>
+    DesignTools.createDesignTool(ctx, args, await targetProject(ctx, args)),
+  read_design: (args, ctx) => DesignTools.readDesignTool(ctx, args),
+  design_tools: (args, ctx) => DesignTools.designToolsTool(ctx, args),
+  run_design_tools: (args, ctx) => DesignTools.runDesignToolsTool(ctx, args),
+  undo_design: (args, ctx) => DesignTools.undoDesignTool(ctx, args),
+  export_design: (args, ctx) => DesignTools.exportDesignTool(ctx, args),
 
   read_drawio: async (args, ctx) => {
     const diagramId = drawioIdArg(args);

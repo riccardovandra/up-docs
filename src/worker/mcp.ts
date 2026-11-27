@@ -1,4 +1,5 @@
 import type { ApiDeps } from "./api.ts";
+import type { DesignAgentPort } from "./designAgent.ts";
 import * as Auth from "./auth.ts";
 import * as DrawioLinks from "./drawioLinks.ts";
 import * as PageLinks from "./pageLinks.ts";
@@ -43,23 +44,24 @@ What to make: decide from the user's words before anything else.
 - A doc, plan or write-up, with or without diagrams: a doc; its diagrams are \`\`\`t3-widget blocks inside it (topic "diagram").
 - A doc with an editable or Draw.io diagram: create_drawio, then paste its block into the doc.
 - A diagram plus a doc that explains it: one Draw.io diagram drawn in sections, and a doc that shows it whole, then one part per section beside its text (topic "diagram_doc").
+- A design (mockup, UI screen, landing page layout): create_design, then run_design_tools in the open editor (topic "design").
 Doc workflow:
 1. Create it first: create_doc with projectKey (and projectName), the title and a skeleton (section headings, each with a one-line placeholder), before research. Omit projectKey only when the doc belongs to no project. Pass type (plan, spec, explainer, report, client) for a ready skeleton.
 2. Give the user the URL right away, then work.
-3. Fill sections one at a time with edit_tab (replace a placeholder with the finished section), so the user watches it build. write_tab only for a new or fully rewritten tab.
+3. Fill sections one at a time with edit_tab (a placeholder becomes the finished section) so the user watches it build; write_tab only for a new or rewritten tab.
 4. Tabs (create_tab) for distinct parts such as research, plan and decisions; nest with parentTabId.
 5. Keep findings in the doc, not the chat. End with one line and the URL.
 How to write: create_doc returns the user's writing rules; read them (topic "writing") before you write in a doc you did not create. In short: know the reader and the decision; foundation first; plain words, every term defined; draft small; a diagram beside every process, system or comparison.
-Doc links read <origin>/d/<docId>/<tabId>: a pasted link's tabId is the tab the user is on, so read_doc with it first. Re-read a tab (read_doc with tabId) before editing it if the user may have changed it. Move a doc with move_doc (projectId: null for no project).
+Doc links read <origin>/d/<docId>/<tabId>: the tabId is the tab the user is on, so read_doc with it first. Re-read a tab (read_doc with tabId) before editing it if the user may have changed it. Move a doc with move_doc (projectId: null for no project).
 Project facts: create_doc and read_doc return the project's standing facts (tools, names, rules). Follow them over your own assumptions. When the user corrects a lasting fact, save it with add_project_fact, or with resolve_comment's lesson when it came from a comment.
 Formats: call format_guide {topic} before you first write one. Malformed blocks are refused with the reason.
 - Diagrams in a doc: \`\`\`t3-widget id=<slug> (topic "diagram"). Existing \`\`\`mermaid blocks keep working; edit them in place, never convert them.
 - Draw.io diagrams (a library of their own, shown in docs whole or one part at a time): list_drawio, read_drawio, create_drawio, update_drawio; big files by link (topic "drawio").
 - Rich tables (status chips, links, per-cell comments): \`\`\`t3-table (topic "table"). Plain markdown tables are fine for static data.
-- Images: ![alt](https://...) links are copied into the doc on write; a local file goes up with prepare_image_upload (topic "image").
+- Images: ![alt](https://...) links are copied in on write; local files go up with prepare_image_upload (topic "image").
 - Videos: \`\`\`t3-video (topic "video"). LinkedIn and X posts: \`\`\`t3-embed (topic "embed").
-- Comments: when asked to address comments, list_comments, make the edits, reply_comment in each thread with what changed, then resolve_comment (topic "comments": anchors on table cells and diagram labels).
-- Sheets (live shared spreadsheets): create_sheet, read_sheet, read_cells, edit_sheet (topic "sheet").
+- Comments: to address comments, list_comments, make the edits, reply_comment in each thread with what changed, then resolve_comment (topic "comments": anchors on table cells, diagram labels).
+- Sheets (live spreadsheets): create_sheet, read_sheet, read_cells, edit_sheet (topic "sheet").
 - Pages (uploaded HTML prototypes, private until shared): prepare_page_upload, list_pages, read_page; \`\`\`t3-page shows one in a doc (topic "page").
 - Sharing: share_doc, list_members and unshare_doc (topic "sharing"). Pushing a tab to a Claude Doc: topic "claude_push".`;
 
@@ -129,6 +131,7 @@ function isRequest(body: unknown): body is JsonRpcRequest {
 export async function handleMcp(
   request: Request,
   deps: ApiDeps,
+  designs?: DesignAgentPort,
 ): Promise<Response> {
   const url = new URL(request.url);
   if (url.pathname.replace(/\/+$/, "") !== "/mcp") {
@@ -205,6 +208,7 @@ export async function handleMcp(
           origin: deps.publicOrigin,
           agentName: clientNameFrom(request) ?? principal.tokenName,
           principal,
+          designs,
         });
         const withImages = result instanceof ToolResultWithImages;
         return rpcResult(body.id, {

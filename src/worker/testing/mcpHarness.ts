@@ -1,10 +1,11 @@
 // The MCP endpoint driven like a real client, over the API test harness.
 
+import type { DesignAgentPort } from "../designAgent.ts";
 import { handleMcp } from "../mcp.ts";
 import { makeApiHarness, ORIGIN } from "./apiHarness.ts";
 
 /** `requestOrigin` stands in for what request.url reports, which can differ from PUBLIC_ORIGIN. */
-export async function makeMcpHarness(requestOrigin = ORIGIN) {
+export async function makeMcpHarness(requestOrigin = ORIGIN, designs?: DesignAgentPort) {
   const api = makeApiHarness();
   const cookie = await api.signIn();
   const created = await api.call("POST", "/api/tokens", {
@@ -24,6 +25,7 @@ export async function makeMcpHarness(requestOrigin = ORIGIN) {
         body: JSON.stringify(body),
       }),
       api.deps,
+      designs,
     );
 
   const rpc = async (method: string, params: Record<string, unknown> = {}) => {
