@@ -14,33 +14,47 @@ import type { Env } from "./env.ts";
 
 const EDITOR_TAG = "editor";
 
-interface EditorAttachment {
+export interface EditorAttachment {
   /** Order of connection: the highest is the newest, the one commands go to. */
   readonly seq: number;
+  /** This connection, never reused: what a batch checks it still talks to. */
+  readonly id: string;
+}
+
+/** A new connection's attachment: after every open one, and its own id. */
+export function newEditorAttachment(
+  openSeqs: ReadonlyArray<number>,
+  now: number,
+  newId: () => string = () => crypto.randomUUID(),
+): EditorAttachment {
+  return { seq: Math.max(now, ...openSeqs.map((seq) => seq + 1)), id: newId() };
 }
 
 export class DesignRoom extends DurableObject<Env> {
   private readonly bridge = new DesignBridge({
-    editor: () => this.editorSocket(),
+    editor: () => {
+      const newest = this.newestEditor();
+      return newest ? { socket: newest.socket, id: newest.id } : null;
+    },
     setTimer: (run, ms) => setTimeout(run, ms),
     clearTimer: (timer) => clearTimeout(timer as ReturnType<typeof setTimeout>),
     newId: () => crypto.randomUUID(),
   });
 
-  private sockets(): ReadonlyArray<{ socket: WebSocket; seq: number }> {
+  private sockets(): ReadonlyArray<{ socket: WebSocket } & EditorAttachment> {
     return this.ctx
       .getWebSockets(EDITOR_TAG)
       .filter((socket) => socket.readyState === WebSocket.OPEN)
-      .map((socket) => ({
-        socket,
-        seq: (socket.deserializeAttachment() as EditorAttachment | null)?.seq ?? 0,
-      }));
+      .map((socket) => {
+        const attachment = socket.deserializeAttachment() as EditorAttachment | null;
+        return { socket, seq: attachment?.seq ?? 0, id: attachment?.id ?? "" };
+      });
   }
 
-  private editorSocket(): WebSocket | null {
-    let newest: { socket: WebSocket; seq: number } | null = null;
+  private newestEditor(): ({ socket: WebSocket } & EditorAttachment) | null {
+    let newest: ({ socket: WebSocket } & EditorAttachment) | null = null;
     for (const entry of this.sockets()) if (!newest || entry.seq > newest.seq) newest = entry;
-    return newest?.socket ?? null;
+    return newest;
   }
 
   /** A one-use ticket for the design page to hand the editor. */
@@ -49,11 +63,15 @@ export class DesignRoom extends DurableObject<Env> {
   }
 
   async status(): Promise<{ readonly connected: boolean }> {
-    return { connected: this.editorSocket() !== null };
+    return { connected: this.newestEditor() !== null };
   }
 
-  async command(command: string, args: unknown): Promise<DesignBridgeAnswer> {
-    return this.bridge.command(command, args);
+  async command(
+    command: string,
+    args: unknown,
+    expectedEditor?: string | null,
+  ): Promise<DesignBridgeAnswer> {
+    return this.bridge.command(command, args, expectedEditor);
   }
 
   /** The editor's socket handshake; the Worker checked its path, method and Origin. */
@@ -68,8 +86,12 @@ export class DesignRoom extends DurableObject<Env> {
     const older = this.sockets();
     const { 0: client, 1: server } = new WebSocketPair();
     this.ctx.acceptWebSocket(server, [EDITOR_TAG]);
-    const seq = Math.max(Date.now(), ...older.map((entry) => entry.seq + 1));
-    server.serializeAttachment({ seq } satisfies EditorAttachment);
+    server.serializeAttachment(
+      newEditorAttachment(
+        older.map((entry) => entry.seq),
+        Date.now(),
+      ),
+    );
     // The newest editor wins. 1000 tells the older one not to reconnect.
     for (const { socket } of older) {
       this.bridge.dropped(socket);

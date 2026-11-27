@@ -32,14 +32,16 @@ export const isDesignTicket = (value: string) => TICKET.test(value);
 
 /** The editor's answer to one command, or why there is none. */
 export type DesignBridgeAnswer =
-  | { readonly kind: "answer"; readonly ok: true; readonly result: unknown }
-  | { readonly kind: "answer"; readonly ok: false; readonly error: string }
+  | { readonly kind: "answer"; readonly ok: true; readonly result: unknown; readonly editor: string }
+  | { readonly kind: "answer"; readonly ok: false; readonly error: string; readonly editor: string }
   /** No editor has this design open. */
   | { readonly kind: "not_open" }
   /** The editor did not answer within DESIGN_COMMAND_TIMEOUT_MS; the call was cancelled. */
   | { readonly kind: "timeout" }
   /** The editor's socket closed before it answered. */
   | { readonly kind: "closed" }
+  /** A newer editor holds the socket than the one the caller expected; nothing was sent. */
+  | { readonly kind: "editor_changed" }
   /** Not a command the room forwards. */
   | { readonly kind: "refused"; readonly error: string };
 
@@ -47,15 +49,22 @@ export interface BridgeSocket {
   send(data: string): void;
 }
 
+/** The open editor's socket, and which connection it is (a new one on every handshake). */
+export interface BridgeEditor {
+  readonly socket: BridgeSocket;
+  readonly id: string;
+}
+
 interface Pending {
   readonly socket: BridgeSocket;
+  readonly editor: string;
   readonly resolve: (answer: DesignBridgeAnswer) => void;
   readonly timer: unknown;
 }
 
 export interface DesignBridgeIo {
-  /** The newest open editor socket, or null. */
-  readonly editor: () => BridgeSocket | null;
+  /** The newest open editor connection, or null. */
+  readonly editor: () => BridgeEditor | null;
   readonly setTimer: (run: () => void, ms: number) => unknown;
   readonly clearTimer: (timer: unknown) => void;
   readonly newId: () => string;
@@ -77,13 +86,19 @@ export class DesignBridge {
   command(
     command: string,
     args: unknown,
+    /** Send only to this connection (from an earlier answer's `editor`). */
+    expectedEditor?: string | null,
     timeoutMs = DESIGN_COMMAND_TIMEOUT_MS,
   ): Promise<DesignBridgeAnswer> {
     if (!isDesignBridgeCommand(command)) {
       return Promise.resolve({ kind: "refused", error: `"${command}" is not forwarded to the editor.` });
     }
-    const socket = this.io.editor();
-    if (!socket) return Promise.resolve({ kind: "not_open" });
+    const editor = this.io.editor();
+    if (!editor) return Promise.resolve({ kind: "not_open" });
+    if (expectedEditor != null && editor.id !== expectedEditor) {
+      return Promise.resolve({ kind: "editor_changed" });
+    }
+    const { socket } = editor;
     const id = this.io.newId();
     return new Promise<DesignBridgeAnswer>((resolve) => {
       const timer = this.io.setTimer(() => {
@@ -95,7 +110,7 @@ export class DesignBridge {
         }
         resolve({ kind: "timeout" });
       }, timeoutMs);
-      this.pending.set(id, { socket, resolve, timer });
+      this.pending.set(id, { socket, editor: editor.id, resolve, timer });
       try {
         socket.send(JSON.stringify({ type: "request", id, command, args: args ?? {} }));
       } catch {
@@ -117,14 +132,16 @@ export class DesignBridge {
     }
     if (message.type !== "response" || typeof message.id !== "string") return;
     // Only the socket a request went to may answer it.
-    if (this.pending.get(message.id)?.socket !== socket) return;
+    const call = this.pending.get(message.id);
+    if (call?.socket !== socket) return;
     this.settle(
       message.id,
       message.ok === true
-        ? { kind: "answer", ok: true, result: message.result ?? null }
+        ? { kind: "answer", ok: true, result: message.result ?? null, editor: call.editor }
         : {
             kind: "answer",
             ok: false,
+            editor: call.editor,
             error:
               typeof message.error === "string" && message.error
                 ? message.error.slice(0, 2000)

@@ -20,11 +20,11 @@ function fakeSocket() {
 
 /** A bridge on a hand-driven clock, sending to whichever socket `editor` holds. */
 function bridgeWith(initial: BridgeSocket | null) {
-  const holder = { editor: initial };
+  const holder = { editor: initial, id: "c1" };
   const timers = new Map<number, () => void>();
   let next = 0;
   const bridge = new DesignBridge({
-    editor: () => holder.editor,
+    editor: () => (holder.editor ? { socket: holder.editor, id: holder.id } : null),
     setTimer: (run) => {
       next += 1;
       timers.set(next, run);
@@ -63,7 +63,7 @@ describe("DesignBridge", () => {
     bridge.receive(editor.socket, "not json");
     bridge.receive(editor.socket, new ArrayBuffer(4));
     bridge.receive(editor.socket, answer(editor.sent[0]!.id, { ok: true, result: { id: "1:2" } }));
-    expect(await pending).toEqual({ kind: "answer", ok: true, result: { id: "1:2" } });
+    expect(await pending).toEqual({ kind: "answer", ok: true, result: { id: "1:2" }, editor: "c1" });
     expect(timers.size).toBe(0);
     expect(bridge.inFlight).toBe(0);
   });
@@ -73,7 +73,7 @@ describe("DesignBridge", () => {
     const { bridge } = bridgeWith(editor.socket);
     const pending = bridge.command("undo", {});
     bridge.receive(editor.socket, answer(editor.sent[0]!.id, { ok: false, error: "made in the editor" }));
-    expect(await pending).toEqual({ kind: "answer", ok: false, error: "made in the editor" });
+    expect(await pending).toEqual({ kind: "answer", ok: false, error: "made in the editor", editor: "c1" });
   });
 
   it("answers not_open with no editor, and refuses eval and other commands without sending", async () => {
@@ -106,6 +106,7 @@ describe("DesignBridge", () => {
     const first = bridge.command("selection", {});
     const newer = fakeSocket();
     holder.editor = newer.socket;
+    holder.id = "c2";
     const second = bridge.command("selection", {});
     expect(old.sent).toHaveLength(1);
     expect(newer.sent).toHaveLength(1);
@@ -117,7 +118,18 @@ describe("DesignBridge", () => {
     bridge.dropped(old.socket);
     expect(await first).toEqual({ kind: "closed" });
     bridge.receive(newer.socket, answer(newer.sent[0]!.id, { ok: true, result: [] }));
-    expect(await second).toEqual({ kind: "answer", ok: true, result: [] });
+    expect(await second).toEqual({ kind: "answer", ok: true, result: [], editor: "c2" });
+  });
+
+  it("sends to an expected connection only", async () => {
+    const editor = fakeSocket();
+    const { bridge, holder } = bridgeWith(editor.socket);
+    expect(await bridge.command("tool", {}, "c0")).toEqual({ kind: "editor_changed" });
+    expect(editor.sent).toEqual([]);
+    const pending = bridge.command("tool", {}, holder.id);
+    expect(editor.sent).toHaveLength(1);
+    bridge.receive(editor.socket, answer(editor.sent[0]!.id, { ok: true, result: null }));
+    expect((await pending).kind).toBe("answer");
   });
 
   it("ends a call whose send throws", async () => {

@@ -273,6 +273,13 @@ function failureOf(ctx: ToolContext, designId: string, answer: DesignBridgeAnswe
           "The editor closed or reloaded before it answered. It may have run: once it is open again, read_design shows the current state.",
         extra: { url: urlOf(ctx, designId) },
       };
+    case "editor_changed":
+      return {
+        error: "editor_changed",
+        message:
+          "Another editor took the design over (a tab opened or reloaded), so this call was not sent. read_design shows the current state.",
+        extra: { url: urlOf(ctx, designId) },
+      };
     case "refused":
       return { error: "not_allowed", message: answer.error, extra: DESIGN_GUIDE };
     case "answer":
@@ -535,11 +542,17 @@ export async function runDesignToolsTool(ctx: ToolContext, args: Args) {
 
   const results: Array<Record<string, unknown>> = [];
   const images: Array<ToolImage> = [];
+  /** The editor connection the batch runs in: one canvas, start to end. */
+  let editor: string | null = null;
   for (const [index, call] of calls.entries()) {
-    const answer = await forwardDesignCommand(bridgePort, designId, "tool", {
-      name: call.name,
-      args: call.args,
-    });
+    const answer = await forwardDesignCommand(
+      bridgePort,
+      designId,
+      "tool",
+      { name: call.name, args: call.args },
+      editor,
+    );
+    if (answer.kind === "answer") editor ??= answer.editor;
     const failure =
       answer.kind === "answer"
         ? answer.ok

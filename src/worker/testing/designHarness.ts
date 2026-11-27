@@ -119,6 +119,8 @@ export interface FakeEditor {
   readonly received: Array<{ command: string; args: Record<string, unknown> }>;
   /** Commands it never answers (the bridge's timeout ends them). */
   readonly hang: Set<string>;
+  /** Runs before each answer is sent, such as another tab opening meanwhile. */
+  beforeAnswer?: (() => Promise<void>) | undefined;
   readonly socket: BridgeSocket;
   open: boolean;
 }
@@ -212,7 +214,10 @@ export function makeDesignRooms(input: { readonly isolatedEditor?: boolean } = {
     const editors: Array<FakeEditor> = [];
     const newest = () => editors.filter((editor) => editor.open).at(-1) ?? null;
     const bridge: DesignBridge = new DesignBridge({
-      editor: () => newest()?.socket ?? null,
+      editor: () => {
+        const editor = newest();
+        return editor ? { socket: editor.socket, id: String(editors.indexOf(editor)) } : null;
+      },
       setTimer: (fire) => {
         timers.add(fire);
         return fire;
@@ -225,7 +230,8 @@ export function makeDesignRooms(input: { readonly isolatedEditor?: boolean } = {
       bridge,
       issueTicket: () => issueDesignTicket(storage, clock.now),
       status: async () => ({ connected: newest() !== null }),
-      command: (command: string, args: unknown) => bridge.command(command, args),
+      command: (command: string, args: unknown, expectedEditor?: string | null) =>
+        bridge.command(command, args, expectedEditor),
       fetch: async (request: Request) => {
         handshakes.push(request);
         const ticket = new URL(request.url).searchParams.get("ticket") ?? "";
@@ -258,9 +264,10 @@ export function makeDesignRooms(input: { readonly isolatedEditor?: boolean } = {
             const key = message.command === "tool" ? String(message.args.name) : message.command;
             if (editor.hang.has(key)) return;
             const reply = run(editor, message.command, message.args);
-            queueMicrotask(() =>
-              bridge.receive(editor.socket, JSON.stringify({ type: "response", id: message.id, ...reply })),
-            );
+            void (async () => {
+              await editor.beforeAnswer?.();
+              bridge.receive(editor.socket, JSON.stringify({ type: "response", id: message.id, ...reply }));
+            })();
           },
         },
       };

@@ -281,6 +281,28 @@ describe("MCP design tools", () => {
     expect(run.body.results[0].result.start).toHaveLength(20_000);
   });
 
+  it("stops a batch when another editor takes the design over between calls", async () => {
+    const { rooms, designId, call } = await setup();
+    const first = await rooms.open(designId);
+    first.beforeAnswer = async () => {
+      first.beforeAnswer = undefined;
+      await rooms.open(designId);
+    };
+    const run = await call("run_design_tools", {
+      designId,
+      calls: [
+        { name: "create_shape", args: { type: "FRAME", x: 0, y: 0 } },
+        { name: "create_shape", args: { type: "TEXT", x: 0, y: 0 } },
+        { name: "list_pages" },
+      ],
+    });
+    expect(run.body).toMatchObject({ error: "editor_changed", ran: 1, failedAt: 1, failedCall: "create_shape" });
+    const second = rooms.room(designId).editors.at(-1)!;
+    expect(first.received).toHaveLength(1);
+    // Nothing of the batch reached the new editor.
+    expect(second.received).toEqual([]);
+  });
+
   it("reports an editor that does not answer in time, and one that closes mid-call", async () => {
     const { rooms, designId, call } = await setup();
     const editor = await rooms.open(designId);

@@ -27,7 +27,7 @@ import { NotFoundError } from "./docs.ts";
 export interface DesignRoomPort {
   issueTicket(): Promise<{ readonly ticket: string; readonly expiresAt: number }>;
   status(): Promise<{ readonly connected: boolean }>;
-  command(command: string, args: unknown): Promise<DesignBridgeAnswer>;
+  command(command: string, args: unknown, expectedEditor?: string | null): Promise<DesignBridgeAnswer>;
   fetch(request: Request): Promise<Response>;
 }
 
@@ -292,8 +292,10 @@ export async function forwardDesignCommand(
   designId: string,
   command: DesignBridgeCommand,
   args: Record<string, unknown>,
+  /** Send only to this editor connection; `editor_changed` when another holds the socket. */
+  expectedEditor?: string | null,
 ): Promise<DesignBridgeAnswer> {
-  if (command !== "tool") return port.room(designId).command(command, args);
+  if (command !== "tool") return port.room(designId).command(command, args, expectedEditor);
   const name = args.name;
   const tool = typeof name === "string" ? (await port.tools()).get(name) : undefined;
   if (!tool) return { kind: "refused", error: `The tool "${String(name)}" is not available here.` };
@@ -305,5 +307,5 @@ export async function forwardDesignCommand(
           ),
         )
       : {};
-  return port.room(designId).command("tool", { name, args: toolArgs });
+  return port.room(designId).command("tool", { name, args: toolArgs }, expectedEditor);
 }
