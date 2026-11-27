@@ -30,6 +30,7 @@ import {
 } from "../shared/design.ts";
 import { canSeeProject, designOwnerStatement } from "./access.ts";
 import { randomId } from "./crypto.ts";
+import { seesDesignThroughDocs } from "./designDocs.ts";
 import { getProject, NotFoundError } from "./docs.ts";
 import { matchesType, type ImageStore } from "./images.ts";
 
@@ -110,18 +111,27 @@ export const designFigKey = (designId: string, version: number, token: string) =
 export const designPictureKey = (designId: string, version: number, token: string) =>
   `${designsPrefix(designId)}${version}-${token}.png`;
 
-/** The person's role on the design, or null when they may not see it. The admin owns every design. */
+/**
+ * The person's role on the design, or null when they may not see it. The admin owns every design.
+ * `throughDocs` (S4, designs in docs): someone on no people list who is on a doc that shows the
+ * design views it, by `seesDesignThroughDocs`'s rule. Only the summary and picture routes ask for
+ * it, so such a viewer never gets the .fig file or the editor.
+ */
 export async function designRole(
   db: D1Database,
   designId: string,
   userId: string,
+  options: { readonly throughDocs?: boolean } = {},
 ): Promise<DocRole | null> {
   if (isAdmin(userId)) return "owner";
   const row = await db
     .prepare("SELECT role FROM design_members WHERE design_id = ? AND user_id = ?")
     .bind(designId, userId)
     .first<{ role: DocRole }>();
-  return row?.role ?? null;
+  if (row) return row.role;
+  // S4: seeing a design through a doc. Viewer at most, and never for the file.
+  if (options.throughDocs && (await seesDesignThroughDocs(db, designId, userId))) return "viewer";
+  return null;
 }
 
 export async function getDesign(db: D1Database, designId: string): Promise<DesignSummary> {
@@ -140,10 +150,18 @@ export async function getDesign(db: D1Database, designId: string): Promise<Desig
  */
 export async function requireDesign(
   db: D1Database,
-  input: { readonly designId: string; readonly userId: string; readonly need: DesignNeed },
+  input: {
+    readonly designId: string;
+    readonly userId: string;
+    readonly need: DesignNeed;
+    /** S4: also count a doc that shows it (see `designRole`). Never for the .fig file. */
+    readonly throughDocs?: boolean;
+  },
 ): Promise<{ readonly design: DesignSummary; readonly role: DocRole }> {
   const design = await getDesign(db, input.designId);
-  const role = await designRole(db, design.id, input.userId);
+  const role = await designRole(db, design.id, input.userId, {
+    throughDocs: input.throughDocs === true,
+  });
   if (!role) throw new NotFoundError("design");
   const required = NEED_ROLE[input.need];
   if (!hasRole(role, required)) throw new DesignForbiddenError(required);
@@ -598,8 +616,10 @@ export async function handleDesigns(
 
   if (!id) return null;
   if (!isDesignId(id)) return error(404, "not_found");
-  const need = (access: DesignNeed) =>
-    requireDesign(deps.db, { designId: id, userId, need: access });
+  // S4: `throughDocs` lets a reader of a doc that shows the design reach its summary and
+  // picture (and be told 403, not 404, elsewhere). The .fig route never passes it.
+  const need = (access: DesignNeed, throughDocs = false) =>
+    requireDesign(deps.db, { designId: id, userId, need: access, throughDocs });
 
   if (sub === "versions" && !leaf && method === "POST") {
     const baseParam = url.searchParams.get("baseVersion") ?? "";
@@ -663,7 +683,7 @@ export async function handleDesigns(
 
   if (sub === "picture" && leaf && method === "GET") {
     if (!VERSION.test(leaf)) return error(404, "not_found");
-    await need("view");
+    await need("view", true);
     // A version's picture never changes, but access can: revalidate every load
     // (after the check above), and answer 304 when the browser has it.
     const etag = `"${id}-${leaf}"`;
@@ -691,7 +711,7 @@ export async function handleDesigns(
   if (sub) return null;
 
   if (method === "GET") {
-    const { design, role } = await need("view");
+    const { design, role } = await need("view", true);
     return json({ design: await view(design, role) });
   }
 

@@ -6,6 +6,12 @@ import { Lexer, type Token, type Tokens } from "marked";
 
 import { splitImageAlt } from "../../shared/images.ts";
 import { isSafeUrl, parseTable, type ChipColor, type RichTable } from "../../shared/table.ts";
+import {
+  DESIGN_LANGUAGE,
+  designExport,
+  parseDesignBlock,
+  type ExportDesigns,
+} from "../../shared/designBlock.ts";
 import { DRAWIO_LANGUAGE, parseDrawioBlock } from "../../shared/drawio.ts";
 import { drawioExport, type DrawioExport, type ExportDiagrams } from "../../shared/drawioExport.ts";
 import { EMBED_LANGUAGE, embedLabel, parseEmbedBlock } from "../../shared/embeds.ts";
@@ -133,10 +139,16 @@ class DocxWriter {
 
   private readonly docUrl: string;
   private readonly diagrams: ExportDiagrams | null;
+  private readonly designs: ExportDesigns | null;
 
-  constructor(docUrl: string, diagrams: ExportDiagrams | null = null) {
+  constructor(
+    docUrl: string,
+    diagrams: ExportDiagrams | null = null,
+    designs: ExportDesigns | null = null,
+  ) {
     this.docUrl = docUrl;
     this.diagrams = diagrams;
+    this.designs = designs;
   }
 
   hyperlink(href: string, content: string): string {
@@ -318,6 +330,15 @@ class DocxWriter {
         return;
       }
     }
+    // A design (S4) comes out like a linked diagram: its title links to the picture.
+    if (language === DESIGN_LANGUAGE && this.designs) {
+      const block = parseDesignBlock(code.text);
+      if (block) {
+        const out = designExport(block, this.designs, new URL(this.docUrl).origin);
+        this.linkedDiagram({ ...out, title: out.title || (out.pageUrl ? "Design" : null) });
+        return;
+      }
+    }
     if (DIAGRAM_LANGUAGES.has(language)) {
       const label = run("Diagram: open the doc to view it. ", { italic: true });
       const link = this.hyperlink(this.docUrl, run(this.docUrl, { italic: true, link: true }));
@@ -477,10 +498,12 @@ export interface DocxInput {
   readonly docUrl: string;
   /** The Draw.io diagrams the markdown links; without them their blocks are written as code. */
   readonly diagrams?: ExportDiagrams;
+  /** The designs the markdown shows (S4); without them their blocks are written as code. */
+  readonly designs?: ExportDesigns;
 }
 
 export function markdownToDocx(input: DocxInput): Uint8Array {
-  const writer = new DocxWriter(input.docUrl, input.diagrams ?? null);
+  const writer = new DocxWriter(input.docUrl, input.diagrams ?? null, input.designs ?? null);
   writer.blocks(new Lexer({ gfm: true }).lex(input.markdown), { quote: false, indent: 0 });
   const encoder = new TextEncoder();
   const part = (name: string, xml: string) => ({ name, data: encoder.encode(xml) });
