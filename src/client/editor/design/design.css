@@ -1,0 +1,62 @@
+/* A design in a doc (S4). The card, actions and source toggle are the Draw.io block's (drawio.css). */
+
+.design-stage {
+  padding: 2.6rem 1rem 1rem;
+}
+
+.design-block-picture {
+  display: block;
+  width: 100%;
+  text-align: center;
+}
+
+/* At its own size, down to the column's width. */
+.design-block-picture img {
+  display: inline-block;
+  max-width: 100%;
+  height: auto;
+}
+
+.design-pick-preview {
+  background: #fff;
+}
+
+/* Used in, on the design page. */
+.design-used-in {
+  position: relative;
+}
+
+.design-used-in-menu {
+  position: absolute;
+  top: calc(100% + 0.35rem);
+  right: 0;
+  z-index: 20;
+  width: min(22rem, calc(100vw - 2rem));
+  padding: 0.6rem 0.8rem;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--popover);
+  box-shadow: 0 6px 24px rgb(0 0 0 / 0.16);
+  font-size: 0.9rem;
+}
+
+.design-used-in-menu ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.design-used-in-menu li {
+  padding: 0.3rem 0;
+  overflow-wrap: anywhere;
+}
+
+.design-used-in-menu p {
+  margin: 0.3rem 0;
+}
+
+@media print {
+  .design-block .design-stage {
+    padding: 0.75rem;
+  }
+}

@@ -8,6 +8,7 @@
 // its cell or label through edits and is orphaned only when that part goes.
 
 import { cellText, findTables, TABLE_LANGUAGE } from "./table.ts";
+import { DESIGN_LANGUAGE } from "./designBlock.ts";
 import { DRAWIO_LANGUAGE } from "./drawio.ts";
 import { EMBED_LANGUAGE } from "./embeds.ts";
 import { VIDEO_LANGUAGE } from "./video.ts";
@@ -211,7 +212,8 @@ export function markdownToText(markdown: string): string {
         opening[2] === TABLE_LANGUAGE ||
         opening[2] === VIDEO_LANGUAGE ||
         opening[2] === EMBED_LANGUAGE ||
-        opening[2] === DRAWIO_LANGUAGE;
+        opening[2] === DRAWIO_LANGUAGE ||
+        opening[2] === DESIGN_LANGUAGE;
       continue;
     }
     const line = raw.trim();

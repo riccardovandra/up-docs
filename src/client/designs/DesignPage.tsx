@@ -21,6 +21,8 @@ import { DesignIcon } from "./DesignIcon.tsx";
 import { DesignSaver, type SaveStatus } from "./designSaver.ts";
 import { designErrorText, DesignSaveError, designsApi } from "./designsApi.ts";
 import { DesignPicture } from "./DesignsView.tsx";
+// S4 (designs in docs) owns this component; mounted below in the header.
+import { DesignUsedIn } from "../editor/design/DesignUsedIn.tsx";
 import "../home/home.css";
 import "./designs.css";
 
@@ -380,6 +382,8 @@ export function DesignPage(props: { readonly designId: string }) {
           </span>
         </div>
         <div className="doc-header-actions">
+          {/* S4: the docs that show this design, for people who manage it. */}
+          <DesignUsedIn designId={designId} canEdit={canEdit} />
           {showEditor ? (
             <StatusLine
               leaving={leaving}

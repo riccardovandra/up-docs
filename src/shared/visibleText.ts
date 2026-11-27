@@ -4,6 +4,7 @@
 // which the client keeps out of its main bundle.
 
 import { markdownToText } from "./anchors.ts";
+import { DESIGN_LANGUAGE, parseDesignBlock } from "./designBlock.ts";
 import { DRAWIO_LANGUAGE, parseDrawioBlock } from "./drawio.ts";
 import { EMBED_LANGUAGE, parseEmbedBlock } from "./embeds.ts";
 import { cellText, findFences, parseTable, TABLE_LANGUAGE } from "./table.ts";
@@ -33,6 +34,11 @@ export function richBlockText(language: string, body: string): ReadonlyArray<str
   // A linked Draw.io diagram reads as its caption, never as the id it is stored as.
   if (language === DRAWIO_LANGUAGE) {
     const caption = parseDrawioBlock(body)?.caption;
+    return caption ? [caption] : [];
+  }
+  // A design reads as its caption too.
+  if (language === DESIGN_LANGUAGE) {
+    const caption = parseDesignBlock(body)?.caption;
     return caption ? [caption] : [];
   }
   if (language === WIDGET_LANGUAGE) return analyzeWidget(body).labels.map((label) => label.text);
