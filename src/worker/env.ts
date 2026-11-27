@@ -1,3 +1,4 @@
+import type { DesignRoom } from "./designRoom.ts";
 import type { DocRoom } from "./docRoom.ts";
 import type { SheetRoom } from "./sheetRoom.ts";
 
@@ -5,6 +6,8 @@ export interface Env {
   readonly DB: D1Database;
   readonly DOC_ROOM: DurableObjectNamespace<DocRoom>;
   readonly SHEET_ROOM: DurableObjectNamespace<SheetRoom>;
+  /** One per design: the open editor's agent socket (designRoom.ts). */
+  readonly DESIGN_ROOM: DurableObjectNamespace<DesignRoom>;
   readonly ASSETS: Fetcher;
   /**
    * Doc images, keyed `images/<docId>/<uuid>.<ext>`, and uploaded videos, keyed

@@ -17,7 +17,14 @@ import {
   isDesignerPath,
   refuseDesignerOriginRequest,
 } from "./designerHost.ts";
-import { isDesignAgentSocketPath } from "../shared/design.ts";
+import {
+  allowedDesignTools,
+  handleDesignAgentSocket,
+  handleDesignAgentTicket,
+  loadDesignTools,
+  type DesignAgentPort,
+} from "./designAgent.ts";
+import { designRoom } from "./designRoom.ts";
 import { handleDrawioLink, handleMcp, handlePageLink } from "./mcp.ts";
 import { PUBLIC_HEADERS } from "./publicLinks.ts";
 import { r2VideoStore } from "./videos.ts";
@@ -25,6 +32,18 @@ import { emailEnabled, isLocalRequest, sendDocInvite, sendLoginCode } from "./em
 
 export { DocRoom } from "./docRoom.ts";
 export { SheetRoom } from "./sheetRoom.ts";
+export { DesignRoom } from "./designRoom.ts";
+
+/** What the MCP design tools reach open editors through (designAgent.ts). */
+function designAgentPort(request: Request, env: Env): DesignAgentPort {
+  const isolated = designerOrigin(env) !== null;
+  return {
+    room: (designId) => designRoom(env, designId),
+    isolatedEditor: isolated,
+    tools: async () =>
+      allowedDesignTools(await loadDesignTools(env.ASSETS, new URL(request.url).origin), isolated),
+  };
+}
 
 async function revive<A>(call: PromiseLike<A>): Promise<A> {
   try {
@@ -109,8 +128,12 @@ export default {
     // The editor's code never reaches the app with the app's cookie (see designerHost.ts).
     const fromEditor = refuseDesignerOriginRequest(request, designer);
     if (fromEditor) return fromEditor;
-    // Reserved for S3's design agent socket: served by nothing else until then.
-    if (isDesignAgentSocketPath(pathname)) return new Response("Not found", { status: 404 });
+    // The design agent socket: a one-use ticket is its only credential, never the cookie.
+    const agentSocket = await handleDesignAgentSocket(request, {
+      editorOrigin: designer ?? resolvePublicOrigin(env.PUBLIC_ORIGIN, request.url),
+      room: (designId) => designRoom(env, designId),
+    });
+    if (agentSocket) return agentSocket;
     if (isDesignerPath(pathname)) {
       // With an editor origin of its own, the app's origin never serves the editor.
       if (designer) return new Response("Not found", { status: 404 });
@@ -122,6 +145,12 @@ export default {
     }
     if (pathname === "/api" || pathname.startsWith("/api/")) {
       const deps = apiDeps(request, env, ctx);
+      const ticket = await handleDesignAgentTicket(request, {
+        ...deps,
+        now: deps.now,
+        room: (designId) => designRoom(env, designId),
+      });
+      if (ticket) return ticket;
       // Before the API's own auth: the one-time link is the credential.
       return (
         (await handleDrawioLink(request, deps)) ??
@@ -130,7 +159,7 @@ export default {
       );
     }
     if (pathname === "/mcp" || pathname.startsWith("/mcp/")) {
-      return handleMcp(request, apiDeps(request, env, ctx));
+      return handleMcp(request, apiDeps(request, env, ctx), designAgentPort(request, env));
     }
     const page = withAssetCaching(
       await withEmbedPolicy(

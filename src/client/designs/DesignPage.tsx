@@ -16,7 +16,7 @@ import { NoProjectBadge, ProjectBadge } from "../home/ProjectSwitcher.tsx";
 import { TitleDialog } from "../home/TitleDialog.tsx";
 import { useLockedProject } from "../lockedProject.ts";
 import { navigate, parseRoute } from "../router.ts";
-import { getAgentSocketURL } from "./agentBridge.ts";
+import { getAgentSocketURL, keepAgentSocket } from "./agentBridge.ts";
 import { DesignIcon } from "./DesignIcon.tsx";
 import { DesignSaver, type SaveStatus } from "./designSaver.ts";
 import { designErrorText, DesignSaveError, designsApi } from "./designsApi.ts";
@@ -169,6 +169,8 @@ export function DesignPage(props: { readonly designId: string }) {
     saver.current = queue;
     let live = true;
     let opened = false;
+    // S3 (agent bridge): see keepAgentSocket.
+    let stopAgentSocket: (() => void) | null = null;
     // `flushed` carries no id, so only one flush is ever in flight: its answer is the next
     // `flushed`. A request while one runs waits for it, then sends its own, so a leave
     // never takes the answer to an earlier (visibility) flush. An answer with none in
@@ -242,6 +244,11 @@ export function DesignPage(props: { readonly designId: string }) {
         case DESIGNER_MESSAGE.loaded:
           opened = true;
           setEditorReady(true);
+          // S3 (agent bridge): once open, hand the editor a fresh agent socket address
+          // whenever no editor holds the socket (a drop, or the room restarting).
+          stopAgentSocket ??= keepAgentSocket(designId, (socketURL) =>
+            post({ type: DESIGNER_MESSAGE.connect, socketURL }),
+          );
           break;
         case DESIGNER_MESSAGE.save:
           queue.offer({ seq: message.seq, fig: message.fig, png: message.png });
@@ -269,6 +276,7 @@ export function DesignPage(props: { readonly designId: string }) {
     document.addEventListener("visibilitychange", onHidden);
     return () => {
       live = false;
+      stopAgentSocket?.();
       window.clearTimeout(started);
       window.removeEventListener("message", onMessage);
       window.removeEventListener("beforeunload", beforeUnload);

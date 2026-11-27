@@ -175,15 +175,23 @@ describe("requests from the editor's origin to the app", () => {
     ).json()) as {
       sheet: { id: string };
     };
+    /** What each room was sent, so a test can see what reached it. */
+    const forwarded: Array<Request> = [];
     const room = {
       idFromName: (name: string) => name,
-      get: () => ({ fetch: async () => new Response("room") }),
+      get: () => ({
+        fetch: async (request: Request) => {
+          forwarded.push(request);
+          return new Response("room");
+        },
+      }),
     };
     const vars = {
       ...env(OWN),
       DB: api.db,
       DOC_ROOM: room,
       SHEET_ROOM: room,
+      DESIGN_ROOM: room,
       OWNER_EMAILS: "owner@example.com, second@example.com",
     } as unknown as Env;
     const call = (path: string, origin: string, init: RequestInit = {}) =>
@@ -195,7 +203,7 @@ describe("requests from the editor's origin to the app", () => {
         vars,
         ctx,
       );
-    return { call, docId: doc.doc.id, sheetId: sheet.sheet.id };
+    return { call, forwarded, docId: doc.doc.id, sheetId: sheet.sheet.id };
   }
   const EDITOR = "https://design.docs.test";
   const APP = "https://docs.test";
@@ -222,11 +230,25 @@ describe("requests from the editor's origin to the app", () => {
     expect((await call("/designs", APP)).status).toBe(200);
   });
 
-  it("leaves only the reserved design agent socket path, which nothing serves yet", async () => {
-    const { call } = await signedIn();
+  // Changed by S3, which serves the reserved path (designAgent.ts).
+  it("leaves only the design agent socket, which takes a ticket and never the cookie", async () => {
+    const { call, forwarded } = await signedIn();
     const path = designAgentSocketPath("abc123");
-    expect((await call(path, EDITOR, socket)).status).toBe(404);
-    expect((await call(path, APP, socket)).status).toBe(404);
-    expect((await call(path, APP)).status).toBe(404);
+    const ticket = "a".repeat(64);
+    // The socket route answers, not the guard: no ticket, no socket.
+    expect(await (await call(path, EDITOR, socket)).text()).toBe("Ticket refused");
+    expect((await call(`${path}?ticket=${ticket}`, EDITOR)).status).toBe(426);
+    // Only the editor's origin opens it.
+    expect((await call(`${path}?ticket=${ticket}`, APP, socket)).status).toBe(403);
+    expect(forwarded).toHaveLength(0);
+    expect(await (await call(`${path}?ticket=${ticket}`, EDITOR, socket)).text()).toBe("room");
+    expect(forwarded).toHaveLength(1);
+    expect(forwarded[0]!.headers.get("Cookie")).toBeNull();
+    expect(new URL(forwarded[0]!.url).searchParams.get("ticket")).toBe(ticket);
+    // Paths beside it stay the guard's.
+    for (const near of [`${path}/x`, "/api/designs/abc123/agent-ticket", "/api/designs/abc123"]) {
+      const response = await call(near, EDITOR, { ...socket, method: "GET" });
+      expect([near, response.status, await response.text()]).toEqual([near, 403, "Forbidden"]);
+    }
   });
 });

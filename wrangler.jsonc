@@ -37,12 +37,14 @@
     "bindings": [
       { "name": "DOC_ROOM", "class_name": "DocRoom" },
       { "name": "SHEET_ROOM", "class_name": "SheetRoom" },
+      { "name": "DESIGN_ROOM", "class_name": "DesignRoom" },
     ],
   },
   // Append-only, like D1 migrations: never edit or reorder an applied tag.
   "migrations": [
     { "tag": "v1", "new_sqlite_classes": ["DocRoom"] },
     { "tag": "v2", "new_sqlite_classes": ["SheetRoom"] },
+    { "tag": "v3", "new_sqlite_classes": ["DesignRoom"] },
   ],
   "vars": {
     // Origins allowed to embed the app (CSP frame-ancestors): app.t3.codes (and preview),
